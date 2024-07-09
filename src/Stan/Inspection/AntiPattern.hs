@@ -49,6 +49,7 @@ module Stan.Inspection.AntiPattern
     -- *** PlutusTx
     , plustan01
     , plustan02
+    , plustan03
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -435,3 +436,18 @@ plustan02 = mkAntiPatternInspection (Id "PLU-STAN-02") "PlutusTx.UnsafeFromData 
   where
     unsafeFromListNameMeta :: NameMeta
     unsafeFromListNameMeta = "unsafeFromBuiltinData" `plutusTxNameFrom` "PlutusTx.IsData.Class"
+
+-- | 'Inspection' — No usage of Optional types in on-chain code. 
+-- No use of fromMaybe.
+plustan03 :: Inspection
+plustan03 = mkAntiPatternInspection (Id "PLU-STAN-03") "No usage of Optional types in on-chain code"
+    (FindAst $ PatternAstName useOfFromMaybe (?))
+    & descriptionL .~ "No usage of Optional types in on-chain code. No use of Maybe or Either for on-chain code."
+    & solutionL .~
+        [ "Use fast-fail variants such as `tryFind` instead of `find`",
+          "or variants that hanfle the other-case through a continuation function"
+        ]
+    & severityL .~ Warning
+  where
+    useOfFromMaybe :: NameMeta
+    useOfFromMaybe = "fromMaybe" `plutusTxNameFrom` "PlutusTx.Maybe"

@@ -18,9 +18,12 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
         --checkObservation AntiPattern.dummyFooStan01 37 3 6
 
     it "PLU-STAN-01: PlutusTx.AssocMap unsafeFromList" $
-        checkObservation AntiPattern.plustan01 33 12 35
+        checkObservation AntiPattern.plustan01 35 12 35
 
     it "PLU-STAN-02: PlutusTx.UnsafeFromData unsafeFromBuiltinData" $
-        checkObservation AntiPattern.plustan02 37 3 27
+        checkObservation AntiPattern.plustan02 39 3 27
+
+    it "PLU-STAN-03: PlutusTx.Maybe fromMaybe" $
+        checkObservation AntiPattern.plustan03 43 7 22
 
 
