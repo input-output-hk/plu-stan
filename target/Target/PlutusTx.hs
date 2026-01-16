@@ -1,6 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 
-module Target.PlutusTx (assocMap, unsafeFromBuiltinData, usageOfPTxMaybe, pubKeyHashEq, scriptHashEq, credentialHashEq, credentialHashLe, hoListFilter, hoFoldableLength, nestedMapFilter, guardedLog2, nonStrictLetTwice, strictLetTwice, nonStrictLetUsedInBindings, nonStrictLetUsedInBindingAndBody, valueOfEqInput, valueOfEqLet, valueOfEqReversed, valueOfEqPrefix, valueOfEqSection) where
+module Target.PlutusTx (assocMap, unsafeFromBuiltinData, usageOfPTxMaybe, pubKeyHashEq, scriptHashEq, credentialHashEq, credentialHashLe, hoListFilter, hoFoldableLength, nestedMapFilter, guardedLog2, nonStrictLetTwice, strictLetTwice, nonStrictLetUsedInBindings, nonStrictLetUsedInBindingAndBody, valueOfEqInput, valueOfEqLet, valueOfEqReversed, valueOfEqPrefix, valueOfEqSection, unsafeContainsSingleTime, exactSlotEquality, unboundedContains) where
 
 import qualified PlutusTx as Tx
 import qualified PlutusTx.AssocMap as AssocMap
@@ -11,13 +11,14 @@ import qualified PlutusTx.List as TxList
 -- Place for future imports
 import PlutusLedgerApi.V1 (Credential (..), PubKeyHash (..), ScriptHash (..))
 import qualified PlutusLedgerApi.V1.Value as Value
+import qualified PlutusLedgerApi.V1.Interval as Interval
+import qualified PlutusLedgerApi.V1.Contexts as Contexts
 {-# ANN module ("onchain-contract" :: String) #-}
 --
 --
 --
 --
---
---
+
 --
 --
 --
@@ -171,3 +172,17 @@ valueOfEqSection =
     adaCS = Value.adaSymbol
     adaToken :: Value.TokenName
     adaToken = Value.adaToken
+
+
+
+unsafeContainsSingleTime :: Bool
+unsafeContainsSingleTime =
+  Interval.contains (Contexts.txInfoValidRange (error "info")) (Interval.singleton 1000)
+
+exactSlotEquality :: Bool
+exactSlotEquality =
+  Contexts.txInfoValidRange (error "info") == Interval.interval 100 100
+
+unboundedContains :: Bool
+unboundedContains =
+  Interval.contains (Interval.from 1000) (Contexts.txInfoValidRange (error "info"))

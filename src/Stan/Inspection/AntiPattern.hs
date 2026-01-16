@@ -57,6 +57,7 @@ module Stan.Inspection.AntiPattern
     , plustan07
     , plustan08
     , plustan09
+    , plustan10
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -67,8 +68,8 @@ import Relude.Extra.Tuple (fmapToFst)
 import Stan.Core.Id (Id (..))
 import Stan.Inspection (Inspection (..), InspectionAnalysis (..), InspectionsMap, categoryL,
                         descriptionL, severityL, solutionL)
-import Stan.NameMeta (ghcPrimNameFrom, NameMeta (..), baseNameFrom, mkBaseFoldableMeta, mkBaseOldListMeta,
-                      primTypeMeta, textNameFrom, unorderedNameFrom, _nameFrom, plutusTxNameFrom)
+import Stan.NameMeta (NameMeta (..), ghcPrimNameFrom, mkBaseFoldableMeta, mkBaseOldListMeta,
+                      primTypeMeta, textNameFrom, unorderedNameFrom, _nameFrom, mkBaseListMeta, baseNameFrom)
 import Stan.Pattern.Ast (Literal (..), PatternAst (..), anyNamesToPatternAst, app,
                          guardBranch, namesToPatternAst, opApp, range)
 import Stan.Pattern.Edsl (PatternBool (..))
@@ -80,6 +81,23 @@ import Stan.Core.ModuleName
 
 import qualified Data.List.NonEmpty as NE
 import qualified Stan.Category as Category
+
+-- | Create 'NameMeta' for a function from the @plutus-tx@ package
+-- and a given 'ModuleName' module.
+-- Uses empty package name to match any package version/variant starting with anything.
+plutusTxNameFrom :: Text -> Text -> NameMeta
+plutusTxNameFrom funName moduleName = NameMeta
+    { nameMetaName       = funName
+    , nameMetaModuleName = ModuleName moduleName
+    , nameMetaPackage    = ""
+    }
+
+plutusLedgerApiNameFrom :: Text -> Text -> NameMeta
+plutusLedgerApiNameFrom funName moduleName = NameMeta
+    { nameMetaName       = funName
+    , nameMetaModuleName = ModuleName moduleName
+    , nameMetaPackage    = ""
+    }
 
 
 -- | All anti-pattern 'Inspection's map from 'Id's.
@@ -110,6 +128,7 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan07
     , plustan08
     , plustan09
+    , plustan10
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -672,3 +691,111 @@ plustan09 = mkAntiPatternInspection (Id "PLU-STAN-09") "valueOf in boolean condi
         , "Consider 'valueEq' when comparing full values"
         ]
     & severityL .~ Warning
+
+-- plustan10 :: Inspection for Validity Interval Misuse
+plustan10 :: Inspection
+plustan10 = mkAntiPatternInspection (Id "PLU-STAN-10") "Validity Interval Misuse"
+    (FindAst validityPat)
+    & descriptionL .~ "Unsafe txInfoValidRange usage: comparing to single bounds or unbounded intervals undermines time logic."
+    & solutionL .~
+        [ "Use `interval lower upper `contains` txInfoValidRange info` (both bounds)"
+        , "Avoid `txInfoValidRange info `contains` now` or `from X `contains` txInfoValidRange info`"
+        , "Never use exact slot equality: `txInfoValidRange info == SlotRange X X` (impossible)"
+        ]
+    & severityL .~ Warning
+  where
+    validityPat :: PatternAst
+    validityPat = unsafeContainsPat ||| exactSlotPat ||| unboundedPat
+
+    -- BAD 1: txInfoValidRange contains/compared to single POSIXTime
+    -- Pattern: contains (txInfoValidRange info) time
+    unsafeContainsPat :: PatternAst
+    unsafeContainsPat =
+        app (app containsMeta (?)) (app (anyOfModules "singleton" intervalModules) (?)) -- Check singleton name
+        ||| app (app containsMeta (app (anyOfModules "from" intervalModules) (?))) (?) -- Check from name
+        -- app (app containsMeta txInfoValidRangePat) singleTimePat
+        -- ||| app (app containsMeta singleTimePat) txInfoValidRangePat
+
+    -- BAD 2: txInfoValidRange == exact SlotRange (impossible)
+    exactSlotPat :: PatternAst
+    exactSlotPat = opApp txInfoValidRangePat eqOp exactSlotRangePat
+
+    -- BAD 3: from/unbounded contains txInfoValidRange
+    -- Pattern: contains (from X) (txInfoValidRange info)
+    -- OR: contains (txInfoValidRange info) (from X)
+    unboundedPat :: PatternAst
+    unboundedPat =
+        app (app containsMeta fromPat) txInfoValidRangePat
+        ||| app (app containsMeta txInfoValidRangePat) fromPat
+
+    -- Helpers (AST patterns)
+    txInfoValidRangePat :: PatternAst
+    txInfoValidRangePat = app (txInfoValidRangeMeta) (infoPat)
+
+    infoPat :: PatternAst
+    infoPat = (?)
+
+    -- | Helper to match a name from multiple likely modules
+    anyOfModules :: Text -> [Text] -> PatternAst
+    anyOfModules name mods = foldr (|||) (PatternAstConstant AnyLiteral) $ -- fallback matches nothing relevant usually, or use foldr1
+        map (\m -> PatternAstName (plutusLedgerApiNameFrom name m) (?) ||| PatternAstName (plutusTxNameFrom name m) (?)) mods
+    
+    -- Modules where Interval functions might be defined
+    intervalModules :: [Text]
+    intervalModules = 
+        [ "PlutusLedgerApi.V1.Interval"
+        , "Plutus.V1.Ledger.Interval"
+        , "PlutusLedgerApi.V1"
+        , "Plutus.V1.Ledger.Api"
+        , "Plutus.V1.Ledger.Time" -- unlikely but possible for time-related
+        , "PlutusTx.Interval"
+        ]
+
+    -- Modules where Contexts/TxInfo might be defined
+    contextModules :: [Text]
+    contextModules = 
+        [ "PlutusLedgerApi.V1.Contexts"
+        , "Plutus.V1.Ledger.Contexts"
+        , "PlutusLedgerApi.V1"
+        , "Plutus.V1.Ledger.Api"
+        , "PlutusTx.Contexts"
+        ]
+
+    txInfoValidRangeMeta :: PatternAst
+    txInfoValidRangeMeta = anyOfModules "txInfoValidRange" contextModules
+
+    containsMeta :: PatternAst
+    containsMeta = anyOfModules "contains" intervalModules
+
+    eqOp :: PatternAst
+    eqOp = PatternAstName (plutusTxNameFrom "==" "PlutusTx.Eq") (?)
+        ||| PatternAstName (ghcPrimNameFrom "==" "GHC.Classes") (?)
+        ||| PatternAstName (ghcPrimNameFrom "==" "GHC.Base") (?)
+
+    exactSlotRangePat :: PatternAst
+    exactSlotRangePat = app
+        (app (anyOfModules "interval" intervalModules) slotLit)
+        slotLit  -- same lower/upper
+
+    slotLit :: PatternAst
+    slotLit = app (anyOfModules "Slot" ("PlutusLedgerApi.V1.Slot":"Plutus.V1.Ledger.Slot":contextModules)
+                   ||| anyOfModules "POSIXTime" ("PlutusLedgerApi.V1.Time":"Plutus.V1.Ledger.Time":intervalModules))
+                  (PatternAstConstant AnyLiteral)
+              ||| PatternAstConstant AnyLiteral
+
+    -- fromPat matches `from time`.
+    fromPat :: PatternAst
+    fromPat = app (anyOfModules "from" intervalModules) singleTimePat
+
+    singleTimePat :: PatternAst
+    singleTimePat =
+        baseTimePat
+        ||| app (anyOfModules "singleton" intervalModules) baseTimePat
+
+    baseTimePat :: PatternAst
+    baseTimePat =
+          anyOfModules "now" contextModules
+          ||| PatternAstConstant AnyLiteral  -- literal time
+          ||| app (anyOfModules "POSIXTime" ("PlutusLedgerApi.V1.Time":"Plutus.V1.Ledger.Time":intervalModules))
+                  (PatternAstConstant AnyLiteral)
+          ||| anyOfModules "slotToPOSIXTime" intervalModules
