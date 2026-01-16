@@ -69,7 +69,7 @@ import Stan.Core.Id (Id (..))
 import Stan.Inspection (Inspection (..), InspectionAnalysis (..), InspectionsMap, categoryL,
                         descriptionL, severityL, solutionL)
 import Stan.NameMeta (NameMeta (..), ghcPrimNameFrom, mkBaseFoldableMeta, mkBaseOldListMeta,
-                      primTypeMeta, textNameFrom, unorderedNameFrom, _nameFrom, mkBaseListMeta, baseNameFrom)
+                      primTypeMeta, textNameFrom, unorderedNameFrom, _nameFrom, mkBaseListMeta, baseNameFrom, plutusTxNameFrom)
 import Stan.Pattern.Ast (Literal (..), PatternAst (..), anyNamesToPatternAst, app,
                          guardBranch, namesToPatternAst, opApp, range)
 import Stan.Pattern.Edsl (PatternBool (..))
@@ -82,22 +82,23 @@ import Stan.Core.ModuleName
 import qualified Data.List.NonEmpty as NE
 import qualified Stan.Category as Category
 
--- | Create 'NameMeta' for a function from the @plutus-tx@ package
--- and a given 'ModuleName' module.
--- Uses empty package name to match any package version/variant starting with anything.
-plutusTxNameFrom :: Text -> Text -> NameMeta
-plutusTxNameFrom funName moduleName = NameMeta
+-- | Create 'NameMeta' for Plutus functions with version-agnostic package matching.
+-- Uses empty package name so `compareNames` will match any package version via `isPrefixOf`.
+-- This is necessary because Plutus packages have version suffixes (e.g., "plutus-tx-1.2.0").
+plutusTxNameFrom' :: Text -> Text -> NameMeta
+plutusTxNameFrom' funName moduleName = NameMeta
     { nameMetaName       = funName
     , nameMetaModuleName = ModuleName moduleName
     , nameMetaPackage    = ""
     }
 
-plutusLedgerApiNameFrom :: Text -> Text -> NameMeta
-plutusLedgerApiNameFrom funName moduleName = NameMeta
+plutusLedgerApiNameFrom' :: Text -> Text -> NameMeta
+plutusLedgerApiNameFrom' funName moduleName = NameMeta
     { nameMetaName       = funName
     , nameMetaModuleName = ModuleName moduleName
     , nameMetaPackage    = ""
     }
+
 
 
 -- | All anti-pattern 'Inspection's map from 'Id's.
@@ -709,12 +710,12 @@ plustan10 = mkAntiPatternInspection (Id "PLU-STAN-10") "Validity Interval Misuse
 
     -- BAD 1: txInfoValidRange contains/compared to single POSIXTime
     -- Pattern: contains (txInfoValidRange info) time
+    -- NOTE: Currently disabled - patterns for singleton/from require improved
+    -- module resolution for re-exported Interval functions
     unsafeContainsPat :: PatternAst
     unsafeContainsPat =
-        app (app containsMeta (?)) (app (anyOfModules "singleton" intervalModules) (?)) -- Check singleton name
-        ||| app (app containsMeta (app (anyOfModules "from" intervalModules) (?))) (?) -- Check from name
-        -- app (app containsMeta txInfoValidRangePat) singleTimePat
-        -- ||| app (app containsMeta singleTimePat) txInfoValidRangePat
+        app (app containsMeta (?)) (app (anyOfModules "singleton" intervalModules) (?))
+        ||| app (app containsMeta (app (anyOfModules "from" intervalModules) (?))) (?)
 
     -- BAD 2: txInfoValidRange == exact SlotRange (impossible)
     exactSlotPat :: PatternAst
@@ -736,9 +737,13 @@ plustan10 = mkAntiPatternInspection (Id "PLU-STAN-10") "Validity Interval Misuse
     infoPat = (?)
 
     -- | Helper to match a name from multiple likely modules
+    -- Tries both plutus-ledger-api and plutus-tx variants for each module
     anyOfModules :: Text -> [Text] -> PatternAst
-    anyOfModules name mods = foldr (|||) (PatternAstConstant AnyLiteral) $ -- fallback matches nothing relevant usually, or use foldr1
-        map (\m -> PatternAstName (plutusLedgerApiNameFrom name m) (?) ||| PatternAstName (plutusTxNameFrom name m) (?)) mods
+    anyOfModules name mods = foldr (|||) nonMatchingPattern $
+        map (\m -> PatternAstName (plutusLedgerApiNameFrom' name m) (?) ||| PatternAstName (plutusTxNameFrom' name m) (?)) mods
+      where
+        -- Fallback pattern that never matches (empty name)
+        nonMatchingPattern = PatternAstName (NameMeta "" "" "") (?)
     
     -- Modules where Interval functions might be defined
     intervalModules :: [Text]
@@ -768,7 +773,7 @@ plustan10 = mkAntiPatternInspection (Id "PLU-STAN-10") "Validity Interval Misuse
     containsMeta = anyOfModules "contains" intervalModules
 
     eqOp :: PatternAst
-    eqOp = PatternAstName (plutusTxNameFrom "==" "PlutusTx.Eq") (?)
+    eqOp = PatternAstName (plutusTxNameFrom' "==" "PlutusTx.Eq") (?)
         ||| PatternAstName (ghcPrimNameFrom "==" "GHC.Classes") (?)
         ||| PatternAstName (ghcPrimNameFrom "==" "GHC.Base") (?)
 
