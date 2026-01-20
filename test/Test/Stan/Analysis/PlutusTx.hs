@@ -69,3 +69,15 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
 
   it "PLU-STAN-09: valueOf compared via section (== 5000)" $
     checkObservation AntiPattern.plustan09 166 3 54
+
+  it "PLU-STAN-11: Unconstrained address in equality check" $
+    checkObservation AntiPattern.plustan11 177 31 54
+
+  it "PLU-STAN-11: Direct PubKeyCredential construction" $
+    checkObservation AntiPattern.plustan11 181 19 42
+  
+  it "PLU-STAN-11: Direct ScriptCredential construction" $
+    checkObservation AntiPattern.plustan11 185 19 46
+
+  it "PLU-STAN-11: Credential used in other contexts" $
+    checkObservation AntiPattern.plustan11 191 18 41

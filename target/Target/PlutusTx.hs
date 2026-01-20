@@ -1,6 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 
-module Target.PlutusTx (assocMap, unsafeFromBuiltinData, usageOfPTxMaybe, pubKeyHashEq, scriptHashEq, credentialHashEq, credentialHashLe, hoListFilter, hoFoldableLength, nestedMapFilter, guardedLog2, nonStrictLetTwice, strictLetTwice, nonStrictLetUsedInBindings, nonStrictLetUsedInBindingAndBody, valueOfEqInput, valueOfEqLet, valueOfEqReversed, valueOfEqPrefix, valueOfEqSection) where
+module Target.PlutusTx (assocMap, unsafeFromBuiltinData, usageOfPTxMaybe, pubKeyHashEq, scriptHashEq, credentialHashEq, credentialHashLe, hoListFilter, hoFoldableLength, nestedMapFilter, guardedLog2, nonStrictLetTwice, strictLetTwice, nonStrictLetUsedInBindings, nonStrictLetUsedInBindingAndBody, valueOfEqInput, valueOfEqLet, valueOfEqReversed, valueOfEqPrefix, valueOfEqSection, lendingValidator, directCredentialCheck, directScriptCredential, unsafeCredentialFromData) where
 
 import qualified PlutusTx as Tx
 import qualified PlutusTx.AssocMap as AssocMap
@@ -9,7 +9,7 @@ import qualified PlutusTx.Maybe as Maybe
 import qualified PlutusTx.List as TxList
 
 -- Place for future imports
-import PlutusLedgerApi.V1 (Credential (..), PubKeyHash (..), ScriptHash (..))
+import PlutusLedgerApi.V1 (Credential (..), PubKeyHash (..), ScriptHash (..), Address (..),BuiltinData)
 import qualified PlutusLedgerApi.V1.Value as Value
 {-# ANN module ("onchain-contract" :: String) #-}
 --
@@ -171,3 +171,22 @@ valueOfEqSection =
     adaCS = Value.adaSymbol
     adaToken :: Value.TokenName
     adaToken = Value.adaToken
+
+lendingValidator :: PubKeyHash -> Address -> Bool
+lendingValidator pkHash repaymentOutput = 
+  repaymentOutput == Address (PubKeyCredential pkHash) Nothing
+
+directCredentialCheck :: PubKeyHash -> Credential -> Bool
+directCredentialCheck pkHash expectedCred =
+  expectedCred == PubKeyCredential pkHash
+
+directScriptCredential :: ScriptHash -> Credential -> Bool
+directScriptCredential scriptHash expectedCred =
+  expectedCred == ScriptCredential scriptHash
+
+unsafeCredentialFromData :: BuiltinData -> Credential -> Bool
+unsafeCredentialFromData rawData expectedCred =
+  let
+    pkHash = Tx.unsafeFromBuiltinData rawData :: PubKeyHash
+    credential = PubKeyCredential pkHash
+  in expectedCred == credential
