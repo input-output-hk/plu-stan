@@ -687,61 +687,6 @@ plustan09 = mkAntiPatternInspection (Id "PLU-STAN-09") "valueOf in boolean condi
         , "Consider 'valueEq' when comparing full values"
         ]
     & severityL .~ Warning
--- From Gemini, does not work but simple
--- plustan11 :: Inspection
--- plustan11 = mkAntiPatternInspection (Id "PLU-STAN-11") "Unconstrained Fulfillment Criteria"
---     (FindAst unconstrainedAddrPat)
---     & descriptionL .~ "Address/PubKeyHash used in fulfillment criteria without ledger invariant validation."
---     & solutionL .~
---         [ "Validate that PubKeyHash/ScriptHash meet ledger length requirements (28 bytes)."
---         , "Check structural integrity of the Address BuiltinData before using it in equality checks."
---         , "Ensure chosen addresses do not contain malformed data that could lead to unsatisfiable constraints."
---         ]
---     & severityL .~ Warning
---   where
---     unconstrainedAddrPat :: PatternAst
---     unconstrainedAddrPat = opApp addrLikePat eqOp (?)  
---         ||| opApp (?) eqOp addrLikePat
-
---     -- Types that are vulnerable if not constrained
---     -- addrLikePat :: PatternAst
---     -- addrLikePat = 
---     --     ledgerApiType "Address" "Address"
---     --     ||| ledgerApiType "PubKeyHash" "Crypto"
---     --     ||| ledgerApiType "ScriptHash" "Scripts"
---     --     ||| ledgerApiType "Credential" "Credential"
-
---     -- ledgerApiType name moduleSuffix = PatternAstName (NameMeta
---     --     { nameMetaName       = name
---     --     , nameMetaModuleName = ModuleName $ "PlutusLedgerApi.V1." <> moduleSuffix
---     --     , nameMetaPackage    = "plutus-ledger-api"
---     --     }) (?)
---     addrLikePat :: PatternAst
---     addrLikePat = 
---         anyOfModules "Address" addrModules
---         ||| anyOfModules "PubKeyHash" addrModules
---         ||| anyOfModules "ScriptHash" addrModules
---         ||| anyOfModules "Credential" addrModules
-
---     addrModules :: [Text]
---     addrModules = 
---         [ "PlutusLedgerApi.V1.Address"
---         , "PlutusLedgerApi.V1.Crypto"
---         , "PlutusLedgerApi.V1.Scripts"
---         , "PlutusLedgerApi.V1.Credential"
---         , "PlutusLedgerApi.V1"
---         , "Plutus.V1.Ledger.Api"
---         ]
-
---     -- Reuse your anyOfModules helper from plustan10
---     anyOfModules :: Text -> [Text] -> PatternAst
---     anyOfModules name mods = foldr (|||) (PatternAstName (NameMeta "" "" "") (?)) $
---         map (\m -> PatternAstName (plutusLedgerApiNameFrom' name m) (?)) mods
-
---     eqOp :: PatternAst
---     eqOp = anyNamesToPatternAst $ 
---         "==" `plutusTxNameFrom` "PlutusTx.Eq" :|
---         [ "==" `ghcPrimNameFrom` "GHC.Classes" ]
 
 plustan11 :: Inspection
 plustan11 = mkAntiPatternInspection (Id "PLU-STAN-11") "PubKeyHash/ScriptHash in fulfillment criteria"
