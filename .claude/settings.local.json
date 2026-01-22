@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir /s \"c:\\\\Users\\\\Romain\\\\Documents\\\\GitHub\\\\plu-stan\\\\plinth-static-analyzer-research\")",
+      "Bash(cabal build:*)",
+      "Bash(stack build:*)"
+    ]
+  }
+}

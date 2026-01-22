@@ -57,6 +57,10 @@ module Stan.Inspection.AntiPattern
     , plustan07
     , plustan08
     , plustan09
+    -- *** Plinth Rules (Phase 1)
+    , plustan16
+    , plustan19
+    , plustan20
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -110,6 +114,10 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan07
     , plustan08
     , plustan09
+    -- Plinth Rules (Phase 1)
+    , plustan16
+    , plustan19
+    , plustan20
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -672,3 +680,172 @@ plustan09 = mkAntiPatternInspection (Id "PLU-STAN-09") "valueOf in boolean condi
         , "Consider 'valueEq' when comparing full values"
         ]
     & severityL .~ Warning
+
+-- ============================================================================
+-- Plinth Static Analyzer Rules (Phase 1)
+-- Based on plinth-static-analyzer-research
+-- ============================================================================
+
+-- | 'Inspection' — Strict Value Equality @PLU-STAN-16@.
+-- Detects exact ADA equality checks that can fail due to minUTxO changes.
+plustan16 :: Inspection
+plustan16 = mkAntiPatternInspection (Id "PLU-STAN-16") "Strict value equality"
+    (FindAst strictAdaEqualityPat)
+    & descriptionL .~ "Exact ADA equality checks can fail due to minUTxO requirements, datum size changes, or reference scripts"
+    & solutionL .~
+        [ "Use minimum checks (>=) instead of exact equality (==) for ADA amounts"
+        , "Only use exact equality when there is a strong protocol invariant requiring it"
+        , "Consider that minUTxO requirements can change with protocol updates"
+        ]
+    & severityL .~ Warning
+    & categoryL %~ (Category.security `NE.cons`)
+  where
+    strictAdaEqualityPat :: PatternAst
+    strictAdaEqualityPat = opApp lovelaceValueOfCall eqOp (?)
+
+    lovelaceValueOfCall :: PatternAst
+    lovelaceValueOfCall = app (PatternAstName lovelaceValueOfName (?)) txOutValueCall
+
+    txOutValueCall :: PatternAst
+    txOutValueCall = app (PatternAstName txOutValueName (?)) (?)
+
+    eqOp :: PatternAst
+    eqOp = PatternAstName ("==" `ghcPrimNameFrom` "GHC.Classes") (?)
+
+    lovelaceValueOfName :: NameMeta
+    lovelaceValueOfName = NameMeta
+        { nameMetaName = "lovelaceValueOf"
+        , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Value"
+        , nameMetaPackage = "plutus-ledger-api"
+        }
+
+    txOutValueName :: NameMeta
+    txOutValueName = NameMeta
+        { nameMetaName = "txOutValue"
+        , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Tx"
+        , nameMetaPackage = "plutus-ledger-api"
+        }
+
+-- | 'Inspection' — Precision Loss @PLU-STAN-19@.
+-- Detects division before multiplication in integer arithmetic.
+plustan19 :: Inspection
+plustan19 = mkAntiPatternInspection (Id "PLU-STAN-19") "Precision loss"
+    (FindAst precisionLossPat)
+    & descriptionL .~ "Division before multiplication causes precision loss in integer arithmetic"
+    & solutionL .~
+        [ "Reorder operations: multiply first, then divide"
+        , "Change (a / b) * c to (a * c) / b to preserve precision"
+        , "Consider the magnitude of intermediate results to avoid overflow"
+        ]
+    & severityL .~ Warning
+    & categoryL %~ (Category.numeric `NE.cons`)
+  where
+    precisionLossPat :: PatternAst
+    precisionLossPat = divThenMul
+
+    -- Pattern: (expr1 / expr2) * expr3
+    divThenMul :: PatternAst
+    divThenMul = opApp divisionExpr mulOp (?)
+
+    divisionExpr :: PatternAst
+    divisionExpr = opApp (?) divOp (?)
+
+    -- Division operators: /, div, quot
+    divOp :: PatternAst
+    divOp = slashOp ||| divFn ||| quotFn
+
+    slashOp :: PatternAst
+    slashOp = PatternAstName ("/" `ghcPrimNameFrom` "GHC.Real") (?)
+
+    divFn :: PatternAst
+    divFn = PatternAstName ("div" `plutusTxNameFrom` "PlutusTx.Prelude") (?)
+
+    quotFn :: PatternAst
+    quotFn = PatternAstName ("quot" `plutusTxNameFrom` "PlutusTx.Prelude") (?)
+
+    -- Multiplication operators: *, mul
+    mulOp :: PatternAst
+    mulOp = starOp ||| mulFn
+
+    starOp :: PatternAst
+    starOp = PatternAstName ("*" `ghcPrimNameFrom` "GHC.Num") (?)
+
+    mulFn :: PatternAst
+    mulFn = PatternAstName ("mul" `plutusTxNameFrom` "PlutusTx.Numeric") (?)
+
+-- | 'Inspection' — Trash Tokens @PLU-STAN-20@.
+-- Detects subset value comparisons allowing arbitrary token injection.
+plustan20 :: Inspection
+plustan20 = mkAntiPatternInspection (Id "PLU-STAN-20") "Trash tokens"
+    (FindAst trashTokensPat)
+    & descriptionL .~ "Subset value comparisons (leq/geq) allow injection of arbitrary tokens"
+    & solutionL .~
+        [ "Use exact value equality (==) instead of leq/geq"
+        , "Filter tokens and validate count: length (flattenValue v) == expectedCount"
+        , "For specific tokens, use valueOf with == for exact amounts"
+        , "Validate the complete token set, not just required tokens"
+        ]
+    & severityL .~ Error
+    & categoryL %~ (Category.security `NE.cons`)
+  where
+    trashTokensPat :: PatternAst
+    trashTokensPat = leqPattern ||| geqPattern ||| assetClassLeqPattern ||| assetClassGeqPattern
+
+    -- Pattern: value `leq` expectedValue
+    leqPattern :: PatternAst
+    leqPattern = opApp (?) (PatternAstName leqName valueToValueFun) (?)
+
+    -- Pattern: value `geq` expectedValue
+    geqPattern :: PatternAst
+    geqPattern = opApp (?) (PatternAstName geqName valueToValueFun) (?)
+
+    -- Pattern: assetClassValueOf v ac >= n
+    assetClassGeqPattern :: PatternAst
+    assetClassGeqPattern = opApp assetClassCall geOp (?)
+
+    -- Pattern: assetClassValueOf v ac <= n or assetClassValueOf v ac > n
+    assetClassLeqPattern :: PatternAst
+    assetClassLeqPattern = opApp assetClassCall (leOp ||| gtOp) (?)
+
+    assetClassCall :: PatternAst
+    assetClassCall = app (app (PatternAstName assetClassValueOfName (?)) (?)) (?)
+
+    leqName :: NameMeta
+    leqName = NameMeta
+        { nameMetaName = "leq"
+        , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Value"
+        , nameMetaPackage = "plutus-ledger-api"
+        }
+
+    geqName :: NameMeta
+    geqName = NameMeta
+        { nameMetaName = "geq"
+        , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Value"
+        , nameMetaPackage = "plutus-ledger-api"
+        }
+
+    assetClassValueOfName :: NameMeta
+    assetClassValueOfName = NameMeta
+        { nameMetaName = "assetClassValueOf"
+        , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Value"
+        , nameMetaPackage = "plutus-ledger-api"
+        }
+
+    valueToValueFun :: PatternType
+    valueToValueFun = valuePat |-> valuePat |-> (?)
+
+    valuePat :: PatternType
+    valuePat = NameMeta
+        { nameMetaName = "Value"
+        , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Value"
+        , nameMetaPackage = "plutus-ledger-api"
+        } |:: []
+
+    geOp :: PatternAst
+    geOp = PatternAstName (">=" `ghcPrimNameFrom` "GHC.Classes") (?)
+
+    leOp :: PatternAst
+    leOp = PatternAstName ("<=" `ghcPrimNameFrom` "GHC.Classes") (?)
+
+    gtOp :: PatternAst
+    gtOp = PatternAstName (">" `ghcPrimNameFrom` "GHC.Classes") (?)
