@@ -5,7 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Target.PlutusTx (assocMap, unsafeFromBuiltinData, usageOfPTxMaybe, pubKeyHashEq, scriptHashEq, credentialHashEq, credentialHashLe, hoListFilter, hoFoldableLength, nestedMapFilter, guardedLog2, nonStrictLetTwice, strictLetTwice, nonStrictLetUsedInBindings, nonStrictLetUsedInBindingAndBody, valueOfEqInput, valueOfEqLet, valueOfEqReversed, valueOfEqPrefix, valueOfEqSection, unvalidatedPubKeyHashEqFromBuiltinData, unvalidatedScriptHashEqFromBuiltinData, lendingValidatorCreateLoan, lendingValidatorCreateLoan_2, lendingValidatorIntermediateBinding, lendingValidatorCasePattern, lendingValidatorFieldAccessor, lendingValidatorWhereClause, LoanDatum(..)) where
+module Target.PlutusTx where
 
 import PlutusTx qualified as Tx
 import PlutusTx.AssocMap qualified as AssocMap
@@ -17,6 +17,7 @@ import PlutusTx.List qualified as TxList
 
 -- Place for future imports
 import PlutusLedgerApi.V1 (Credential (..), PubKeyHash (..), ScriptHash (..))
+import PlutusLedgerApi.V1.Contexts qualified as V1
 import PlutusLedgerApi.V1.Value qualified as Value
 import PlutusLedgerApi.V3 (
   Address (..),
@@ -56,7 +57,7 @@ assocMap = AssocMap.unsafeFromList mempty
 
 unsafeFromBuiltinData :: Integer
 unsafeFromBuiltinData =
-  Tx.unsafeFromBuiltinData (error "tbd")
+  Tx.unsafeFromBuiltinData (Tx.toBuiltinData (42 :: Integer))
 
 usageOfPTxMaybe :: Integer
 usageOfPTxMaybe = let
@@ -67,25 +68,25 @@ pubKeyHashEq :: Bool
 pubKeyHashEq = pubKeyHash == pubKeyHash
   where
     pubKeyHash :: PubKeyHash
-    pubKeyHash = error "tbd"
+    pubKeyHash = PubKeyHash (BI.stringToBuiltinByteStringHex "deadbeef")
 
 scriptHashEq :: Bool
 scriptHashEq = scriptHash == scriptHash
   where
     scriptHash :: ScriptHash
-    scriptHash = error "tbd"
+    scriptHash = ScriptHash (BI.stringToBuiltinByteStringHex "deadbeef")
 
 credentialHashEq :: Bool
 credentialHashEq = credentialHash == credentialHash
   where
     credentialHash :: Credential
-    credentialHash = error "tbd"
+    credentialHash = PubKeyCredential (PubKeyHash (BI.stringToBuiltinByteStringHex "deadbeef"))
 
 credentialHashLe :: Bool
 credentialHashLe = credentialHash < credentialHash
   where
     credentialHash :: Credential
-    credentialHash = error "tbd"
+    credentialHash = PubKeyCredential (PubKeyHash (BI.stringToBuiltinByteStringHex "deadbeef"))
 
 hoListFilter :: [Integer]
 hoListFilter =
@@ -188,6 +189,11 @@ valueOfEqSection =
     adaCS = Value.adaSymbol
     adaToken :: Value.TokenName
     adaToken = Value.adaToken
+
+currencySymbolValueOfMintedValue :: V1.ScriptContext -> Bool
+currencySymbolValueOfMintedValue ctx =
+  let cs = Value.adaSymbol
+  in Value.currencySymbolValueOf (V1.txInfoMint $ V1.scriptContextTxInfo ctx) cs < 0
 
 unvalidatedPubKeyHashEqFromBuiltinData :: Bool
 unvalidatedPubKeyHashEqFromBuiltinData =
@@ -360,3 +366,26 @@ lendingValidatorWhereClause ctx = mustRepayToPkh == outputPkh
     getOutputPkh :: Address -> PubKeyHash
     getOutputPkh (Address (PubKeyCredential pkh) _) = pkh
     getOutputPkh _ = error "expected pubkey address"
+
+mintCheckViaHelperLet1 :: V1.ScriptContext -> Bool
+mintCheckViaHelperLet1 ctx =
+  let mint = V1.txInfoMint $ V1.scriptContextTxInfo ctx
+      sym = Value.adaSymbol
+  in checkBurn1 mint sym
+
+checkBurn1 :: Value.Value -> Value.CurrencySymbol -> Bool
+checkBurn1 x y = Value.currencySymbolValueOf x y < 0
+
+mintCheckViaHelperLet2 :: V1.ScriptContext -> Bool
+mintCheckViaHelperLet2 ctx =
+  let mint = V1.txInfoMint $ V1.scriptContextTxInfo ctx
+      sym = Value.adaSymbol
+  in checkBurn2 mint sym
+
+checkBurn2 :: Value.Value -> Value.CurrencySymbol -> Bool
+checkBurn2 a b = Value.currencySymbolValueOf a b < 0
+
+nonMintedCurrencySymbolValueOf :: Bool
+nonMintedCurrencySymbolValueOf =
+  let val = Value.singleton Value.adaSymbol Value.adaToken 1
+  in Value.currencySymbolValueOf val Value.adaSymbol > 0

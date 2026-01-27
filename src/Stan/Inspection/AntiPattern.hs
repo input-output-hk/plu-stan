@@ -58,6 +58,7 @@ module Stan.Inspection.AntiPattern
     , plustan08
     , plustan09
     , plustan10
+    , plustan11
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -112,6 +113,7 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan08
     , plustan09
     , plustan10
+    , plustan11
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -682,5 +684,16 @@ plustan10 = mkAntiPatternInspection (Id "PLU-STAN-10") "Unvalidated hashes from 
     & solutionL .~
         [ "Validate ledger invariants on the underlying BuiltinData before using it in fulfillment criteria (e.g. check hash bytestring length is 28)"
         , "Prefer constructing expected outputs and comparing them against actual outputs, or explicitly check structural and per-field integrity and ledger invariants"
+        ]
+    & severityL .~ Warning
+
+plustan11 :: Inspection
+plustan11 = mkAntiPatternInspection (Id "PLU-STAN-11") "currencySymbolValueOf usage"
+    CurrencySymbolValueOfOnMintedValue
+    & descriptionL .~ "The 'currencySymbolValueOf' function should not be used. It does not enforce that all entries in the value are strictly positive or negative, which can allow mixed mint/burn within the same transaction, making burn-only checks insufficient."
+    & solutionL .~
+        [ "Avoid using 'currencySymbolValueOf'"
+        , "If checking mint/burn, validate that all token amounts under the currency symbol are strictly negative (for burns) or strictly positive (for mints)"
+        , "Consider checking the full minted value structure, not just the sum for a symbol"
         ]
     & severityL .~ Warning

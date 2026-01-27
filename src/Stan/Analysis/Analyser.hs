@@ -22,7 +22,7 @@ import Stan.Core.List (nonRepeatingPairs)
 import Stan.Core.ModuleName (ModuleName (..))
 import Stan.FileInfo (isExtensionDisabled)
 import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, nameOccName, occNameString,
-                        srcSpanStartLine)
+                        srcSpanEndCol, srcSpanEndLine, srcSpanStartCol, srcSpanStartLine)
 import Stan.Hie (eqAst, slice)
 import Stan.Hie.Compat (ContextInfo (..), HieAST (..), HieASTs (..), HieFile (..),
                         Identifier, IdentifierDetails (..), NodeAnnotation, NodeInfo (..),
@@ -77,6 +77,7 @@ createVisitor hie exts inspections = Visitor $ \node ->
         NonStrictLetMultiUse -> analyseNonStrictLetMultiUse inspectionId hie node
         ValueOfInComparison -> analyseValueOfInComparison inspectionId hie node
         UnsafeFromBuiltinDataInHashComparison -> analyseUnsafeFromBuiltinDataInHashComparison inspectionId hie node
+        CurrencySymbolValueOfOnMintedValue -> analyseCurrencySymbolValueOfOnMintedValue inspectionId hie node
 
 {- | Check for big tuples (size >= 4) in the following places:
 
@@ -476,6 +477,541 @@ analyseValueOfInComparison insId hie curNode =
         isBindingCtx (ValBind _ _ _) = True
         isBindingCtx (PatternBind _ _ _) = True
         isBindingCtx _ = False
+
+
+analyseCurrencySymbolValueOfOnMintedValue
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseCurrencySymbolValueOfOnMintedValue insId hie curNode = do
+    addObservations $ mkObservation insId hie <$> matchCurrencySymbolValueOf curNode
+  where
+    allHieAsts :: [HieAST TypeIndex]
+    allHieAsts = Map.elems $ getAsts $ hie_asts hie
+
+    mintedBindings :: Set Name
+    mintedBindings =
+        foldMap (collectMintedBindings (hie_hs_src hie)) allHieAsts
+
+    mintedBindingOccs :: Set ByteString
+    mintedBindingOccs =
+        Set.map (BS8.pack . occNameString . nameOccName) mintedBindings
+
+    functionParamMap :: Map ByteString [ByteString]
+    functionParamMap =
+        collectFunctionParamMap (hie_hs_src hie) (collectBindingOccs allHieAsts)
+
+    functionSpans :: [(ByteString, RealSrcSpan)]
+    functionSpans =
+        collectFunctionSpans allHieAsts functionParamMap
+
+    taintedFunctionParams :: Map ByteString (Set ByteString)
+    taintedFunctionParams =
+        collectTaintedFunctionParams allHieAsts functionParamMap mintedBindings mintedBindingOccs
+
+    matchCurrencySymbolValueOf :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchCurrencySymbolValueOf node =
+        let here = case currencySymbolValueOfCall node of
+                Just arg1
+                    | argIsMinted arg1 -> S.one $ nodeSpan node
+                    | argIsTaintedParam node arg1 -> S.one $ nodeSpan node
+                _ -> mempty
+        in here <> foldMap matchCurrencySymbolValueOf (nodeChildren node)
+
+    currencySymbolValueOfCall :: HieAST TypeIndex -> Maybe (HieAST TypeIndex)
+    currencySymbolValueOfCall node = do
+        guard $ nodeHasAnnotation hsAppAnnotation node
+        let (headNode, args) = appSpine node
+        guard $ nodeHasCurrencySymbolValueOf headNode
+        listToMaybe args
+
+    nodeHasCurrencySymbolValueOf :: HieAST TypeIndex -> Bool
+    nodeHasCurrencySymbolValueOf node =
+        let idents = Map.assocs $ nodeIdentifiers $ nodeInfo node
+            matchesName =
+                any (\pair -> any (`hieMatchNameMeta` pair) currencySymbolValueOfNameMetas) idents
+            matchesOcc =
+                any
+                    (\(ident, _) -> case ident of
+                        Right identName ->
+                            occNameString (nameOccName identName) == "currencySymbolValueOf"
+                        _ -> False
+                    )
+                    idents
+            matchesSource = fromMaybe False $ do
+                src <- slice (nodeSpan node) (hie_hs_src hie)
+                pure $ "currencySymbolValueOf" `BS8.isInfixOf` src
+        in matchesName || matchesOcc || matchesSource
+
+    hsAppAnnotation :: NodeAnnotation
+    hsAppAnnotation = mkNodeAnnotation "HsApp" "HsExpr"
+
+    appSpine :: HieAST TypeIndex -> (HieAST TypeIndex, [HieAST TypeIndex])
+    appSpine node = case node of
+        n@Node{nodeChildren = appFun:arg:_}
+            | nodeHasAnnotation hsAppAnnotation n ->
+                let (f, args) = appSpine appFun
+                in (f, args <> [arg])
+        _ -> (node, [])
+
+    nodeHasAnnotation :: NodeAnnotation -> HieAST TypeIndex -> Bool
+    nodeHasAnnotation ann node =
+        let NodeInfo{nodeAnnotations = nodeAnnotations'} = nodeInfo node
+        in ann `Set.member` Set.map toNodeAnnotation nodeAnnotations'
+
+    argIsMinted :: HieAST TypeIndex -> Bool
+    argIsMinted arg =
+        containsTxInfoMint arg
+            || usesMintedBinding mintedBindings arg
+            || spanMentionsMintedBinding (nodeSpan arg)
+
+    argIsTaintedParam :: HieAST TypeIndex -> HieAST TypeIndex -> Bool
+    argIsTaintedParam node arg =
+        case (enclosingFunctionName (nodeSpan node), argVariableOcc arg) of
+            (Just fnName, Just argName) ->
+                case Map.lookup fnName taintedFunctionParams of
+                    Just tainted -> Set.member argName tainted
+                    Nothing -> False
+            _ -> False
+
+    enclosingFunctionName :: RealSrcSpan -> Maybe ByteString
+    enclosingFunctionName spanToCheck =
+        let candidates =
+                [ (fn, span')
+                | (fn, span') <- functionSpans
+                , spanContains span' spanToCheck
+                ]
+        in fmap fst (selectSmallestSpan candidates)
+
+    selectSmallestSpan :: [(ByteString, RealSrcSpan)] -> Maybe (ByteString, RealSrcSpan)
+    selectSmallestSpan = foldl' pickSmaller Nothing
+      where
+        pickSmaller Nothing candidate = Just candidate
+        pickSmaller (Just best@(_, bestSpan)) candidate@(_, candSpan)
+            | spanIsSmaller candSpan bestSpan = Just candidate
+            | otherwise = Just best
+
+    spanIsSmaller :: RealSrcSpan -> RealSrcSpan -> Bool
+    spanIsSmaller a b =
+        let sizeA = spanSize a
+            sizeB = spanSize b
+        in sizeA < sizeB
+
+    spanSize :: RealSrcSpan -> (Int, Int)
+    spanSize span' =
+        if srcSpanEndLine span' == srcSpanStartLine span'
+            then (0, srcSpanEndCol span' - srcSpanStartCol span')
+            else (srcSpanEndLine span' - srcSpanStartLine span', srcSpanEndCol span')
+
+    spanContains :: RealSrcSpan -> RealSrcSpan -> Bool
+    spanContains outer inner =
+        let startsAfter =
+                srcSpanStartLine inner > srcSpanStartLine outer
+                || (srcSpanStartLine inner == srcSpanStartLine outer
+                    && srcSpanStartCol inner >= srcSpanStartCol outer)
+            endsBefore =
+                srcSpanEndLine inner < srcSpanEndLine outer
+                || (srcSpanEndLine inner == srcSpanEndLine outer
+                    && srcSpanEndCol inner <= srcSpanEndCol outer)
+        in startsAfter && endsBefore
+
+    argVariableOcc :: HieAST TypeIndex -> Maybe ByteString
+    argVariableOcc node@Node{nodeChildren = []} =
+        let idents = Map.assocs $ nodeIdentifiers $ nodeInfo node
+        in listToMaybe
+            [ BS8.pack (occNameString (nameOccName identName))
+            | (Right identName, _) <- idents
+            ]
+    argVariableOcc _ = Nothing
+
+    spanMentionsMintedBinding :: RealSrcSpan -> Bool
+    spanMentionsMintedBinding spanToCheck = fromMaybe False $ do
+        src <- slice spanToCheck (hie_hs_src hie)
+        pure $ any (\occ -> occ `isWordInBS` src) (Set.toList mintedBindingOccs)
+
+    containsTxInfoMint :: HieAST TypeIndex -> Bool
+    containsTxInfoMint node =
+        nodeHasTxInfoMint node || any containsTxInfoMint (nodeChildren node)
+
+    nodeHasTxInfoMint :: HieAST TypeIndex -> Bool
+    nodeHasTxInfoMint node =
+        let idents = Map.assocs $ nodeIdentifiers $ nodeInfo node
+            matchesName = any (\pair -> any (`hieMatchNameMeta` pair) txInfoMintNameMetas) idents
+            matchesOcc =
+                any
+                    (\(ident, _) -> case ident of
+                        Right identName -> occNameString (nameOccName identName) == "txInfoMint"
+                        _ -> False
+                    )
+                    idents
+            matchesSource = fromMaybe False $ do
+                src <- slice (nodeSpan node) (hie_hs_src hie)
+                pure $ "txInfoMint" `BS8.isInfixOf` src
+        in matchesName || matchesOcc || matchesSource
+
+    usesMintedBinding :: Set Name -> HieAST TypeIndex -> Bool
+    usesMintedBinding minted = go
+      where
+        go n@Node{nodeChildren = children} =
+            let info = nodeInfo n
+                useHere = any (isNameUse minted) (Map.assocs $ nodeIdentifiers info)
+            in useHere || any go children
+
+        isNameUse :: Set Name -> (Identifier, IdentifierDetails TypeIndex) -> Bool
+        isNameUse bindings (ident, IdentifierDetails{identInfo = identInfo'}) =
+            case ident of
+                Right identName ->
+                    Set.member Use identInfo' && Set.member identName bindings
+                _ -> False
+
+    collectMintedBindings :: ByteString -> HieAST TypeIndex -> Set Name
+    collectMintedBindings hsSrc rootNode =
+        let directlyTainted = collectDirectBindings rootNode
+            allBindings = collectAllBindingsWithSpans rootNode
+        in expandTransitively allBindings directlyTainted
+      where
+        collectDirectBindings :: HieAST TypeIndex -> Set Name
+        collectDirectBindings = go Set.empty
+          where
+            go acc n@Node{nodeSpan = nodeSpan', nodeChildren = children} =
+                let info = nodeInfo n
+                    acc' = foldl' (insertBinding nodeSpan') acc
+                        (Map.assocs $ nodeIdentifiers info)
+                in foldl' go acc' children
+
+            insertBinding
+                :: RealSrcSpan
+                -> Set Name
+                -> (Identifier, IdentifierDetails TypeIndex)
+                -> Set Name
+            insertBinding fallbackSpan acc (ident, details) = case ident of
+                Right name ->
+                    let fromBindingSpan = case getBindingSpan details of
+                            Just rhsSpan -> spanContainsTxInfoMint rhsSpan
+                            Nothing -> False
+                        fromFallbackSpan =
+                            isBindingDetails details && spanContainsTxInfoMint fallbackSpan
+                        fromSourceSearch = bindingRhsContainsMint name
+                    in if fromBindingSpan || fromFallbackSpan || fromSourceSearch
+                       then Set.insert name acc
+                       else acc
+                _ -> acc
+
+            bindingRhsContainsMint :: Name -> Bool
+            bindingRhsContainsMint name =
+                let nameBS = BS8.pack $ occNameString $ nameOccName name
+                    srcLines = BS8.lines hsSrc
+                    hasMintBinding line =
+                        ((nameBS <> " = ") `BS8.isInfixOf` line || (nameBS <> " =") `BS8.isInfixOf` line)
+                        && ("txInfoMint" `BS8.isInfixOf` line)
+                in any hasMintBinding srcLines
+
+        collectAllBindingsWithSpans :: HieAST TypeIndex -> [(Name, RealSrcSpan)]
+        collectAllBindingsWithSpans = go
+          where
+            go n@Node{nodeSpan = nodeSpan', nodeChildren = children} =
+                let info = nodeInfo n
+                    bindings = mapMaybe (extractBinding nodeSpan')
+                        (Map.assocs $ nodeIdentifiers info)
+                in bindings ++ concatMap go children
+
+            extractBinding
+                :: RealSrcSpan
+                -> (Identifier, IdentifierDetails TypeIndex)
+                -> Maybe (Name, RealSrcSpan)
+            extractBinding fallbackSpan (ident, details) = case ident of
+                Right name | Just rhsSpan <- getBindingSpan details ->
+                    Just (name, rhsSpan)
+                Right name | isBindingDetails details ->
+                    Just (name, fallbackSpan)
+                _ -> Nothing
+
+        expandTransitively :: [(Name, RealSrcSpan)] -> Set Name -> Set Name
+        expandTransitively allBindings = go
+          where
+            go tainted =
+                let newTainted = Set.fromList
+                        [ name
+                        | (name, rhsSpan) <- allBindings
+                        , not (Set.member name tainted)
+                        , spanUsesTaintedName rhsSpan tainted
+                        ]
+                in if Set.null newTainted
+                   then tainted
+                   else go (tainted `Set.union` newTainted)
+
+            spanUsesTaintedName :: RealSrcSpan -> Set Name -> Bool
+            spanUsesTaintedName spanToCheck taintedNames = fromMaybe False $ do
+                src <- slice spanToCheck hsSrc
+                pure $ any (\n -> nameAsBS n `isWordIn` src) (Set.toList taintedNames)
+
+            nameAsBS :: Name -> ByteString
+            nameAsBS = BS8.pack . occNameString . nameOccName
+
+            isWordIn :: ByteString -> ByteString -> Bool
+            isWordIn word src = case BS8.breakSubstring word src of
+                (before, after)
+                    | BS8.null after -> False
+                    | otherwise ->
+                        let afterWord = BS8.drop (BS8.length word) after
+                            beforeOk = BS8.null before || not (isIdentChar (BS8.last before))
+                            afterOk = BS8.null afterWord || not (isIdentChar (BS8.head afterWord))
+                        in (beforeOk && afterOk) || (word `isWordIn` BS8.tail after)
+
+            isIdentChar :: Char -> Bool
+            isIdentChar c = isAlphaNum c || c == '_' || c == '\''
+
+        spanContainsTxInfoMint :: RealSrcSpan -> Bool
+        spanContainsTxInfoMint spanToCheck = fromMaybe False $ do
+            src <- slice spanToCheck hsSrc
+            pure $ "txInfoMint" `BS8.isInfixOf` src
+
+        getBindingSpan :: IdentifierDetails TypeIndex -> Maybe RealSrcSpan
+        getBindingSpan IdentifierDetails{identInfo = identInfo'} =
+            listToMaybe $ mapMaybe spanFromCtx (toList identInfo')
+          where
+            spanFromCtx (ValBind _ _ (Just s)) = Just s
+            spanFromCtx (PatternBind _ _ (Just s)) = Just s
+            spanFromCtx _ = Nothing
+
+        isBindingDetails :: IdentifierDetails TypeIndex -> Bool
+        isBindingDetails IdentifierDetails{identInfo = identInfo'} =
+            any isBindingCtx identInfo'
+          where
+            isBindingCtx (ValBind _ _ _) = True
+            isBindingCtx (PatternBind _ _ _) = True
+            isBindingCtx _ = False
+
+    collectBindingOccs :: [HieAST TypeIndex] -> Set ByteString
+    collectBindingOccs =
+        foldMap collectBindingOccsFromAst
+      where
+        collectBindingOccsFromAst :: HieAST TypeIndex -> Set ByteString
+        collectBindingOccsFromAst = go Set.empty
+          where
+            go acc n@Node{nodeChildren = children} =
+                let info = nodeInfo n
+                    acc' = foldl' insertBinding acc (Map.assocs $ nodeIdentifiers info)
+                in foldl' go acc' children
+
+            insertBinding
+                :: Set ByteString
+                -> (Identifier, IdentifierDetails TypeIndex)
+                -> Set ByteString
+            insertBinding acc (ident, IdentifierDetails{identInfo = identInfo'}) =
+                case ident of
+                    Right name
+                        | any isBindingCtx identInfo' ->
+                            Set.insert (BS8.pack $ occNameString $ nameOccName name) acc
+                    _ -> acc
+
+            isBindingCtx :: ContextInfo -> Bool
+            isBindingCtx (ValBind _ _ _) = True
+            isBindingCtx (PatternBind _ _ _) = True
+            isBindingCtx _ = False
+
+    collectFunctionParamMap :: ByteString -> Set ByteString -> Map ByteString [ByteString]
+    collectFunctionParamMap srcBytes bindingNames =
+        let lines' = BS8.lines srcBytes
+            entries = mapMaybe (parseLine bindingNames) lines'
+        in Map.fromList entries
+      where
+        parseLine :: Set ByteString -> ByteString -> Maybe (ByteString, [ByteString])
+        parseLine names line = do
+            let stripped = BS8.dropWhile isSpace line
+            guard (not (BS8.null stripped))
+            let noComment = stripLineComment stripped
+            guard $ "=" `BS8.isInfixOf` noComment
+            let (lhs, _rhs) = BS8.break (== '=') noComment
+                tokens = BS8.words lhs
+            fname <- listToMaybe tokens
+            guard $ Set.member fname names
+            let params = mapMaybe tokenToIdent (drop 1 tokens)
+            guard (not (null params))
+            pure (fname, params)
+
+        tokenToIdent :: ByteString -> Maybe ByteString
+        tokenToIdent tok =
+            let trimmed = BS8.dropWhile (not . isIdentChar) tok
+                ident = BS8.takeWhile isIdentChar trimmed
+            in if BS8.null ident then Nothing else Just ident
+
+        isIdentChar :: Char -> Bool
+        isIdentChar c = isAlphaNum c || c == '_' || c == '\''
+
+        stripLineComment :: ByteString -> ByteString
+        stripLineComment line =
+            case BS8.breakSubstring "--" line of
+                (before, after)
+                    | BS8.null after -> line
+                    | otherwise -> before
+
+    collectFunctionSpans
+        :: [HieAST TypeIndex]
+        -> Map ByteString [ByteString]
+        -> [(ByteString, RealSrcSpan)]
+    collectFunctionSpans asts paramMap =
+        let bindings = foldMap collectBindingsWithSpans asts
+        in
+        [ (occ, span')
+        | (name, span') <- bindings
+        , let occ = BS8.pack $ occNameString $ nameOccName name
+        , Map.member occ paramMap
+        ]
+      where
+        collectBindingsWithSpans :: HieAST TypeIndex -> [(Name, RealSrcSpan)]
+        collectBindingsWithSpans = go
+          where
+            go n@Node{nodeSpan = nodeSpan', nodeChildren = children} =
+                let info = nodeInfo n
+                    bindings = mapMaybe (extractBinding nodeSpan')
+                        (Map.assocs $ nodeIdentifiers info)
+                in bindings ++ concatMap go children
+
+            extractBinding
+                :: RealSrcSpan
+                -> (Identifier, IdentifierDetails TypeIndex)
+                -> Maybe (Name, RealSrcSpan)
+            extractBinding fallbackSpan (ident, details) = case ident of
+                Right name | Just rhsSpan <- getBindingSpan details ->
+                    Just (name, rhsSpan)
+                Right name | isBindingDetails details ->
+                    Just (name, fallbackSpan)
+                _ -> Nothing
+
+            getBindingSpan :: IdentifierDetails TypeIndex -> Maybe RealSrcSpan
+            getBindingSpan IdentifierDetails{identInfo = identInfo'} =
+                listToMaybe $ mapMaybe spanFromCtx (toList identInfo')
+              where
+                spanFromCtx (ValBind _ _ (Just s)) = Just s
+                spanFromCtx (PatternBind _ _ (Just s)) = Just s
+                spanFromCtx _ = Nothing
+
+            isBindingDetails :: IdentifierDetails TypeIndex -> Bool
+            isBindingDetails IdentifierDetails{identInfo = identInfo'} =
+                any isBindingCtx identInfo'
+              where
+                isBindingCtx (ValBind _ _ _) = True
+                isBindingCtx (PatternBind _ _ _) = True
+                isBindingCtx _ = False
+
+    collectTaintedFunctionParams
+        :: [HieAST TypeIndex]
+        -> Map ByteString [ByteString]
+        -> Set Name
+        -> Set ByteString
+        -> Map ByteString (Set ByteString)
+    collectTaintedFunctionParams asts paramMap minted mintedOccs =
+        foldl' mergeMaps Map.empty (map (collectFromAst paramMap minted mintedOccs) asts)
+      where
+        mergeMaps :: Map ByteString (Set ByteString) -> Map ByteString (Set ByteString)
+                  -> Map ByteString (Set ByteString)
+        mergeMaps = Map.unionWith Set.union
+
+        collectFromAst
+            :: Map ByteString [ByteString]
+            -> Set Name
+            -> Set ByteString
+            -> HieAST TypeIndex
+            -> Map ByteString (Set ByteString)
+        collectFromAst params mintedNames mintedOccs' =
+            go Map.empty
+          where
+            go acc n@Node{nodeChildren = children} =
+                let acc' = case callInfo n of
+                        Just (fnName, args) ->
+                            case Map.lookup fnName params of
+                                Just paramNames ->
+                                    let tainted =
+                                            Set.fromList
+                                                [ param
+                                                | (arg, param) <- zip args paramNames
+                                                , argMentionsMinted mintedNames mintedOccs' arg
+                                                ]
+                                    in if Set.null tainted
+                                       then acc
+                                       else Map.insertWith Set.union fnName tainted acc
+                                Nothing -> acc
+                        Nothing -> acc
+                in foldl' go acc' children
+
+            callInfo :: HieAST TypeIndex -> Maybe (ByteString, [HieAST TypeIndex])
+            callInfo node = do
+                guard $ nodeHasAnnotation hsAppAnnotation node
+                let (headNode, args) = appSpine node
+                fnName <- headFunctionOcc headNode
+                pure (fnName, args)
+
+            headFunctionOcc :: HieAST TypeIndex -> Maybe ByteString
+            headFunctionOcc headNode =
+                listToMaybe
+                    [ BS8.pack $ occNameString $ nameOccName identName
+                    | (Right identName, _) <- Map.assocs $ nodeIdentifiers $ nodeInfo headNode
+                    ]
+
+        argMentionsMinted :: Set Name -> Set ByteString -> HieAST TypeIndex -> Bool
+        argMentionsMinted mintedNames mintedOccs' arg =
+            containsTxInfoMint arg
+                || usesMintedBinding mintedNames arg
+                || spanMentionsOccs mintedOccs' (nodeSpan arg)
+
+        spanMentionsOccs :: Set ByteString -> RealSrcSpan -> Bool
+        spanMentionsOccs occs spanToCheck = fromMaybe False $ do
+            src <- slice spanToCheck (hie_hs_src hie)
+            pure $ any (\occ -> occ `isWordInBS` src) (Set.toList occs)
+
+    isWordInBS :: ByteString -> ByteString -> Bool
+    isWordInBS word src = case BS8.breakSubstring word src of
+        (before, after)
+            | BS8.null after -> False
+            | otherwise ->
+                let afterWord = BS8.drop (BS8.length word) after
+                    beforeOk = BS8.null before || not (isIdentCharBS (BS8.last before))
+                    afterOk = BS8.null afterWord || not (isIdentCharBS (BS8.head afterWord))
+                in (beforeOk && afterOk) || (word `isWordInBS` BS8.tail after)
+
+    isIdentCharBS :: Char -> Bool
+    isIdentCharBS c = isAlphaNum c || c == '_' || c == '\''
+
+    currencySymbolValueOfNameMetas :: [NameMeta]
+    currencySymbolValueOfNameMetas =
+        [ NameMeta
+            { nameMetaName = "currencySymbolValueOf"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Value"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        , NameMeta
+            { nameMetaName = "currencySymbolValueOf"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V2.Value"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        , NameMeta
+            { nameMetaName = "currencySymbolValueOf"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V3.Value"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        , "currencySymbolValueOf" `plutusTxNameFrom` "PlutusTx.Value"
+        ]
+
+    txInfoMintNameMetas :: [NameMeta]
+    txInfoMintNameMetas =
+        [ NameMeta
+            { nameMetaName = "txInfoMint"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Contexts"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        , NameMeta
+            { nameMetaName = "txInfoMint"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V2.Contexts"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        , NameMeta
+            { nameMetaName = "txInfoMint"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V3.Contexts"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        ]
 
 
 analyseUnsafeFromBuiltinDataInHashComparison

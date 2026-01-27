@@ -162,13 +162,13 @@ isMaybeStakingCredential' b =
   -- Or SOP-style
   outAda = snd $ head $ M.toList $ snd $ head (M.toList $ getValue outVal)
   ```
-- **`currencySymbolValueOf` on minted value:** Potential unauthorized minting attack (common in `Burn` redeemers). (**Stan:** not implemented)
+- **`currencySymbolValueOf` on minted value:** Potential unauthorized minting attack (common in `Burn` redeemers).
   ```haskell
   ourMintingPolicy :: ScriptContext -> BuiltinUnit
   ourMintingPolicy ctx =
     case scriptContextRedeemer ctx of
       Mint -> ... -- deposit liquidity for LP tokens
-      Burn -> symbolValueOf mintedValue ownCS < 0
+      Burn -> currencySymbolValueOf mintedValue ownCS < 0
     where
       MintingScript ownCS = scriptContextScriptInfo ctx
       mintedValue = txInfoMint (scriptContextTxInfo ctx)
@@ -237,7 +237,7 @@ isMaybeStakingCredential' b =
 ## Bindings
 
 - **Non-strict `let` bindings used multiple times:** Make them strict to avoid repeated evaluation. (**Stan:** implemented via `PLU-STAN-08`)
-- **Hardcoded values:** Most ledger-dependent values change across hardforks. Avoid hardcoding unless truly constant; prefer dynamic retrieval or explicit acknowledgment that the value is invariant. (**Stan:** not implemented)
+- **Hardcoded values:** Most ledger-dependent values change across hardforks. Avoid hardcoding unless truly constant; prefer dynamic retrieval or explicit acknowledgment that the value is invariant. 
 
 ## Guards
 
@@ -257,7 +257,7 @@ isMaybeStakingCredential' b =
 
 ## Tooling
 
-- **Codex integration:** Use Codex for vulnerability detection; similar to Slither (Ethereum static analysis). (**Stan:** not implemented)
+- **Codex integration:** Use Codex for vulnerability detection; similar to Slither (Ethereum static analysis).
 
 ## Validity Interval / POSIX Time Misuse
 

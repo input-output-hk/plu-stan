@@ -122,6 +122,8 @@ data InspectionAnalysis
     | ValueOfInComparison
     -- | 'unsafeFromBuiltinData' used in comparisons for ledger hash-like types.
     | UnsafeFromBuiltinDataInHashComparison
+    -- | 'currencySymbolValueOf' used on minted value in comparisons.
+    | CurrencySymbolValueOfOnMintedValue
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.
