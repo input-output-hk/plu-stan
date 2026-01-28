@@ -261,5 +261,5 @@ isMaybeStakingCredential' b =
 
 ## Validity Interval / POSIX Time Misuse
 
-- **Detector:** Flags contracts that compare timestamps without checking both bounds of `txInfoValidRange`, equality on slots, or open-ended intervals. (**Stan:** not implemented)
+- **Detector:** Flags use of validity interval utilities (e.g. `from`, `to`, `interval`, `always`, `contains`, `member`) or any use of `txInfoValidRange` that does not ensure either the lower or upper bound is `Finite`. (**Stan:** implemented)
 - **Risk:** Unbounded ranges can undermine intended timeboxing logic.

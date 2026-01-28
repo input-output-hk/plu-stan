@@ -21,8 +21,9 @@ import Stan.Core.Id (Id)
 import Stan.Core.List (nonRepeatingPairs)
 import Stan.Core.ModuleName (ModuleName (..))
 import Stan.FileInfo (isExtensionDisabled)
-import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, nameOccName, occNameString,
-                        srcSpanEndCol, srcSpanEndLine, srcSpanStartCol, srcSpanStartLine)
+import Stan.Ghc.Compat (FastString, Name, RealSrcSpan, isSymOcc, mkFastString, mkRealSrcLoc,
+                        mkRealSrcSpan, nameOccName, occNameString, srcSpanEndCol, srcSpanEndLine,
+                        srcSpanStartCol, srcSpanStartLine)
 import Stan.Hie (eqAst, slice)
 import Stan.Hie.Compat (ContextInfo (..), HieAST (..), HieASTs (..), HieFile (..),
                         Identifier, IdentifierDetails (..), NodeAnnotation, NodeInfo (..),
@@ -37,7 +38,7 @@ import Stan.Pattern.Ast (Literal (..), PatternAst (..), anyNamesToPatternAst, ca
                          lazyField, literalPat, opApp, patternMatchArrow, patternMatchBranch,
                          patternMatch_, rhs, tuple, typeSig)
 import Stan.Pattern.Edsl (PatternBool (..))
-import Stan.Pattern.Type (PatternType, (|::))
+import Stan.Pattern.Type (PatternType, (|::), (|->))
 
 import Data.Char (isAlphaNum, isLower, isSpace)
 import qualified Data.ByteString as BS
@@ -78,6 +79,7 @@ createVisitor hie exts inspections = Visitor $ \node ->
         ValueOfInComparison -> analyseValueOfInComparison inspectionId hie node
         UnsafeFromBuiltinDataInHashComparison -> analyseUnsafeFromBuiltinDataInHashComparison inspectionId hie node
         CurrencySymbolValueOfOnMintedValue -> analyseCurrencySymbolValueOfOnMintedValue inspectionId hie node
+        ValidityIntervalMisuse -> analyseValidityIntervalMisuse inspectionId hie node
 
 {- | Check for big tuples (size >= 4) in the following places:
 
@@ -1012,6 +1014,290 @@ analyseCurrencySymbolValueOfOnMintedValue insId hie curNode = do
             , nameMetaPackage = "plutus-ledger-api"
             }
         ]
+
+
+analyseValidityIntervalMisuse
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseValidityIntervalMisuse insId hie curNode = do
+    addObservations $ mkObservation insId hie <$> matchNode curNode
+  where
+    allHieAsts :: [HieAST TypeIndex]
+    allHieAsts = Map.elems $ getAsts $ hie_asts hie
+
+    utilitySpanSet :: Set RealSrcSpan
+    utilitySpanSet =
+        Set.fromList $ concatMap collectUtilityCallSpans allHieAsts
+
+    finiteCheckSpanSet :: Set RealSrcSpan
+    finiteCheckSpanSet =
+        Set.fromList $ concatMap collectFiniteCheckSpans allHieAsts
+
+    rangeSpanSet :: Set RealSrcSpan
+    rangeSpanSet =
+        Set.fromList $ concatMap (collectRangeValueSpans False) allHieAsts
+
+    invalidRangeSpanSet :: Set RealSrcSpan
+    invalidRangeSpanSet =
+        let isCoveredBy spanSet spanToCheck =
+                any (`spanContains` spanToCheck) (Set.toList spanSet)
+        in Set.filter
+            (\spanToCheck ->
+                not (isCoveredBy finiteCheckSpanSet spanToCheck)
+                && not (isCoveredBy utilitySpanSet spanToCheck)
+            )
+            rangeSpanSet
+
+    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchNode node
+        | nodeSpan node `Set.member` utilitySpanSet = S.one $ nodeSpan node
+        | nodeSpan node `Set.member` invalidRangeSpanSet = S.one $ nodeSpan node
+        | otherwise = mempty
+
+    collectUtilityCallSpans :: HieAST TypeIndex -> [RealSrcSpan]
+    collectUtilityCallSpans node =
+        let here = case utilityCallSpan node of
+                Just span -> [span]
+                Nothing -> []
+        in here <> concatMap collectUtilityCallSpans (nodeChildren node)
+
+    utilityCallSpan :: HieAST TypeIndex -> Maybe RealSrcSpan
+    utilityCallSpan node =
+        appCallSpan node <|> opAppSpan node
+
+    appCallSpan :: HieAST TypeIndex -> Maybe RealSrcSpan
+    appCallSpan node = do
+        guard $ nodeHasAnnotation hsAppAnnotation node
+        let (headNode, _args) = appSpine node
+        guard $ nodeHasAnyNameMeta intervalUtilityNameMetas headNode
+        pure $ nodeSpan node
+
+    opAppSpan :: HieAST TypeIndex -> Maybe RealSrcSpan
+    opAppSpan node = do
+        guard $ nodeHasAnnotation opAppAnnotation node
+        _lhs:opNode:_rhs:_ <- Just $ nodeChildren node
+        guard $ nodeHasAnyNameMeta intervalUtilityNameMetas opNode
+        pure $ nodeSpan node
+
+    collectRangeValueSpans :: Bool -> HieAST TypeIndex -> [RealSrcSpan]
+    collectRangeValueSpans parentIsRange node =
+        let isRange = nodeTypeMatchesRange node
+            isRangeApp = appReturnsRange node
+            here = [nodeSpan node | (isRange || isRangeApp) && not parentIsRange]
+            nextParent = parentIsRange || isRange || isRangeApp
+        in here <> concatMap (collectRangeValueSpans nextParent) (nodeChildren node)
+
+    collectFiniteCheckSpans :: HieAST TypeIndex -> [RealSrcSpan]
+    collectFiniteCheckSpans = go
+      where
+        go node =
+            let here =
+                    if isFiniteCheckNode node
+                        then [nodeSpan node]
+                        else []
+            in here <> concatMap go (nodeChildren node)
+
+        isFiniteCheckNode :: HieAST TypeIndex -> Bool
+        isFiniteCheckNode node =
+            (nodeHasAnnotation hsCaseAnnotation node || nodeHasAnnotation hsLetAnnotation node)
+            && subtreeHasNameMeta boundFunctionNameMetas node
+            && subtreeHasNameMeta boundConstructorNameMetas node
+            && subtreeHasNameMeta finiteConstructorNameMetas node
+
+    subtreeHasNameMeta :: [NameMeta] -> HieAST TypeIndex -> Bool
+    subtreeHasNameMeta metas node =
+        nodeHasAnyNameMeta metas node || any (subtreeHasNameMeta metas) (nodeChildren node)
+
+    nodeTypeMatchesRange :: HieAST TypeIndex -> Bool
+    nodeTypeMatchesRange = nodeTypeMatchesPattern posixTimeRangePattern
+
+    nodeTypeMatchesPattern :: PatternType -> HieAST TypeIndex -> Bool
+    nodeTypeMatchesPattern pat node =
+        let NodeInfo{nodeType = tys} = nodeInfo node
+        in any (hieMatchPatternType (hie_types hie) pat) tys
+
+    appReturnsRange :: HieAST TypeIndex -> Bool
+    appReturnsRange node
+        | nodeHasAnnotation hsAppAnnotation node =
+            let (headNode, _args) = appSpine node
+            in nodeTypeMatchesPattern posixTimeRangeFunPattern headNode
+        | otherwise = False
+
+    nodeHasAnyNameMeta :: [NameMeta] -> HieAST TypeIndex -> Bool
+    nodeHasAnyNameMeta metas node =
+        let idents = Map.assocs $ nodeIdentifiers $ nodeInfo node
+        in any (\pair -> any (`hieMatchNameMeta` pair) metas) idents
+
+    nodeHasAnnotation :: NodeAnnotation -> HieAST TypeIndex -> Bool
+    nodeHasAnnotation ann node =
+        let NodeInfo{nodeAnnotations = nodeAnnotations'} = nodeInfo node
+        in ann `Set.member` Set.map toNodeAnnotation nodeAnnotations'
+
+    appSpine :: HieAST TypeIndex -> (HieAST TypeIndex, [HieAST TypeIndex])
+    appSpine node = case node of
+        n@Node{nodeChildren = appFun:arg:_}
+            | nodeHasAnnotation hsAppAnnotation n ->
+                let (f, args) = appSpine appFun
+                in (f, args <> [arg])
+        _ -> (node, [])
+
+    hsAppAnnotation :: NodeAnnotation
+    hsAppAnnotation = mkNodeAnnotation "HsApp" "HsExpr"
+
+    opAppAnnotation :: NodeAnnotation
+    opAppAnnotation = mkNodeAnnotation "OpApp" "HsExpr"
+
+    hsCaseAnnotation :: NodeAnnotation
+    hsCaseAnnotation = mkNodeAnnotation "HsCase" "HsExpr"
+
+    hsLetAnnotation :: NodeAnnotation
+    hsLetAnnotation = mkNodeAnnotation "HsLet" "HsExpr"
+
+    intervalUtilityNameMetas :: [NameMeta]
+    intervalUtilityNameMetas = concatMap intervalNameMetas
+        [ "from"
+        , "to"
+        , "interval"
+        , "always"
+        , "contains"
+        , "member"
+        , "before"
+        , "after"
+        , "singleton"
+        ]
+
+    boundFunctionNameMetas :: [NameMeta]
+    boundFunctionNameMetas = concatMap intervalNameMetas
+        [ "lowerBound"
+        , "upperBound"
+        ]
+
+    boundConstructorNameMetas :: [NameMeta]
+    boundConstructorNameMetas = concatMap intervalNameMetas
+        [ "LowerBound"
+        , "UpperBound"
+        ]
+
+    finiteConstructorNameMetas :: [NameMeta]
+    finiteConstructorNameMetas =
+        concatMap intervalNameMetas ["Finite"]
+
+    intervalNameMetas :: Text -> [NameMeta]
+    intervalNameMetas name =
+        [ NameMeta
+            { nameMetaName = name
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Interval"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        , NameMeta
+            { nameMetaName = name
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V2.Interval"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        , NameMeta
+            { nameMetaName = name
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V3.Interval"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        ]
+
+    posixTimeRangePattern :: PatternType
+    posixTimeRangePattern =
+        posixTimeRangeType
+        ||| intervalPosixTimeType
+
+    posixTimeRangeFunPattern :: PatternType
+    posixTimeRangeFunPattern =
+        (?) |-> posixTimeRangePattern
+
+    posixTimeRangeType :: PatternType
+    posixTimeRangeType =
+        posixTimeRangeTypeV1
+        ||| posixTimeRangeTypeV2
+        ||| posixTimeRangeTypeV3
+
+    posixTimeRangeTypeV1, posixTimeRangeTypeV2, posixTimeRangeTypeV3 :: PatternType
+    posixTimeRangeTypeV1 =
+        NameMeta
+            { nameMetaName = "POSIXTimeRange"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Time"
+            , nameMetaPackage = "plutus-ledger-api"
+            } |:: []
+    posixTimeRangeTypeV2 =
+        NameMeta
+            { nameMetaName = "POSIXTimeRange"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V2.Time"
+            , nameMetaPackage = "plutus-ledger-api"
+            } |:: []
+    posixTimeRangeTypeV3 =
+        NameMeta
+            { nameMetaName = "POSIXTimeRange"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V3.Time"
+            , nameMetaPackage = "plutus-ledger-api"
+            } |:: []
+
+    intervalPosixTimeType :: PatternType
+    intervalPosixTimeType =
+        intervalPosixTimeTypeV1
+        ||| intervalPosixTimeTypeV2
+        ||| intervalPosixTimeTypeV3
+
+    intervalPosixTimeTypeV1, intervalPosixTimeTypeV2, intervalPosixTimeTypeV3 :: PatternType
+    intervalPosixTimeTypeV1 =
+        NameMeta
+            { nameMetaName = "Interval"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Interval"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        |:: [posixTimeTypeV1]
+    intervalPosixTimeTypeV2 =
+        NameMeta
+            { nameMetaName = "Interval"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V2.Interval"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        |:: [posixTimeTypeV2]
+    intervalPosixTimeTypeV3 =
+        NameMeta
+            { nameMetaName = "Interval"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V3.Interval"
+            , nameMetaPackage = "plutus-ledger-api"
+            }
+        |:: [posixTimeTypeV3]
+
+    posixTimeTypeV1, posixTimeTypeV2, posixTimeTypeV3 :: PatternType
+    posixTimeTypeV1 =
+        NameMeta
+            { nameMetaName = "POSIXTime"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Time"
+            , nameMetaPackage = "plutus-ledger-api"
+            } |:: []
+    posixTimeTypeV2 =
+        NameMeta
+            { nameMetaName = "POSIXTime"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V2.Time"
+            , nameMetaPackage = "plutus-ledger-api"
+            } |:: []
+    posixTimeTypeV3 =
+        NameMeta
+            { nameMetaName = "POSIXTime"
+            , nameMetaModuleName = ModuleName "PlutusLedgerApi.V3.Time"
+            , nameMetaPackage = "plutus-ledger-api"
+            } |:: []
+
+    spanContains :: RealSrcSpan -> RealSrcSpan -> Bool
+    spanContains outer inner =
+        let startsAfter =
+                srcSpanStartLine inner > srcSpanStartLine outer
+                || (srcSpanStartLine inner == srcSpanStartLine outer
+                    && srcSpanStartCol inner >= srcSpanStartCol outer)
+            endsBefore =
+                srcSpanEndLine inner < srcSpanEndLine outer
+                || (srcSpanEndLine inner == srcSpanEndLine outer
+                    && srcSpanEndCol inner <= srcSpanEndCol outer)
+        in startsAfter && endsBefore
 
 
 analyseUnsafeFromBuiltinDataInHashComparison

@@ -16,8 +16,9 @@ import PlutusTx.Maybe qualified as Maybe
 import PlutusTx.List qualified as TxList
 
 -- Place for future imports
-import PlutusLedgerApi.V1 (Credential (..), PubKeyHash (..), ScriptHash (..))
+import PlutusLedgerApi.V1 (Credential (..), POSIXTimeRange, PubKeyHash (..), ScriptHash (..))
 import PlutusLedgerApi.V1.Contexts qualified as V1
+import PlutusLedgerApi.V1.Interval qualified as Interval
 import PlutusLedgerApi.V1.Value qualified as Value
 import PlutusLedgerApi.V3 (
   Address (..),
@@ -29,6 +30,7 @@ import PlutusLedgerApi.V3 (
   TxOut (..),
   txOutAddress,
   )
+import PlutusLedgerApi.V3.MintValue qualified as MintValue
 {-# ANN module ("onchain-contract" :: String) #-}
 --
 --
@@ -51,7 +53,7 @@ import PlutusLedgerApi.V3 (
 --
 --
 --
-
+--
 assocMap :: AssocMap.Map k v
 assocMap = AssocMap.unsafeFromList mempty
 
@@ -389,3 +391,61 @@ nonMintedCurrencySymbolValueOf :: Bool
 nonMintedCurrencySymbolValueOf =
   let val = Value.singleton Value.adaSymbol Value.adaToken 1
   in Value.currencySymbolValueOf val Value.adaSymbol > 0
+
+validRangeUtilityFrom :: V1.ScriptContext -> Bool
+validRangeUtilityFrom ctx =
+  Interval.contains
+    (Interval.from 10)
+    (V1.txInfoValidRange $ V1.scriptContextTxInfo ctx)
+
+validRangeUtilityAlways :: V1.ScriptContext -> Bool
+validRangeUtilityAlways ctx =
+  Interval.contains Interval.always (V1.txInfoValidRange $ V1.scriptContextTxInfo ctx)
+
+validRangeNoFiniteCheck :: V1.ScriptContext -> POSIXTimeRange
+validRangeNoFiniteCheck ctx =
+  V1.txInfoValidRange $ V1.scriptContextTxInfo ctx
+
+validRangeFiniteCheck :: V1.ScriptContext -> Bool
+validRangeFiniteCheck ctx =
+  case Interval.lowerBound (V1.txInfoValidRange $ V1.scriptContextTxInfo ctx) of
+    Interval.LowerBound (Interval.Finite _) _ -> True
+    _ -> False
+    
+_plutusTxFixtureBindings :: [()]
+_plutusTxFixtureBindings =
+  [ validRangeUtilityFrom `seq` ()
+  , validRangeUtilityAlways `seq` ()
+  , validRangeNoFiniteCheck `seq` ()
+  , validRangeFiniteCheck `seq` ()
+  , currencySymbolValueOfMintedValueRewrapped `seq` ()
+  , currencySymbolValueOfMintedValueToMap `seq` ()
+  , currencySymbolValueOfMintedValueLetPattern `seq` ()
+  , mintCheckViaHelperLet1 `seq` ()
+  , checkBurn1 `seq` ()
+  , mintCheckViaHelperLet2 `seq` ()
+  , checkBurn2 `seq` ()
+  , nonMintedCurrencySymbolValueOf `seq` ()
+  ]
+
+currencySymbolValueOfMintedValueRewrapped :: ScriptContext -> Bool
+currencySymbolValueOfMintedValueRewrapped ctx =
+  let mintValue = txInfoMint $ scriptContextTxInfo ctx
+      mintMap = case mintValue of
+        MintValue.UnsafeMintValue valueMap -> valueMap
+      rewrapped = Value.Value mintMap
+  in Value.currencySymbolValueOf rewrapped Value.adaSymbol < 0
+
+currencySymbolValueOfMintedValueToMap :: ScriptContext -> Bool
+currencySymbolValueOfMintedValueToMap ctx =
+  let mintValue = txInfoMint $ scriptContextTxInfo ctx
+      mintMap = MintValue.mintValueToMap mintValue
+      rewrapped = Value.Value mintMap
+  in Value.currencySymbolValueOf rewrapped Value.adaSymbol < 0
+
+currencySymbolValueOfMintedValueLetPattern :: ScriptContext -> Bool
+currencySymbolValueOfMintedValueLetPattern ctx =
+  let mintValue = txInfoMint $ scriptContextTxInfo ctx
+      MintValue.UnsafeMintValue mintMap = mintValue
+      rewrapped = Value.Value mintMap
+  in Value.currencySymbolValueOf rewrapped Value.adaSymbol < 0

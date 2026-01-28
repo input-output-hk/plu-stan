@@ -124,6 +124,8 @@ data InspectionAnalysis
     | UnsafeFromBuiltinDataInHashComparison
     -- | 'currencySymbolValueOf' used on minted value in comparisons.
     | CurrencySymbolValueOfOnMintedValue
+    -- | Misuse of validity interval / POSIX time range.
+    | ValidityIntervalMisuse
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

@@ -59,6 +59,7 @@ module Stan.Inspection.AntiPattern
     , plustan09
     , plustan10
     , plustan11
+    , plustan12
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -114,6 +115,7 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan09
     , plustan10
     , plustan11
+    , plustan12
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -695,5 +697,15 @@ plustan11 = mkAntiPatternInspection (Id "PLU-STAN-11") "currencySymbolValueOf us
         [ "Avoid using 'currencySymbolValueOf'"
         , "If checking mint/burn, validate that all token amounts under the currency symbol are strictly negative (for burns) or strictly positive (for mints)"
         , "Consider checking the full minted value structure, not just the sum for a symbol"
+        ]
+    & severityL .~ Warning
+
+plustan12 :: Inspection
+plustan12 = mkAntiPatternInspection (Id "PLU-STAN-12") "Validity interval / POSIX time misuse"
+    ValidityIntervalMisuse
+    & descriptionL .~ "Using validity interval utilities or accessing 'txInfoValidRange' without ensuring a finite lower or upper bound can lead to unbounded time windows."
+    & solutionL .~
+        [ "Avoid using validity interval utilities like 'from', 'to', 'interval', or 'always' in checks"
+        , "When using 'txInfoValidRange', ensure either the lower or upper bound is 'Finite'"
         ]
     & severityL .~ Warning
