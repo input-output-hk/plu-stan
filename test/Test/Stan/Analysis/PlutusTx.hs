@@ -13,8 +13,8 @@ analysisPlutusTxSpec :: Analysis -> Spec
 analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
 
-  it "PLU-STAN-01: verifyEd25519Signature usage" $
-    checkObservation AntiPattern.plustan01 59 3 27
+  it "PLU-STAN-01: verifyEd25519Signature usage ignored via inline comment" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan01 59
 
   it "PLU-STAN-01: verifyEcdsaSecp256k1Signature usage" $
     checkObservation AntiPattern.plustan01 66 3 34
@@ -134,3 +134,21 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
 
   it "PLU-STAN-10: Where clause binding" $
     checkObservation AntiPattern.plustan10 370 35 62
+
+  it "PLU-STAN-16: valid multiply-before-divide does not trigger" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan16 473
+
+  it "PLU-STAN-16: division before multiplication (simple)" $
+    checkObservation AntiPattern.plustan16 477 3 42
+
+  it "PLU-STAN-16: division before multiplication (lambda)" $
+    checkObservation AntiPattern.plustan16 482 25 59
+
+  it "PLU-STAN-16: division before multiplication (let-bound)" $
+    checkObservation AntiPattern.plustan16 488 20 33
+
+  it "PLU-STAN-16: division before multiplication (nested let)" $
+    checkObservation AntiPattern.plustan16 494 23 36
+
+  it "PLU-STAN-16: division before multiplication (where)" $
+    checkObservation AntiPattern.plustan16 501 18 31

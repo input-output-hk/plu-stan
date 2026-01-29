@@ -126,6 +126,8 @@ data InspectionAnalysis
     | CurrencySymbolValueOfOnMintedValue
     -- | Misuse of validity interval / POSIX time range.
     | ValidityIntervalMisuse
+    -- | Precision loss: division before multiplication (including via let/where).
+    | PrecisionLossDivisionBeforeMultiply
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

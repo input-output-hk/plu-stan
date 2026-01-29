@@ -53,9 +53,9 @@ import PlutusLedgerApi.V3.MintValue qualified as MintValue
 --
 --
 --
---
 verifyEd25519SignatureUsage :: Bool
 verifyEd25519SignatureUsage =
+  -- stan-ignore: PLU-STAN-01
   P.verifyEd25519Signature
     (BI.stringToBuiltinByteStringHex "deadbeef")
     (BI.stringToBuiltinByteStringHex "deadbeef")
@@ -467,3 +467,35 @@ currencySymbolValueOfMintedValueLetPattern ctx =
       MintValue.UnsafeMintValue mintMap = mintValue
       rewrapped = Value.Value mintMap
   in Value.currencySymbolValueOf rewrapped Value.adaSymbol < 0
+
+precisionLossValid :: Integer -> Integer -> Integer -> Integer
+precisionLossValid principal elapsedTime totalTime =
+  (principal * elapsedTime) `div` totalTime
+
+precisionLossInvalid1 :: Integer -> Integer -> Integer -> Integer
+precisionLossInvalid1 principal elapsedTime totalTime =
+  elapsedTime `div` totalTime * principal
+
+precisionLossInvalid2 :: Integer -> [Integer] -> Integer -> Integer
+precisionLossInvalid2 principal periods totalTime =
+  let periodInterests =
+        map (\period -> period `div` totalTime * principal) periods
+  in sum periodInterests
+
+precisionLossLetBlock :: Integer -> Integer -> Integer -> Integer
+precisionLossLetBlock a b c =
+  let divResult = a `div` b
+      multResult = divResult * c
+  in multResult
+
+precisionLossNestedLet :: Integer -> Integer -> Integer -> Integer
+precisionLossNestedLet a b c =
+  let divResult = a `div` b
+  in let multResult = divResult * c
+     in multResult
+
+precisionLossWhere :: Integer -> Integer -> Integer -> Integer
+precisionLossWhere a b c = multResult
+  where
+    divResult = a `div` b
+    multResult = divResult * c

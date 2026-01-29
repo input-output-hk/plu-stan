@@ -21,9 +21,8 @@ import Stan.Core.Id (Id)
 import Stan.Core.List (nonRepeatingPairs)
 import Stan.Core.ModuleName (ModuleName (..))
 import Stan.FileInfo (isExtensionDisabled)
-import Stan.Ghc.Compat (FastString, Name, RealSrcSpan, isSymOcc, mkFastString, mkRealSrcLoc,
-                        mkRealSrcSpan, nameOccName, occNameString, srcSpanEndCol, srcSpanEndLine,
-                        srcSpanStartCol, srcSpanStartLine)
+import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, nameOccName, occNameString, srcSpanEndCol,
+                        srcSpanEndLine, srcSpanStartCol, srcSpanStartLine)
 import Stan.Hie (eqAst, slice)
 import Stan.Hie.Compat (ContextInfo (..), HieAST (..), HieASTs (..), HieFile (..),
                         Identifier, IdentifierDetails (..), NodeAnnotation, NodeInfo (..),
@@ -31,12 +30,13 @@ import Stan.Hie.Compat (ContextInfo (..), HieAST (..), HieASTs (..), HieFile (..
 import Stan.Hie.MatchAst (hieMatchPatternAst)
 import Stan.Hie.MatchType (hieMatchPatternType)
 import Stan.Inspection (Inspection (..), InspectionAnalysis (..))
-import Stan.NameMeta (NameMeta (..), ghcPrimNameFrom, hieMatchNameMeta, plutusTxNameFrom)
+import Stan.NameMeta (NameMeta (..), baseNameFrom, ghcPrimNameFrom, hieMatchNameMeta,
+                      plutusTxNameFrom)
 import Stan.Observation (Observations, mkObservation)
-import Stan.Pattern.Ast (Literal (..), PatternAst (..), anyNamesToPatternAst, case', constructor,
-                         constructorNameIdentifier, dataDecl, fixity, fun, guardBranch, lambdaCase,
-                         lazyField, literalPat, opApp, patternMatchArrow, patternMatchBranch,
-                         patternMatch_, rhs, tuple, typeSig)
+import Stan.Pattern.Ast (Literal (..), PatternAst (..), anyNamesToPatternAst, app, case',
+                         constructor, constructorNameIdentifier, dataDecl, fixity, fun,
+                         guardBranch, lambdaCase, lazyField, literalPat, opApp, patternMatchArrow,
+                         patternMatchBranch, patternMatch_, rhs, tuple, typeSig)
 import Stan.Pattern.Edsl (PatternBool (..))
 import Stan.Pattern.Type (PatternType, (|::), (|->))
 
@@ -80,6 +80,7 @@ createVisitor hie exts inspections = Visitor $ \node ->
         UnsafeFromBuiltinDataInHashComparison -> analyseUnsafeFromBuiltinDataInHashComparison inspectionId hie node
         CurrencySymbolValueOfOnMintedValue -> analyseCurrencySymbolValueOfOnMintedValue inspectionId hie node
         ValidityIntervalMisuse -> analyseValidityIntervalMisuse inspectionId hie node
+        PrecisionLossDivisionBeforeMultiply -> analysePrecisionLossDivisionBeforeMultiply inspectionId hie node
 
 {- | Check for big tuples (size >= 4) in the following places:
 
@@ -757,12 +758,12 @@ analyseCurrencySymbolValueOfOnMintedValue insId hie curNode = do
                     | BS8.null after -> False
                     | otherwise ->
                         let afterWord = BS8.drop (BS8.length word) after
-                            beforeOk = BS8.null before || not (isIdentChar (BS8.last before))
-                            afterOk = BS8.null afterWord || not (isIdentChar (BS8.head afterWord))
+                            beforeOk = BS8.null before || not (isIdentCharLocal (BS8.last before))
+                            afterOk = BS8.null afterWord || not (isIdentCharLocal (BS8.head afterWord))
                         in (beforeOk && afterOk) || (word `isWordIn` BS8.tail after)
 
-            isIdentChar :: Char -> Bool
-            isIdentChar c = isAlphaNum c || c == '_' || c == '\''
+            isIdentCharLocal :: Char -> Bool
+            isIdentCharLocal c = isAlphaNum c || c == '_' || c == '\''
 
         spanContainsTxInfoMint :: RealSrcSpan -> Bool
         spanContainsTxInfoMint spanToCheck = fromMaybe False $ do
@@ -1299,6 +1300,234 @@ analyseValidityIntervalMisuse insId hie curNode = do
                     && srcSpanEndCol inner <= srcSpanEndCol outer)
         in startsAfter && endsBefore
 
+
+analysePrecisionLossDivisionBeforeMultiply
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analysePrecisionLossDivisionBeforeMultiply insId hie curNode =
+    addObservations $ mkObservation insId hie <$> matchNode curNode
+  where
+    allHieAsts :: [HieAST TypeIndex]
+    allHieAsts = Map.elems $ getAsts $ hie_asts hie
+
+    divisionBindings :: Set Name
+    divisionBindings =
+        foldMap (collectDivisionBindings (hie_hs_src hie)) allHieAsts
+
+    divisionBindingOccs :: Set ByteString
+    divisionBindingOccs =
+        Set.map (BS8.pack . occNameString . nameOccName) divisionBindings
+
+    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchNode node =
+        let direct = createMatch precisionLossPattern hie node
+            tainted =
+                memptyIfFalse
+                    (hieMatchPatternAst hie node multiplyPattern
+                        && spanMentionsDivisionBinding (nodeSpan node))
+                    (S.one $ nodeSpan node)
+        in direct <> tainted
+
+    spanMentionsDivisionBinding :: RealSrcSpan -> Bool
+    spanMentionsDivisionBinding spanToCheck = fromMaybe False $ do
+        src <- slice spanToCheck (hie_hs_src hie)
+        pure $ any (`isWordInBS` src) (Set.toList divisionBindingOccs)
+
+    collectDivisionBindings :: ByteString -> HieAST TypeIndex -> Set Name
+    collectDivisionBindings hsSrc rootNode =
+        let directlyTainted = collectDirectBindings rootNode
+            allBindings = collectAllBindingsWithSpans rootNode
+        in expandTransitively allBindings directlyTainted
+      where
+        collectDirectBindings :: HieAST TypeIndex -> Set Name
+        collectDirectBindings = go Set.empty
+          where
+            go acc n@Node{nodeSpan = nodeSpan', nodeChildren = children} =
+                let info = nodeInfo n
+                    acc' = foldl' (insertBinding nodeSpan') acc
+                        (Map.assocs $ nodeIdentifiers info)
+                in foldl' go acc' children
+
+            insertBinding
+                :: RealSrcSpan
+                -> Set Name
+                -> (Identifier, IdentifierDetails TypeIndex)
+                -> Set Name
+            insertBinding fallbackSpan acc (ident, details) = case ident of
+                Right name ->
+                    let fromBindingSpan = case getBindingSpan details of
+                            Just rhsSpan -> spanContainsDivision rhsSpan
+                            Nothing -> False
+                        fromFallbackSpan =
+                            isBindingDetails details && spanContainsDivision fallbackSpan
+                        fromSourceSearch = bindingRhsContainsDivision name
+                    in if fromBindingSpan || fromFallbackSpan || fromSourceSearch
+                       then Set.insert name acc
+                       else acc
+                _ -> acc
+
+            bindingRhsContainsDivision :: Name -> Bool
+            bindingRhsContainsDivision name =
+                let nameBS = BS8.pack $ occNameString $ nameOccName name
+                    srcLines = BS8.lines hsSrc
+                    hasDivBinding line =
+                        ((nameBS <> " = ") `BS8.isInfixOf` line || (nameBS <> " =") `BS8.isInfixOf` line)
+                        && lineHasDivision line
+                in any hasDivBinding srcLines
+
+        collectAllBindingsWithSpans :: HieAST TypeIndex -> [(Name, RealSrcSpan)]
+        collectAllBindingsWithSpans = go
+          where
+            go n@Node{nodeSpan = nodeSpan', nodeChildren = children} =
+                let info = nodeInfo n
+                    bindings = mapMaybe (extractBinding nodeSpan')
+                        (Map.assocs $ nodeIdentifiers info)
+                in bindings ++ concatMap go children
+
+            extractBinding
+                :: RealSrcSpan
+                -> (Identifier, IdentifierDetails TypeIndex)
+                -> Maybe (Name, RealSrcSpan)
+            extractBinding fallbackSpan (ident, details) = case ident of
+                Right name | Just rhsSpan <- getBindingSpan details ->
+                    Just (name, rhsSpan)
+                Right name | isBindingDetails details ->
+                    Just (name, fallbackSpan)
+                _ -> Nothing
+
+        expandTransitively :: [(Name, RealSrcSpan)] -> Set Name -> Set Name
+        expandTransitively allBindings = go
+          where
+            go tainted =
+                let newTainted = Set.fromList
+                        [ name
+                        | (name, rhsSpan) <- allBindings
+                        , not (Set.member name tainted)
+                        , spanUsesTaintedName rhsSpan tainted
+                        ]
+                in if Set.null newTainted
+                   then tainted
+                   else go (tainted `Set.union` newTainted)
+
+            spanUsesTaintedName :: RealSrcSpan -> Set Name -> Bool
+            spanUsesTaintedName spanToCheck taintedNames = fromMaybe False $ do
+                src <- slice spanToCheck hsSrc
+                pure $ any (\n -> nameAsBS n `isWordIn` src) (Set.toList taintedNames)
+
+            nameAsBS :: Name -> ByteString
+            nameAsBS = BS8.pack . occNameString . nameOccName
+
+            isWordIn :: ByteString -> ByteString -> Bool
+            isWordIn word src = case BS8.breakSubstring word src of
+                (before, after)
+                    | BS8.null after -> False
+                    | otherwise ->
+                        let afterWord = BS8.drop (BS8.length word) after
+                            beforeOk = BS8.null before || not (isIdentCharLocal (BS8.last before))
+                            afterOk = BS8.null afterWord || not (isIdentCharLocal (BS8.head afterWord))
+                        in (beforeOk && afterOk) || (word `isWordIn` BS8.tail after)
+
+            isIdentCharLocal :: Char -> Bool
+            isIdentCharLocal c = isAlphaNum c || c == '_' || c == '\''
+
+        spanContainsDivision :: RealSrcSpan -> Bool
+        spanContainsDivision spanToCheck = fromMaybe False $ do
+            src <- slice spanToCheck hsSrc
+            pure $ lineHasDivision src
+
+        lineHasDivision :: ByteString -> Bool
+        lineHasDivision src =
+            isWordInBS "div" src
+                || isWordInBS "quot" src
+                || ("/" `BS8.isInfixOf` src)
+
+        getBindingSpan :: IdentifierDetails TypeIndex -> Maybe RealSrcSpan
+        getBindingSpan IdentifierDetails{identInfo = identInfo'} =
+            listToMaybe $ mapMaybe spanFromCtx (toList identInfo')
+          where
+            spanFromCtx (ValBind _ _ (Just s)) = Just s
+            spanFromCtx (PatternBind _ _ (Just s)) = Just s
+            spanFromCtx _ = Nothing
+
+        isBindingDetails :: IdentifierDetails TypeIndex -> Bool
+        isBindingDetails IdentifierDetails{identInfo = identInfo'} =
+            any isBindingCtx identInfo'
+          where
+            isBindingCtx (ValBind _ _ _) = True
+            isBindingCtx (PatternBind _ _ _) = True
+            isBindingCtx _ = False
+
+    precisionLossPattern :: PatternAst
+    precisionLossPattern =
+        opApp divisionExpr mulOp (?)
+        ||| app (app mulFun divisionExpr) (?)
+
+    multiplyPattern :: PatternAst
+    multiplyPattern =
+        opApp (?) mulOp (?) ||| app (app mulFun (?)) (?)
+
+    divisionExpr :: PatternAst
+    divisionExpr =
+        opApp (?) divOp (?) ||| app (app divFun (?)) (?)
+
+    divOp :: PatternAst
+    divOp = anyNamesToPatternAst divOpNames
+
+    divFun :: PatternAst
+    divFun = anyNamesToPatternAst divFunNames
+
+    mulOp :: PatternAst
+    mulOp = anyNamesToPatternAst mulOpNames
+
+    mulFun :: PatternAst
+    mulFun = anyNamesToPatternAst mulFunNames
+
+    divOpNames :: NonEmpty NameMeta
+    divOpNames =
+        "div" `plutusTxNameFrom` "PlutusTx.Prelude" :|
+            [ "quot" `plutusTxNameFrom` "PlutusTx.Prelude"
+            , "/" `plutusTxNameFrom` "PlutusTx.Prelude"
+            , "div" `baseNameFrom` "GHC.Real"
+            , "quot" `baseNameFrom` "GHC.Real"
+            , "/" `baseNameFrom` "GHC.Real"
+            ]
+
+    divFunNames :: NonEmpty NameMeta
+    divFunNames =
+        "div" `plutusTxNameFrom` "PlutusTx.Prelude" :|
+            [ "quot" `plutusTxNameFrom` "PlutusTx.Prelude"
+            , "div" `baseNameFrom` "GHC.Real"
+            , "quot" `baseNameFrom` "GHC.Real"
+            ]
+
+    mulOpNames :: NonEmpty NameMeta
+    mulOpNames =
+        "*" `plutusTxNameFrom` "PlutusTx.Prelude" :|
+            [ "mul" `plutusTxNameFrom` "PlutusTx.Prelude"
+            , "*" `baseNameFrom` "GHC.Num"
+            ]
+
+    mulFunNames :: NonEmpty NameMeta
+    mulFunNames =
+        "*" `plutusTxNameFrom` "PlutusTx.Prelude" :|
+            [ "mul" `plutusTxNameFrom` "PlutusTx.Prelude"
+            , "*" `baseNameFrom` "GHC.Num"
+            ]
+
+    isWordInBS :: ByteString -> ByteString -> Bool
+    isWordInBS word src = case BS8.breakSubstring word src of
+        (before, after)
+            | BS8.null after -> False
+            | otherwise ->
+                let afterWord = BS8.drop (BS8.length word) after
+                    beforeOk = BS8.null before || not (isIdentChar (BS8.last before))
+                    afterOk = BS8.null afterWord || not (isIdentChar (BS8.head afterWord))
+                in (beforeOk && afterOk) || (word `isWordInBS` BS8.tail after)
+
+    isIdentChar :: Char -> Bool
+    isIdentChar c = isAlphaNum c || c == '_' || c == '\''
 
 analyseUnsafeFromBuiltinDataInHashComparison
     :: Id Inspection

@@ -60,6 +60,7 @@ module Stan.Inspection.AntiPattern
     , plustan10
     , plustan11
     , plustan12
+    , plustan16
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -119,6 +120,7 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan10
     , plustan11
     , plustan12
+    , plustan16
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -728,6 +730,17 @@ plustan12 = mkAntiPatternInspection (Id "PLU-STAN-12") "Validity interval / POSI
     & solutionL .~
         [ "Avoid using validity interval utilities like 'from', 'to', 'interval', or 'always' in checks"
         , "When using 'txInfoValidRange', ensure either the lower or upper bound is 'Finite'"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan16 :: Inspection
+plustan16 = mkAntiPatternInspection (Id "PLU-STAN-16") "Precision loss: division before multiplication"
+    PrecisionLossDivisionBeforeMultiply
+    & descriptionL .~ "Division before multiplication in integer arithmetic can cause precision loss. Multiply first, then divide."
+    & solutionL .~
+        [ "Multiply before dividing to delay rounding"
+        , "Rewrite (a `div` b) * c as (a * c) `div` b"
         ]
     & withPlutusCategory
     & severityL .~ Warning
