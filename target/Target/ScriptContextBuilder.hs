@@ -72,8 +72,6 @@ import PlutusTx.AssocMap qualified as Map
 import PlutusTx.Builtins.HasOpaque (stringToBuiltinByteStringHex)
 import PlutusTx.Eq qualified
 
-{-# ANN module ("onchain-contract" :: String) #-}
-
 currencySymbolFromHex :: String -> CurrencySymbol
 currencySymbolFromHex = CurrencySymbol . stringToBuiltinByteStringHex
 

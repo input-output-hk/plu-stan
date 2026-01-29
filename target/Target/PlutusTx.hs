@@ -8,12 +8,12 @@
 module Target.PlutusTx where
 
 import PlutusTx qualified as Tx
-import PlutusTx.AssocMap qualified as AssocMap
 import PlutusTx.Builtins.HasOpaque qualified as BI
 import PlutusTx.Builtins.Internal qualified as BIInternal
 import PlutusTx.Foldable qualified as TxFoldable
 import PlutusTx.Maybe qualified as Maybe
 import PlutusTx.List qualified as TxList
+import PlutusTx.Prelude qualified as P
 
 -- Place for future imports
 import PlutusLedgerApi.V1 (Credential (..), POSIXTimeRange, PubKeyHash (..), ScriptHash (..))
@@ -54,8 +54,26 @@ import PlutusLedgerApi.V3.MintValue qualified as MintValue
 --
 --
 --
-assocMap :: AssocMap.Map k v
-assocMap = AssocMap.unsafeFromList mempty
+verifyEd25519SignatureUsage :: Bool
+verifyEd25519SignatureUsage =
+  P.verifyEd25519Signature
+    (BI.stringToBuiltinByteStringHex "deadbeef")
+    (BI.stringToBuiltinByteStringHex "deadbeef")
+    (BI.stringToBuiltinByteStringHex "deadbeef")
+
+verifyEcdsaSecp256k1SignatureUsage :: Bool
+verifyEcdsaSecp256k1SignatureUsage =
+  P.verifyEcdsaSecp256k1Signature
+    (BI.stringToBuiltinByteStringHex "deadbeef")
+    (BI.stringToBuiltinByteStringHex "deadbeef")
+    (BI.stringToBuiltinByteStringHex "deadbeef")
+
+verifySchnorrSecp256k1SignatureUsage :: Bool
+verifySchnorrSecp256k1SignatureUsage =
+  P.verifySchnorrSecp256k1Signature
+    (BI.stringToBuiltinByteStringHex "deadbeef")
+    (BI.stringToBuiltinByteStringHex "deadbeef")
+    (BI.stringToBuiltinByteStringHex "deadbeef")
 
 unsafeFromBuiltinData :: Integer
 unsafeFromBuiltinData =

@@ -25,15 +25,17 @@ import Text.Printf (printf)
 import Stan.Analysis (Analysis (..))
 import Stan.Core.ModuleName (ModuleName (..))
 import Stan.FileInfo (FileInfo (..), extensionsToText)
+import Stan.Inspection (Inspection (..))
 import Stan.Observation (Observation (..), prettyShowObservation)
 import Stan.Report.Settings (OutputSettings (..), Verbosity (..))
+import Stan.Inspection.All (getInspectionById)
 
 import qualified Data.HashSet as HS
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Slist as S
-import Stan.Core.Id (Id(unId))
+import qualified Stan.Category as Category
 
 
 {- | Shows analysed output of Stan work.
@@ -66,8 +68,7 @@ data AnalysisNumbers = AnalysisNumbers
 
 isPlinthObservation :: Observation -> Bool
 isPlinthObservation Observation{..} =
-  -- observationInspectionId includes PLU-STAN
-  "PLU-STAN" `Text.isInfixOf` unId observationInspectionId
+  Category.plutus `elem` inspectionCategory (getInspectionById observationInspectionId)
 
 analysisToNumbers :: Analysis -> AnalysisNumbers
 analysisToNumbers Analysis{..} = AnalysisNumbers

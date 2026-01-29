@@ -19,6 +19,7 @@ module Stan.Category
     , infinite
     , list
     , partial
+    , plutus
     , spaceLeak
     , syntax
     , unsafe
@@ -57,6 +58,10 @@ antiPattern = Category "AntiPattern"
 spaceLeak :: Category
 spaceLeak = Category "SpaceLeak"
 
+-- | @Plutus@ category of Plu-Stan inspections.
+plutus :: Category
+plutus = Category "Plutus"
+
 {- | @Syntax@ category of Stan inspections. Usually used in
 'Stan.Severity.Style' inspections.
 -}
@@ -74,6 +79,7 @@ stanCategories =
     , infinite
     , list
     , partial
+    , plutus
     , spaceLeak
     , syntax
     , unsafe
