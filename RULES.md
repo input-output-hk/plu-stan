@@ -17,7 +17,8 @@ Reference for common Plu-Stan checks and why they matter. Each item highlights t
 
 ## Data Handling & Deserialization
 
-- **`unsafeFromList` (AssocMap):** Using `AssocMap.unsafeFromList` without validation can cause script failure at runtime if the list contains duplicate keys. (**Stan:** implemented via `PLU-STAN-01`)
+- **Signature verification builtins:** Usage of `verifyEd25519Signature`, `verifyEcdsaSecp256k1Signature`, or `verifySchnorrSecp256k1Signature` must satisfy invariants. Ensure direct on-chain verification of message hash correspondence and include replay prevention mechanisms. (**Stan:** implemented via `PLU-STAN-01`)
+- **`unsafeFromList` (AssocMap):** Using `AssocMap.unsafeFromList` without validation can cause script failure at runtime if the list contains duplicate keys. (**Stan:** not yet implemented)
 - **`unsafeFromBuiltinData`:** Potential unbounded datum spam attack. Warn users and either: (**Stan:** implemented via `PLU-STAN-02`)
   1. Construct the expected output datum and assert the actual output datum matches it (enforces structural integrity by construction).
   2. Explicitly check structural integrity via a custom `checkIntegrity` that verifies field counts and per-field integrity in the underlying `BuiltinData`.
