@@ -18,19 +18,23 @@ import Relude.Extra.Lens (Lens', lens, over)
 
 import Stan.Analysis.Analyser (analyseAst)
 import Stan.Cabal (mergeParsedExtensions)
-import Stan.Core.Id (Id)
+import Stan.Core.Id (Id, unId)
 import Stan.Core.ModuleName (fromGhcModule)
 import Stan.FileInfo (FileInfo (..), FileMap)
+import Stan.Ghc.Compat (srcSpanStartLine)
 import Stan.Hie (countLinesOfCode)
 import Stan.Hie.Compat (HieFile (..))
 import Stan.Inspection (Inspection)
 import Stan.Inspection.All (lookupInspectionById)
 import Stan.Observation (Observation (..), Observations)
 
+import Data.List (isInfixOf)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Slist as S
+import qualified Data.ByteString.Char8 as BS8
+import qualified Data.Text as Text
 
 
 {- | This data type stores all information collected during static analysis.
@@ -129,6 +133,19 @@ addObservations observations = modify' $ over observationsL (observations <>)
 addIgnoredObservations :: Observations -> State Analysis ()
 addIgnoredObservations obs = modify' $ over ignoredObservationsL (obs <>)
 
+isInlineIgnored :: HieFile -> Observation -> Bool
+isInlineIgnored HieFile{..} Observation{..} =
+    let lineNo = srcSpanStartLine observationSrcSpan
+        marker = "stan-ignore: " <> Text.unpack (unId observationInspectionId)
+        linesSrc = BS8.lines hie_hs_src
+        lineHas n =
+            if n <= 0
+            then False
+            else case linesSrc !!? (n - 1) of
+                Nothing -> False
+                Just line -> marker `isInfixOf` BS8.unpack line
+    in lineHas lineNo || lineHas (lineNo - 1)
+
 -- | Collect all unique used extensions.
 addExtensions :: ParsedExtensions -> State Analysis ()
 addExtensions ParsedExtensions{..} = modify' $ over extensionsL
@@ -186,7 +203,8 @@ analyseHieFile hieFile@HieFile{..} cabalExts obs insIds = do
     -- get list of inspections for the file
     let inss = mapMaybe lookupInspectionById (toList insIds)
     -- get all observations by analysing ast
-    let allObservations = analyseAst hieFile fileInfoMergedExtensions inss
+    let rawObservations = analyseAst hieFile fileInfoMergedExtensions inss
+    let allObservations = S.filter (not . isInlineIgnored hieFile) rawObservations
     let (ignoredObs, fileInfoObservations) = S.partition ((`elem` obs) . observationId) allObservations
 
     incModulesNum

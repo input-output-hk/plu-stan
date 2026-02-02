@@ -120,6 +120,14 @@ data InspectionAnalysis
     | NonStrictLetMultiUse
     -- | 'valueOf' used in boolean comparisons.
     | ValueOfInComparison
+    -- | 'unsafeFromBuiltinData' used in comparisons for ledger hash-like types.
+    | UnsafeFromBuiltinDataInHashComparison
+    -- | 'currencySymbolValueOf' used on minted value in comparisons.
+    | CurrencySymbolValueOfOnMintedValue
+    -- | Misuse of validity interval / POSIX time range.
+    | ValidityIntervalMisuse
+    -- | Precision loss: division before multiplication (including via let/where).
+    | PrecisionLossDivisionBeforeMultiply
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

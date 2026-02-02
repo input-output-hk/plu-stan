@@ -160,7 +160,9 @@ library
                      , extensions ^>= 0.0.0.1 || ^>= 0.1.0.0
                      , filepath >= 1.4 && < 1.6
                      , ghc >= 8.8 && < 9.13
+                     , ghc-boot >= 8.8 && < 9.13
                      , ghc-boot-th >= 8.8 && < 9.13
+                     , ghc-paths
                      , gitrev ^>= 1.3.1
                      , microaeson ^>= 0.1.0.0
                      , optparse-applicative >= 0.15 && < 0.20
@@ -171,7 +173,6 @@ library
                      , trial ^>= 0.0.0.0
                      , trial-optparse-applicative ^>= 0.0.0.0
                      , trial-tomland ^>= 0.0.0.0
-                     , haskell-src-exts
                      -- This should be removed after the research is done
                      , pretty-show
                      , pretty-simple
@@ -184,6 +185,23 @@ executable stan
   hs-source-dirs:      app
   main-is:             Main.hs
   build-depends:       stan
+
+executable plustan
+  import:              common-options
+  hs-source-dirs:      app
+  main-is:             PluStan.hs
+  build-depends:       stan
+                     , colourista
+                     , containers >= 0.5 && < 0.9
+                     , directory
+                     , filepath
+                     , ghc >= 8.8 && < 9.13
+                     , ghc-boot >= 8.8 && < 9.13
+                     , ghc-paths
+                     , process
+                     , slist >= 0.1 && < 0.3
+                     , text
+                     , trial
 
 library target
   import:              common-options
@@ -206,6 +224,8 @@ library target
                        Target.Partial
                        Target.Style
                        Target.PlutusTx
+                       Target.ScriptContextBuilder
+                       Target.TestHelpers
 
 test-suite stan-test
   import:              common-options
@@ -229,12 +249,14 @@ test-suite stan-test
 
   build-depends:       stan
                      , containers
+                     , directory
                      , filepath
                      , ghc
                      , hedgehog >= 1.0 && < 1.6
                      , hspec >= 2.7 && < 2.12
                      , hspec-hedgehog >= 0.0.1.2
                      , optparse-applicative
+                     , process
                      , text
                      , tomland
                      , trial

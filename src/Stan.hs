@@ -11,7 +11,6 @@ module Stan
     , runStan
     , getAnalysis
     , getStanConfig
-    , removeOffchain
 
       -- ** Internal
     , createCabalExtensionsMap
@@ -25,7 +24,7 @@ import Trial (Trial (..), prettyTaggedTrial, prettyTrial, prettyTrialWith, trial
               whenResult_)
 
 import Stan.Analysis (Analysis (..), runAnalysis)
-import Stan.Analysis.Pretty (prettyShowAnalysis, isPlinthObservation)
+import Stan.Analysis.Pretty (prettyShowAnalysis)
 import Stan.Browse (openBrowser)
 import Stan.Cabal (createCabalExtensionsMap, usedCabalFiles)
 import Stan.Cli (CliToTomlArgs (..), InspectionArgs (..), ReportArgs (..), StanArgs (..),
@@ -46,10 +45,6 @@ import Stan.Severity (Severity (Error))
 import Stan.Toml (configCodec, getTomlConfig, usedTomlFiles)
 
 import qualified Toml
-import qualified Slist as Slist
-import qualified Data.Set as Set
-import Language.Haskell.Exts
-import Stan.FileInfo (FileInfo(..))
 
 
 run :: IO ()
@@ -88,52 +83,13 @@ getAnalysis StanArgs{..} notJson config hieFiles = do
     -- show what observations are ignored
     pure analysis
 
-isOnchainObservations :: Set FilePath -> Observation -> Bool
-isOnchainObservations files obs = Set.member (observationFile obs) files
-
-isFileOnchainContract :: FilePath -> IO Bool
-isFileOnchainContract file = do
-  result <- parseFile file
-  pure $ case result of
-    ParseOk (Module _ _ _ _ decls) -> any isOnchainModuleAnn decls
-    _otherwise -> False
-
-isOnchainModuleAnn :: Decl SrcSpanInfo -> Bool
-isOnchainModuleAnn (AnnPragma _ (ModuleAnn _ (Lit _ (String _ "onchain-contract" _)))) = True
-isOnchainModuleAnn (AnnPragma _ (ModuleAnn _ (Paren _ (ExpTypeSig _ (Lit _ (String _ "onchain-contract" _)) _)))) = True
-isOnchainModuleAnn _ = False
-
-onchainFiles :: [HieFile] -> IO (Set FilePath)
-onchainFiles hieFiles = do
-  let files = map hie_hs_file hieFiles
-  fromList <$> filterM isFileOnchainContract files
-
-onchainCondition :: Set FilePath -> Observation -> Bool
-onchainCondition contracts obs = not (isPlinthObservation obs) || isOnchainObservations contracts obs
-
-filterForOnchain :: Set FilePath -> FileInfo -> FileInfo
-filterForOnchain contracts info@FileInfo{..}= info {
-  fileInfoObservations = Slist.filter (onchainCondition contracts) fileInfoObservations }
-
--- TODO: remove IO and everything will be fine
-removeOffchain :: [HieFile] -> Analysis -> IO Analysis
-removeOffchain hieFiles analysis = do
-  contracts <- onchainFiles hieFiles
-  pure analysis {
-          analysisObservations = Slist.filter (onchainCondition contracts) (analysisObservations analysis)
-        , analysisFileMap = fmap (filterForOnchain contracts) (analysisFileMap analysis)
-        -- TODO: we might want to add those filtered observations to the ignored list
-        -- but i'm not sure if it's a good idea
-      }
-
 runStan :: StanArgs -> IO ()
 runStan stanArgs@StanArgs{..} = do
     let notJson = not stanArgsJsonOut
     (configTrial, useDefConfig, env) <- getStanConfig stanArgs notJson
     whenResult_ configTrial $ \warnings config -> do
         hieFiles <- readHieFiles stanArgsHiedir
-        --NOTE: this filter is applied only for CLI, hls will still show all observations
-        analysis <- getAnalysis stanArgs notJson config hieFiles >>= removeOffchain hieFiles
+        analysis <- getAnalysis stanArgs notJson config hieFiles
         -- show what observations are ignored
         when notJson $ putText $ indent $ prettyShowIgnoredObservations
             (configIgnored config)

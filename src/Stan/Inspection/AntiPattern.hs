@@ -57,6 +57,10 @@ module Stan.Inspection.AntiPattern
     , plustan07
     , plustan08
     , plustan09
+    , plustan10
+    , plustan11
+    , plustan12
+    , plustan16
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -80,6 +84,9 @@ import Stan.Core.ModuleName
 
 import qualified Data.List.NonEmpty as NE
 import qualified Stan.Category as Category
+
+withPlutusCategory :: Inspection -> Inspection
+withPlutusCategory = categoryL %~ (Category.plutus `NE.cons`)
 
 
 -- | All anti-pattern 'Inspection's map from 'Id's.
@@ -110,6 +117,10 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan07
     , plustan08
     , plustan09
+    , plustan10
+    , plustan11
+    , plustan12
+    , plustan16
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -430,24 +441,33 @@ stan0215 = mkAntiPatternInspection (Id "STAN-0215") "Slashes in paths" (FindAst 
         ||| PatternAstConstant (ContainStr "\\\\")
 
 plustan01 :: Inspection
-plustan01 = mkAntiPatternInspection (Id "PLU-STAN-01") "AssocMap unsafeFromList"
-    (FindAst $ PatternAstName unsafeFromListNameMeta (?))
-    & descriptionL .~ "Usage of 'unsafeFromList' can lead to runtime errors"
+plustan01 = mkAntiPatternInspection (Id "PLU-STAN-01") "Signature verification builtin usage must satisfy invariants"
+    (FindAst $ anyNamesToPatternAst verifySignatureNames)
+    & descriptionL .~ "Usage of 'verifyEd25519Signature', 'verifyEcdsaSecp256k1Signature', 'verifySchnorrSecp256k1Signature' must satisfy invariants."
     & solutionL .~
-        [ "{Extra dependency} Switch to ?????"
+        [ "Ensure the signature satisfies the invariants of the signature scheme"
+        , "direct correspondence between the message hash and the message must be verified onchain"
+        , "message should include mechanism to prevent replay"
         ]
+    & withPlutusCategory
     & severityL .~ Performance
   where
-    unsafeFromListNameMeta :: NameMeta
-    unsafeFromListNameMeta = "unsafeFromList" `plutusTxNameFrom` "PlutusTx.AssocMap"
+    verifySignatureNames :: NonEmpty NameMeta
+    verifySignatureNames = NE.fromList
+        [ name `plutusTxNameFrom` modName
+        | modName <- ["PlutusTx.Prelude", "PlutusTx.Builtins", "PlutusTx.Builtins.Internal"]
+        , name <- ["verifyEd25519Signature", "verifyEcdsaSecp256k1Signature", "verifySchnorrSecp256k1Signature"]
+        ]
 
 plustan02 :: Inspection
 plustan02 = mkAntiPatternInspection (Id "PLU-STAN-02") "PlutusTx.UnsafeFromData unsafeFromBuiltinData"
     (FindAst $ PatternAstName unsafeFromBuiltinDataNameMeta (?))
-    & descriptionL .~ "Usage of 'unsafeFromBuiltinData' can lead to unexpected behavior"
+    & descriptionL .~ "Usage of 'unsafeFromBuiltinData' Potential unbounded datum spam attack; also just generally converting to SOP is extremely inefficient."
     & solutionL .~
-        [ "{Extra dependency} Switch to ?????"
+        [ "Prefer working with BuiltinData directly"
+        , "in edge-cases where you do benefit from SOP conversion use explicit custom transformation functions that perform integrity checks and conversion."
         ]
+    & withPlutusCategory
     & severityL .~ Performance
   where
     unsafeFromBuiltinDataNameMeta :: NameMeta
@@ -463,6 +483,7 @@ plustan03 = mkAntiPatternInspection (Id "PLU-STAN-03") "No usage of Optional typ
         [ "Use fast-fail variants such as `tryFind` instead of `find`",
           "or variants that hanfle the other-case through a continuation function"
         ]
+    & withPlutusCategory
     & severityL .~ Warning
   where
     useOfFromMaybe :: NameMeta
@@ -474,6 +495,7 @@ plustan04 = mkAntiPatternInspection (Id "PLU-STAN-04") "Usage of eq instance of 
     & descriptionL .~ "Usage of eq instance of script-hash / pubkeyhash / payment credential "
     & solutionL .~
         [ "Potential staking value theft might want to prefer eq comparison of address" ]
+    & withPlutusCategory
     & severityL .~ Warning
   where
 
@@ -513,6 +535,7 @@ plustan05 = mkAntiPatternInspection (Id "PLU-STAN-05") "Higher-order helpers in 
         [ "Rewrite using a specialized recursive function"
         , "Inline the predicate and avoid higher-order helpers"
         ]
+    & withPlutusCategory
     & severityL .~ Performance
   where
     higherOrderNames :: NonEmpty NameMeta
@@ -553,6 +576,7 @@ plustan06 = mkAntiPatternInspection (Id "PLU-STAN-06") "Multiple list traversals
         [ "Fuse the traversals into a single recursive function"
         , "Use a specialized helper that combines the traversal logic"
         ]
+    & withPlutusCategory
     & severityL .~ Performance
   where
     nestedTraversalPat :: PatternAst
@@ -651,6 +675,7 @@ plustan07 = mkAntiPatternInspection (Id "PLU-STAN-07") "Guard syntax in on-chain
         [ "Rewrite guards using if-then-else"
         , "Use lower-level conditional logic"
         ]
+    & withPlutusCategory
     & severityL .~ Performance
 
 plustan08 :: Inspection
@@ -661,6 +686,7 @@ plustan08 = mkAntiPatternInspection (Id "PLU-STAN-08") "Non-strict let binding u
         [ "Make the binding strict using a bang pattern"
         , "Refactor to share the recursion explicitly"
         ]
+    & withPlutusCategory
     & severityL .~ Performance
 
 plustan09 :: Inspection
@@ -671,4 +697,50 @@ plustan09 = mkAntiPatternInspection (Id "PLU-STAN-09") "valueOf in boolean condi
         [ "Use a bounded token check or a stronger value-level comparison"
         , "Consider 'valueEq' when comparing full values"
         ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan10 :: Inspection
+plustan10 = mkAntiPatternInspection (Id "PLU-STAN-10") "Unvalidated hashes from BuiltinData in equality comparisons"
+    UnsafeFromBuiltinDataInHashComparison
+    & descriptionL .~ "Using equality (==) to compare Address/ScriptHash/PubKeyHash/Credential values obtained via 'unsafeFromBuiltinData' (directly or through pattern binding) can create unsatisfiable constraints if ledger invariants are not enforced (e.g. hash length)."
+    & solutionL .~
+        [ "Validate ledger invariants on the underlying BuiltinData before using it in fulfillment criteria (e.g. check hash bytestring length is 28)"
+        , "Prefer constructing expected outputs and comparing them against actual outputs, or explicitly check structural and per-field integrity and ledger invariants"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan11 :: Inspection
+plustan11 = mkAntiPatternInspection (Id "PLU-STAN-11") "currencySymbolValueOf usage"
+    CurrencySymbolValueOfOnMintedValue
+    & descriptionL .~ "The 'currencySymbolValueOf' function should not be used. It does not enforce that all entries in the value are strictly positive or negative, which can allow mixed mint/burn within the same transaction, making burn-only checks insufficient."
+    & solutionL .~
+        [ "Avoid using 'currencySymbolValueOf'"
+        , "If checking mint/burn, validate that all token amounts under the currency symbol are strictly negative (for burns) or strictly positive (for mints)"
+        , "Consider checking the full minted value structure, not just the sum for a symbol"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan12 :: Inspection
+plustan12 = mkAntiPatternInspection (Id "PLU-STAN-12") "Validity interval / POSIX time misuse"
+    ValidityIntervalMisuse
+    & descriptionL .~ "Using validity interval utilities or accessing 'txInfoValidRange' without ensuring a finite lower or upper bound can lead to unbounded time windows."
+    & solutionL .~
+        [ "Avoid using validity interval utilities like 'from', 'to', 'interval', or 'always' in checks"
+        , "When using 'txInfoValidRange', ensure either the lower or upper bound is 'Finite'"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan16 :: Inspection
+plustan16 = mkAntiPatternInspection (Id "PLU-STAN-16") "Precision loss: division before multiplication"
+    PrecisionLossDivisionBeforeMultiply
+    & descriptionL .~ "Division before multiplication in integer arithmetic can cause precision loss. Multiply first, then divide."
+    & solutionL .~
+        [ "Multiply before dividing to delay rounding"
+        , "Rewrite (a `div` b) * c as (a * c) `div` b"
+        ]
+    & withPlutusCategory
     & severityL .~ Warning
