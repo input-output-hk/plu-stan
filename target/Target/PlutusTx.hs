@@ -4,12 +4,13 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module Target.PlutusTx where
 
 import PlutusTx qualified as Tx
 import PlutusTx.Builtins.HasOpaque qualified as BI
-import PlutusTx.Builtins.Internal qualified as BIInternal
+import PlutusTx.Builtins.Internal qualified as BI
 import PlutusTx.Foldable qualified as TxFoldable
 import PlutusTx.Maybe qualified as Maybe
 import PlutusTx.List qualified as TxList
@@ -217,14 +218,14 @@ currencySymbolValueOfMintedValue ctx =
 
 unvalidatedPubKeyHashEqFromBuiltinData :: Bool
 unvalidatedPubKeyHashEqFromBuiltinData =
-  Tx.unsafeFromBuiltinData (BIInternal.mkB (BI.stringToBuiltinByteStringHex "deadbeef")) == pubKeyHash
+  Tx.unsafeFromBuiltinData (BI.mkB (BI.stringToBuiltinByteStringHex "deadbeef")) == pubKeyHash
   where
     pubKeyHash :: PubKeyHash
     pubKeyHash = PubKeyHash (BI.stringToBuiltinByteStringHex "deadbeef")
 
 unvalidatedScriptHashEqFromBuiltinData :: Bool
 unvalidatedScriptHashEqFromBuiltinData =
-  Tx.unsafeFromBuiltinData (BIInternal.mkB (BI.stringToBuiltinByteStringHex "deadbeef")) == scriptHash
+  Tx.unsafeFromBuiltinData (BI.mkB (BI.stringToBuiltinByteStringHex "deadbeef")) == scriptHash
   where
     scriptHash :: ScriptHash
     scriptHash = ScriptHash (BI.stringToBuiltinByteStringHex "deadbeef")
@@ -499,3 +500,87 @@ precisionLossWhere a b c = multResult
   where
     divResult = a `div` b
     multResult = divResult * c
+
+strictBangArgMultiUseWhere :: Integer
+strictBangArgMultiUseWhere = go ([1, 2, 3] :: [Integer])
+  where
+    go :: [Integer] -> Integer
+    go !xs = TxFoldable.length xs + TxFoldable.length xs
+
+multiUseLazyArgBindingWhere :: Integer
+multiUseLazyArgBindingWhere = go ([1, 2, 3] :: [Integer])
+  where
+    go :: [Integer] -> Integer
+    go xs = TxFoldable.length xs + TxFoldable.length xs
+
+pluStan08OracleLikeCredStrictLet :: Integer
+pluStan08OracleLikeCredStrictLet = go 1
+  where
+    go :: Integer -> Integer
+    go x =
+      let !cred = (x, x + 1)
+      in if fst cred == 1 then fst cred else snd cred
+
+pluStan08OracleLikeCredLazyLet :: Integer
+pluStan08OracleLikeCredLazyLet = go 1
+  where
+    go :: Integer -> Integer
+    go !x =
+      let !cred = (x, x + 1)
+      in if fst cred == 1 then fst cred else snd cred
+
+{-# INLINE plutStan08GetOracle #-}
+plutStan08GetOracle ::
+  BI.BuiltinByteString
+  -- oracle minting currency symbol
+  -> BuiltinData 
+  -> BI.BuiltinList BuiltinData
+  -> BuiltinData 
+plutStan08GetOracle b_oracleSym tref = go
+  where
+    go :: BI.BuiltinList BuiltinData -> BuiltinData
+    go l =
+      let !infoFields = BI.snd $ BI.unsafeDataAsConstr (BI.head l) -- error if l is null
+          tInfoRef = BI.head infoFields
+          r_txout = BI.head $ BI.tail infoFields
+          !txout_fields = BI.snd $ BI.unsafeDataAsConstr r_txout
+      in BI.ifThenElse (BI.equalsData tInfoRef tref)
+         (\_ ->
+             let r_v = BI.head $ BI.tail txout_fields
+                 r_addr = BI.head txout_fields
+                 !cred = BI.unsafeDataAsConstr $ BI.head $ BI.snd $ BI.unsafeDataAsConstr r_addr
+             in BI.ifThenElse (BI.equalsInteger (BI.fst cred) 1)
+                (\_ -> BI.head $ BI.snd cred)
+                (\_ -> error "retrieveOracleHash: only one script input expected or NFT token missing !!!")
+                BI.unitval
+         )
+         (\_ -> go (BI.tail l))
+         BI.unitval
+
+{-# INLINE plutStan08GetOracleTrigger #-}
+plutStan08GetOracleTrigger ::
+  BI.BuiltinByteString
+  -- oracle minting currency symbol
+  -> BuiltinData 
+  -> BI.BuiltinList BuiltinData
+  -> BuiltinData 
+plutStan08GetOracleTrigger b_oracleSym tref = go
+  where
+    go :: BI.BuiltinList BuiltinData -> BuiltinData
+    go l =
+      let !infoFields = BI.snd $ BI.unsafeDataAsConstr (BI.head l) -- error if l is null
+          tInfoRef = BI.head infoFields
+          r_txout = BI.head $ BI.tail infoFields
+          !txout_fields = BI.snd $ BI.unsafeDataAsConstr r_txout
+      in BI.ifThenElse (BI.equalsData tInfoRef tref)
+         (\_ ->
+             let r_v = BI.head $ BI.tail txout_fields
+                 r_addr = BI.head txout_fields
+                 cred = BI.unsafeDataAsConstr $ BI.head $ BI.snd $ BI.unsafeDataAsConstr r_addr
+             in BI.ifThenElse (BI.equalsInteger (BI.fst cred) 1)
+                (\_ -> BI.head $ BI.snd cred)
+                (\_ -> error "retrieveOracleHash: only one script input expected or NFT token missing !!!")
+                BI.unitval
+         )
+         (\_ -> go (BI.tail l))
+         BI.unitval
