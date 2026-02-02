@@ -4,23 +4,27 @@ Reference for common Plu-Stan checks and why they matter. Each item highlights t
 
 ## Contents
 
-- [Data Handling & Deserialization](#data-handling--deserialization)
-- [Value Handling](#value-handling)
-- [Equality](#equality)
-- [Optional Types](#optional-types)
-- [Higher-Order Functions](#higher-order-functions)
-- [Bindings](#bindings)
-- [Guards](#guards)
-- [Integers](#integers)
-- [Tooling](#tooling)
-- [Validity Interval / POSIX Time Misuse](#validity-interval--posix-time-misuse)
+- [Plinth Smart Contract Development - Static Analysis Checks](#plinth-smart-contract-development---static-analysis-checks)
+  - [Contents](#contents)
+  - [Data Handling \& Deserialization](#data-handling--deserialization)
+  - [Value Handling](#value-handling)
+  - [Equality](#equality)
+  - [Optional Types](#optional-types)
+  - [Higher-Order Functions](#higher-order-functions)
+  - [Bindings](#bindings)
+  - [Guards](#guards)
+  - [Integers](#integers)
+  - [Tooling](#tooling)
+  - [Validity Interval / POSIX Time Misuse](#validity-interval--posix-time-misuse)
 
 ## Data Handling & Deserialization
 
+- **Signature verification builtins:** Usage of `verifyEd25519Signature`, `verifyEcdsaSecp256k1Signature`, or `verifySchnorrSecp256k1Signature` must satisfy invariants. Ensure direct on-chain verification of message hash correspondence and include replay prevention mechanisms. (**Stan:** implemented via `PLU-STAN-01`)
+<!-- - **`unsafeFromList` (AssocMap):** Using `AssocMap.unsafeFromList` without validation can cause script failure at runtime if the list contains duplicate keys. (**Stan:** not yet implemented) -->
 - **`unsafeFromBuiltinData`:** Potential unbounded datum spam attack. Warn users and either: (**Stan:** implemented via `PLU-STAN-02`)
   1. Construct the expected output datum and assert the actual output datum matches it (enforces structural integrity by construction).
   2. Explicitly check structural integrity via a custom `checkIntegrity` that verifies field counts and per-field integrity in the underlying `BuiltinData`.
-- **PubKeyHash/ScriptHash in fulfillment criteria without verifying ledger invariants:** Potential unsatisfiable constraints.
+- **PubKeyHash/ScriptHash in fulfillment criteria without verifying ledger invariants:** Potential unsatisfiable constraints. (**Stan:** implemented via `PLU-STAN-10`)
   - *Example:* lender-chosen `repaymentAddress` in a lending validator.
   ```haskell
   lendingValidator :: ScriptContext -> ()
@@ -162,7 +166,7 @@ isMaybeStakingCredential' b =
   -- Or SOP-style
   outAda = snd $ head $ M.toList $ snd $ head (M.toList $ getValue outVal)
   ```
-- **`currencySymbolValueOf` on minted value:** Potential unauthorized minting attack (common in `Burn` redeemers).
+- **`currencySymbolValueOf` on minted value:** Potential unauthorized minting attack (common in `Burn` redeemers). (**Stan:** implemented via `PLU-STAN-11`)
   ```haskell
   ourMintingPolicy :: ScriptContext -> BuiltinUnit
   ourMintingPolicy ctx =
@@ -233,6 +237,20 @@ isMaybeStakingCredential' b =
           then i
           else go rest
   ```
+- **Multiple/nested list traversals:** Composing list traversals (e.g., `map` over `filter`) forces multiple passes over the data, increasing execution costs. (**Stan:** implemented via `PLU-STAN-06`)
+  - **Bad:**
+  ```haskell
+  processedList = map transform $ filter predicate inputList
+  ```
+  - **Good:**
+  ```haskell
+  processedList = go inputList
+    where
+      go [] = []
+      go (x:xs) = if predicate x
+                  then transform x : go xs
+                  else go xs
+  ```
 
 ## Bindings
 
@@ -254,6 +272,17 @@ isMaybeStakingCredential' b =
 ## Integers
 
 - **Unconstrained integers:** Attackers can supply negative or out-of-range values. Add explicit range checks (for example, `x > 0`) and prefer newtypes that enforce invariants (such as `Natural`). (**Stan:** not implemented)
+- **Division before multiplication:** Division before multiplication in integer arithmetic causes precision loss due to rounding. Always multiply first, then divide. (**Stan:** implemented via `PLU-STAN-16`)
+  - **Bad:**
+  ```haskell
+  calculateFee amount rate =
+    (amount `divide` 1000) * rate  -- Loses precision from early division
+  ```
+  - **Good:**
+  ```haskell
+  calculateFee amount rate =
+    (amount * rate) `divide` 1000  -- Preserves precision by multiplying first
+  ```
 
 ## Tooling
 
@@ -261,5 +290,5 @@ isMaybeStakingCredential' b =
 
 ## Validity Interval / POSIX Time Misuse
 
-- **Detector:** Flags use of validity interval utilities (e.g. `from`, `to`, `interval`, `always`, `contains`, `member`) or any use of `txInfoValidRange` that does not ensure either the lower or upper bound is `Finite`. (**Stan:** implemented)
+- **Detector:** Flags use of validity interval utilities (e.g. `from`, `to`, `interval`, `always`, `contains`, `member`) or any use of `txInfoValidRange` that does not ensure either the lower or upper bound is `Finite`. (**Stan:** implemented via `PLU-STAN-12`)
 - **Risk:** Unbounded ranges can undermine intended timeboxing logic.

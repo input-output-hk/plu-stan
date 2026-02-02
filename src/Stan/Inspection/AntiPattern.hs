@@ -450,7 +450,7 @@ plustan01 = mkAntiPatternInspection (Id "PLU-STAN-01") "Signature verification b
         , "message should include mechanism to prevent replay"
         ]
     & withPlutusCategory
-    & severityL .~ Performance
+    & severityL .~ Warning
   where
     verifySignatureNames :: NonEmpty NameMeta
     verifySignatureNames = NE.fromList

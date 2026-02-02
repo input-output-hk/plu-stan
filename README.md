@@ -15,7 +15,7 @@ Plu-Stan is a [Plinth](https://github.com/input-output-hk/plutus) **ST**atic **A
   - [What this tool is about](#what-this-tool-is-about)
   - [Rules](#rules)
   - [Usage](#usage)
-    - [Building & Running](#building--running)
+    - [Building \& Running](#building--running)
     - [Running tests](#running-tests)
     - [Haskell language server integration](#haskell-language-server-integration)
   - [Contributing](#contributing)
@@ -41,18 +41,25 @@ On top of all the rules provided by Stan, Plu-Stan implements its own set of rul
 - **Security**: rules that catch common security issues in Plinth code.
 - **Performance**: rules that suggest performance improvements specific to Plinth.
 
-So far, Plu-Stan implements the following rules:
-| ID          | Name                                                 | Category    | Severity  |
-|-------------|------------------------------------------------------|-------------|-----------|
-| PLU-STAN-01 | Usage of 'unsafeFromList' can lead to runtime errors | Security    | High      |
-| PLU-STAN-02 | Usage of 'unsafeFromBuiltinData' can lead to unexpected behavior | Security    | High      |
-| PLU-STAN-03 | Usage of Optional types in on chain code. |           | Security    | Medium    |
-| PLU-STAN-04 | Usage of 'eq instance' on script hash, public key hash and payment credential | Security    | Medium    |
-| PLU-STAN-05 | Usage of higher-order helpers like 'all', 'any', and 'find' in on-chain code | Performance | Medium    |
-| PLU-STAN-06 | Multiple list traversals in on-chain code | Performance | Medium    |
-| PLU-STAN-07 | Guard syntax in on-chain code | Performance | Medium    |
-| PLU-STAN-08 | Non-strict let binding used multiple times | Performance | Medium    |
-| PLU-STAN-09 | valueOf in boolean conditions | Security    | Medium    |
+So far, Plu-Stan implements the following automated detection rules:
+
+| ID          | Name                                                    | Severity    | Description |
+|-------------|------------------------------------------------------|-------------|-------------|
+| PLU-STAN-01 | Signature verification builtin usage must satisfy invariants | Warning | Using `verifyEd25519Signature`, `verifyEcdsaSecp256k1Signature`, or `verifySchnorrSecp256k1Signature` requires direct on-chain verification of message hash correspondence and replay prevention mechanisms |
+| PLU-STAN-02 | Usage of `unsafeFromBuiltinData` | Performance | Using `unsafeFromBuiltinData` without integrity checks can lead to unbounded datum spam attacks |
+| PLU-STAN-03 | Usage of Optional types in on-chain code | Warning     | Using `Maybe` or `Either` types is an anti-pattern; prefer fast-fail variants or continuation functions |
+| PLU-STAN-04 | Equality/comparison on PubKeyHash, ScriptHash, or Credential | Warning     | Comparing only credentials (not full addresses) can lead to staking value theft; prefer equality on full `Address` |
+| PLU-STAN-05 | Usage of higher-order list helpers | Performance | Higher-order functions like `filter`, `any`, `all`, `find` are inefficient in on-chain code; prefer specialized recursive functions |
+| PLU-STAN-06 | Multiple list traversals in on-chain code | Performance | Nested list operations (e.g., `map` over `filter`) cause redundant iterations and increase execution costs |
+| PLU-STAN-07 | Guard syntax in on-chain code | Performance | Guard syntax produces inefficient UPLC; prefer `if-then-else` or lower-level conditionals |
+| PLU-STAN-08 | Non-strict let binding used multiple times | Performance | Non-strict bindings used multiple times cause repeated evaluation; make bindings strict with bang patterns |
+| PLU-STAN-09 | `valueOf` in equality comparisons | Warning     | Using `valueOf` with `adaSymbol` and `adaToken` in comparisons can be unsafe if the token set is unbounded |
+| PLU-STAN-10 | Unvalidated hashes from BuiltinData in comparisons | Warning     | Comparing Address/ScriptHash/PubKeyHash/Credential from `unsafeFromBuiltinData` without validating ledger invariants can create unsatisfiable constraints |
+| PLU-STAN-11 | Usage of `currencySymbolValueOf` | Warning     | Does not enforce that all token amounts are strictly positive or negative; allows mixed mint/burn in the same transaction |
+| PLU-STAN-12 | Validity interval / POSIX time misuse | Warning     | Using validity interval utilities or accessing `txInfoValidRange` without ensuring finite bounds can lead to unbounded time windows |
+| PLU-STAN-16 | Precision loss: division before multiplication | Warning     | Division before multiplication in integer arithmetic causes precision loss; multiply first, then divide |
+
+For comprehensive guidelines on Plinth security patterns, anti-patterns, and best practices, see the [**Rules Documentation**](./rules.md). This includes detailed explanations of the above rules plus additional security considerations not yet automated.
 
 ## Usage
 [[Back to the Table of Contents] ↑](#table-of-contents)
