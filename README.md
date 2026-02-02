@@ -15,7 +15,7 @@ Plu-Stan is a [Plinth](https://github.com/input-output-hk/plutus) **ST**atic **A
   - [What this tool is about](#what-this-tool-is-about)
   - [Rules](#rules)
   - [Usage](#usage)
-    - [Building & Running](#building--running)
+    - [Building \& Running](#building--running)
     - [Running tests](#running-tests)
     - [Haskell language server integration](#haskell-language-server-integration)
   - [Contributing](#contributing)
@@ -45,7 +45,7 @@ So far, Plu-Stan implements the following automated detection rules:
 
 | ID          | Name                                                    | Severity    | Description |
 |-------------|------------------------------------------------------|-------------|-------------|
-| PLU-STAN-01 | Signature verification builtin usage must satisfy invariants | Performance | Using `verifyEd25519Signature`, `verifyEcdsaSecp256k1Signature`, or `verifySchnorrSecp256k1Signature` requires direct on-chain verification of message hash correspondence and replay prevention mechanisms |
+| PLU-STAN-01 | Signature verification builtin usage must satisfy invariants | Warning | Using `verifyEd25519Signature`, `verifyEcdsaSecp256k1Signature`, or `verifySchnorrSecp256k1Signature` requires direct on-chain verification of message hash correspondence and replay prevention mechanisms |
 | PLU-STAN-02 | Usage of `unsafeFromBuiltinData` | Performance | Using `unsafeFromBuiltinData` without integrity checks can lead to unbounded datum spam attacks |
 | PLU-STAN-03 | Usage of Optional types in on-chain code | Warning     | Using `Maybe` or `Either` types is an anti-pattern; prefer fast-fail variants or continuation functions |
 | PLU-STAN-04 | Equality/comparison on PubKeyHash, ScriptHash, or Credential | Warning     | Comparing only credentials (not full addresses) can lead to staking value theft; prefer equality on full `Address` |

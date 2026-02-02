@@ -4,21 +4,23 @@ Reference for common Plu-Stan checks and why they matter. Each item highlights t
 
 ## Contents
 
-- [Data Handling & Deserialization](#data-handling--deserialization)
-- [Value Handling](#value-handling)
-- [Equality](#equality)
-- [Optional Types](#optional-types)
-- [Higher-Order Functions](#higher-order-functions)
-- [Bindings](#bindings)
-- [Guards](#guards)
-- [Integers](#integers)
-- [Tooling](#tooling)
-- [Validity Interval / POSIX Time Misuse](#validity-interval--posix-time-misuse)
+- [Plinth Smart Contract Development - Static Analysis Checks](#plinth-smart-contract-development---static-analysis-checks)
+  - [Contents](#contents)
+  - [Data Handling \& Deserialization](#data-handling--deserialization)
+  - [Value Handling](#value-handling)
+  - [Equality](#equality)
+  - [Optional Types](#optional-types)
+  - [Higher-Order Functions](#higher-order-functions)
+  - [Bindings](#bindings)
+  - [Guards](#guards)
+  - [Integers](#integers)
+  - [Tooling](#tooling)
+  - [Validity Interval / POSIX Time Misuse](#validity-interval--posix-time-misuse)
 
 ## Data Handling & Deserialization
 
 - **Signature verification builtins:** Usage of `verifyEd25519Signature`, `verifyEcdsaSecp256k1Signature`, or `verifySchnorrSecp256k1Signature` must satisfy invariants. Ensure direct on-chain verification of message hash correspondence and include replay prevention mechanisms. (**Stan:** implemented via `PLU-STAN-01`)
-- **`unsafeFromList` (AssocMap):** Using `AssocMap.unsafeFromList` without validation can cause script failure at runtime if the list contains duplicate keys. (**Stan:** not yet implemented)
+<!-- - **`unsafeFromList` (AssocMap):** Using `AssocMap.unsafeFromList` without validation can cause script failure at runtime if the list contains duplicate keys. (**Stan:** not yet implemented) -->
 - **`unsafeFromBuiltinData`:** Potential unbounded datum spam attack. Warn users and either: (**Stan:** implemented via `PLU-STAN-02`)
   1. Construct the expected output datum and assert the actual output datum matches it (enforces structural integrity by construction).
   2. Explicitly check structural integrity via a custom `checkIntegrity` that verifies field counts and per-field integrity in the underlying `BuiltinData`.
