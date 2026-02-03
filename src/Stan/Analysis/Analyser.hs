@@ -22,11 +22,12 @@ import Stan.Core.List (nonRepeatingPairs)
 import Stan.Core.ModuleName (ModuleName (..))
 import Stan.FileInfo (isExtensionDisabled)
 import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, nameOccName, occNameString, srcSpanEndCol,
-                        srcSpanEndLine, srcSpanStartCol, srcSpanStartLine, isExternalName)
+                        srcSpanEndLine, srcSpanStartCol, srcSpanStartLine, isExternalName, IfaceTyCon (..))
 import Stan.Hie (eqAst, slice)
 import Stan.Hie.Compat (ContextInfo (..), HieAST (..), HieASTs (..), HieFile (..),
-                        Identifier, IdentifierDetails (..), NodeAnnotation, NodeInfo (..),
-                        TypeIndex, mkNodeAnnotation, nodeInfo, toNodeAnnotation)
+                        HieArgs (..), HieType (..), HieTypeFlat, Identifier, IdentifierDetails (..),
+                        NodeAnnotation, NodeInfo (..), TypeIndex, mkNodeAnnotation, nodeInfo,
+                        toNodeAnnotation)
 import Stan.Hie.MatchAst (hieMatchPatternAst)
 import Stan.Hie.MatchType (hieMatchPatternType)
 import Stan.Inspection (Inspection (..), InspectionAnalysis (..))
@@ -40,8 +41,9 @@ import Stan.Pattern.Ast (Literal (..), PatternAst (..), anyNamesToPatternAst, ap
 import Stan.Pattern.Edsl (PatternBool (..))
 import Stan.Pattern.Type (PatternType, (|::))
 
-import Data.Char (isAlphaNum, isLower, isSpace)
+import Data.Char (isAlphaNum, isLower, isSpace, toLower)
 import qualified Data.ByteString.Char8 as BS8
+import qualified Data.Array as Arr
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Slist as S
@@ -80,6 +82,7 @@ createVisitor hie exts inspections = Visitor $ \node ->
         CurrencySymbolValueOfOnMintedValue -> analyseCurrencySymbolValueOfOnMintedValue inspectionId hie node
         ValidityIntervalMisuse -> analyseValidityIntervalMisuse inspectionId hie node
         PrecisionLossDivisionBeforeMultiply -> analysePrecisionLossDivisionBeforeMultiply inspectionId hie node
+        RedeemerSuppliedIndicesUniqueness -> analyseRedeemerSuppliedIndicesUniqueness inspectionId hie node
 
 {- | Check for big tuples (size >= 4) in the following places:
 
@@ -1955,6 +1958,395 @@ analyseUnsafeFromBuiltinDataInHashComparison insId hie curNode =
         let nonOpChildren = filter (not . nodeHasEqOpName) (nodeChildren node)
         in listToMaybe nonOpChildren
 
+
+analyseRedeemerSuppliedIndicesUniqueness
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseRedeemerSuppliedIndicesUniqueness insId hie curNode =
+    addObservations $ mkObservation insId hie <$> matchNode curNode
+  where
+    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchNode node =
+        let direct = case indexingCall node of
+                Nothing -> mempty
+                Just (indexSpan, arg1, arg2) ->
+                    let triggers =
+                            indexArgIsFromMultiIndexRedeemer arg1
+                                || indexArgIsFromMultiIndexRedeemer arg2
+                    in memptyIfFalse (triggers && not (hasUniquenessMarker indexSpan)) (S.one indexSpan)
+            viaMap = case mapCall node of
+                Nothing -> mempty
+                Just (funArg, indicesArg)
+                    | indicesContainerFromRedeemer indicesArg ->
+                        let spans = collectIndexingSpans funArg
+                        in S.slist $ filter (not . hasUniquenessMarker) spans
+                    | otherwise -> mempty
+        in direct <> viaMap
+
+    indexingCall :: HieAST TypeIndex -> Maybe (RealSrcSpan, HieAST TypeIndex, HieAST TypeIndex)
+    indexingCall node =
+        hsAppIndexingCall node <|> opAppIndexingCall node
+      where
+        hsAppIndexingCall n = do
+            guard $ nodeHasAnnotation hsAppAnnotation n
+            let (headNode, args) = appSpine n
+            a1 <- args !!? 0
+            a2 <- args !!? 1
+            guard $ nodeIsIndexingFunction headNode || callArgsLookIndexing a1 a2
+            pure (nodeSpan n, a1, a2)
+
+        opAppIndexingCall n = do
+            guard $ nodeHasAnnotation opAppAnnotation n
+            lhsNode:opNode:rhsNode:_ <- Just $ nodeChildren n
+            guard $ nodeIsIndexingFunction opNode || callArgsLookIndexing lhsNode rhsNode
+            pure (nodeSpan n, lhsNode, rhsNode)
+
+        callArgsLookIndexing :: HieAST TypeIndex -> HieAST TypeIndex -> Bool
+        callArgsLookIndexing a b =
+            (nodeTypeIsInteger a && nodeTypeIsList b)
+                || (nodeTypeIsList a && nodeTypeIsInteger b)
+
+    nodeIsIndexingFunction :: HieAST TypeIndex -> Bool
+    nodeIsIndexingFunction node =
+        any typeIndexIsIndexingFunction (nodeTypeIndices node)
+      where
+        typeIndexIsIndexingFunction :: TypeIndex -> Bool
+        typeIndexIsIndexingFunction ix = case funTwoArgs ix of
+            Just (a1, a2) ->
+                (typeIndexRootTyConName a1 == Just "Integer" && typeIndexIsList a2)
+                    || (typeIndexIsList a1 && typeIndexRootTyConName a2 == Just "Integer")
+            Nothing -> False
+
+        funTwoArgs :: TypeIndex -> Maybe (TypeIndex, TypeIndex)
+        funTwoArgs ix = do
+            (a1, res1) <- funArgRes ix
+            (a2, _res2) <- funArgRes res1
+            pure (a1, a2)
+
+        funArgRes :: TypeIndex -> Maybe (TypeIndex, TypeIndex)
+        funArgRes ix = case hie_types hie Arr.! peelTypeIndex ix of
+            HFunTy _ a b -> Just (a, b)
+            _ -> Nothing
+
+        peelTypeIndex :: TypeIndex -> TypeIndex
+        peelTypeIndex ix = case hie_types hie Arr.! ix of
+            HForAllTy _ inner -> peelTypeIndex inner
+            HQualTy _ inner -> peelTypeIndex inner
+            _ -> ix
+
+        typeIndexIsList :: TypeIndex -> Bool
+        typeIndexIsList ix = case typeIndexRootTyConName ix of
+            -- In `.hie` types, the list type constructor can show up as either
+            -- `[]` or `List` depending on how GHC renders it.
+            Just "[]" -> True
+            Just "List" -> True
+            Just "BuiltinList" -> True
+            _ -> False
+
+        typeIndexRootTyConName :: TypeIndex -> Maybe String
+        typeIndexRootTyConName ix = case hie_types hie Arr.! peelTypeIndex ix of
+            HTyConApp IfaceTyCon{ifaceTyConName = tyConName} _ ->
+                Just $ occNameString $ nameOccName tyConName
+            _ -> Nothing
+
+    indexArgIsFromMultiIndexRedeemer :: HieAST TypeIndex -> Bool
+    indexArgIsFromMultiIndexRedeemer node =
+        subtreeUsesAnyName indexValueBindings node
+            || (subtreeHasAnyOccName ["indexByteString"] node
+                    && (subtreeHasAnyOccName redeemerDecodeIndicators node || subtreeUsesAnyName indexContainerBindings node))
+            || (subtreeHasIndexingCall node
+                    && (subtreeHasAnyOccName redeemerDecodeIndicators node || subtreeUsesAnyName indexContainerBindings node))
+
+    redeemerDecodeIndicators :: [String]
+    redeemerDecodeIndicators =
+        [ "unsafeFromBuiltinData"
+        , "fromBuiltinData"
+        , "unsafeDataAsB"
+        , "unsafeDataAsList"
+        , "unsafeDataAsConstr"
+        ]
+
+    subtreeHasIndexingCall :: HieAST TypeIndex -> Bool
+    subtreeHasIndexingCall = go
+      where
+        go n@Node{nodeChildren = children} =
+            isJust (indexingCall n) || any go children
+
+    mapCall :: HieAST TypeIndex -> Maybe (HieAST TypeIndex, HieAST TypeIndex)
+    mapCall node = do
+        guard $ nodeHasAnnotation hsAppAnnotation node
+        let (headNode, args) = appSpine node
+        guard $ nodeHasAnyOccName ["map"] headNode
+        fn <- args !!? 0
+        xs <- args !!? 1
+        pure (fn, xs)
+
+    collectIndexingSpans :: HieAST TypeIndex -> [RealSrcSpan]
+    collectIndexingSpans = go
+      where
+        go n@Node{nodeChildren = children} =
+            let here = case indexingCall n of
+                    Just (indexSpan, arg1, arg2)
+                        | (nodeTypeIsList arg1 && isVariableUse arg2)
+                          || (nodeTypeIsList arg2 && isVariableUse arg1) ->
+                            [indexSpan]
+                    _ -> []
+            in here <> concatMap go children
+
+    nodeTypeIsList :: HieAST TypeIndex -> Bool
+    nodeTypeIsList node =
+        any typeIndexIsList (nodeTypeIndices node)
+      where
+        typeIndexIsList ix = case hie_types hie Arr.! ix of
+            HForAllTy _ inner -> typeIndexIsList inner
+            HQualTy _ inner -> typeIndexIsList inner
+            HTyConApp IfaceTyCon{ifaceTyConName = tyConName} _ ->
+                let n = occNameString $ nameOccName tyConName
+                in n == "[]" || n == "List" || n == "BuiltinList"
+            _ -> False
+
+    nodeTypeIsInteger :: HieAST TypeIndex -> Bool
+    nodeTypeIsInteger node =
+        any typeIndexIsInteger (nodeTypeIndices node)
+      where
+        typeIndexIsInteger ix = case hie_types hie Arr.! ix of
+            HForAllTy _ inner -> typeIndexIsInteger inner
+            HQualTy _ inner -> typeIndexIsInteger inner
+            HTyConApp IfaceTyCon{ifaceTyConName = tyConName} _ ->
+                occNameString (nameOccName tyConName) == "Integer"
+            _ -> False
+
+    nodeTypeIndices :: HieAST TypeIndex -> [TypeIndex]
+    nodeTypeIndices node =
+        let NodeInfo{nodeType = nodeTypes, nodeIdentifiers = idents} = nodeInfo node
+            identTypes =
+                [ ty
+                | (_ident, IdentifierDetails{identType = Just ty}) <- Map.assocs idents
+                ]
+        in nodeTypes <> identTypes
+
+    isVariableUse :: HieAST TypeIndex -> Bool
+    isVariableUse node =
+        let idents = Map.assocs $ nodeIdentifiers $ nodeInfo node
+        in any
+            (\(ident, IdentifierDetails{identInfo = identInfo'}) -> case ident of
+                Right _name -> Set.member Use identInfo'
+                _ -> False
+            )
+            idents
+
+    indicesContainerFromRedeemer :: HieAST TypeIndex -> Bool
+    indicesContainerFromRedeemer node =
+        subtreeUsesAnyName indexContainerBindings node
+            || (subtreeHasAnyOccName redeemerDecodeIndicators node && nodeTypeLooksLikeIntegerList node)
+
+    nodeTypeLooksLikeIntegerList :: HieAST TypeIndex -> Bool
+    nodeTypeLooksLikeIntegerList node =
+        let isListTy =
+                nodeTypeContainsTyConName "[]" node
+                    || nodeTypeContainsTyConName "List" node
+                    || nodeTypeContainsTyConName "BuiltinList" node
+            hasInteger =
+                nodeTypeContainsTyConName "Integer" node
+        in isListTy && hasInteger
+
+    hasUniquenessMarker :: RealSrcSpan -> Bool
+    hasUniquenessMarker spanToCheck =
+        let lineNo = srcSpanStartLine spanToCheck
+        in lineHasMarker lineNo || lineHasMarker (lineNo - 1)
+
+    lineHasMarker :: Int -> Bool
+    lineHasMarker n
+        | n <= 0 = False
+        | otherwise =
+            case (BS8.lines $ hie_hs_src hie) !!? (n - 1) of
+                Nothing -> False
+                Just line -> normalizedContainsMarker (normalizeMarkerLine line)
+
+    markerNormalized :: ByteString
+    markerNormalized = "plutstan uniqueness enforced"
+
+    normalizeMarkerLine :: ByteString -> ByteString
+    normalizeMarkerLine =
+        BS8.unwords
+            . BS8.words
+            . BS8.map (\c -> if isAlphaNum c then toLower c else ' ')
+
+    normalizedContainsMarker :: ByteString -> Bool
+    normalizedContainsMarker = BS8.isInfixOf markerNormalized
+
+    subtreeHasAnyOccName :: [String] -> HieAST TypeIndex -> Bool
+    subtreeHasAnyOccName targets = go
+      where
+        go n@Node{nodeChildren = children} =
+            nodeHasAnyOccName targets n || any go children
+
+    nodeHasAnyOccName :: [String] -> HieAST TypeIndex -> Bool
+    nodeHasAnyOccName targets node =
+        any
+            (\(ident, _details) -> case ident of
+                Right name -> occNameString (nameOccName name) `elem` targets
+                _ -> False
+            )
+            (Map.assocs $ nodeIdentifiers $ nodeInfo node)
+
+    subtreeUsesAnyName :: Set Name -> HieAST TypeIndex -> Bool
+    subtreeUsesAnyName targets = go
+      where
+        go n@Node{nodeChildren = children} =
+            nodeUsesAnyName targets n || any go children
+
+    nodeUsesAnyName :: Set Name -> HieAST TypeIndex -> Bool
+    nodeUsesAnyName targets node =
+        any
+            (\(ident, IdentifierDetails{identInfo = identInfo'}) -> case ident of
+                Right name -> Set.member Use identInfo' && Set.member name targets
+                _ -> False
+            )
+            (Map.assocs $ nodeIdentifiers $ nodeInfo node)
+
+    nodeHasAnnotation :: NodeAnnotation -> HieAST TypeIndex -> Bool
+    nodeHasAnnotation ann node =
+        let NodeInfo{nodeAnnotations = nodeAnnotations'} = nodeInfo node
+        in ann `Set.member` Set.map toNodeAnnotation nodeAnnotations'
+
+    hsAppAnnotation :: NodeAnnotation
+    hsAppAnnotation = mkNodeAnnotation "HsApp" "HsExpr"
+
+    opAppAnnotation :: NodeAnnotation
+    opAppAnnotation = mkNodeAnnotation "OpApp" "HsExpr"
+
+    appSpine :: HieAST TypeIndex -> (HieAST TypeIndex, [HieAST TypeIndex])
+    appSpine node = case node of
+        n@Node{nodeChildren = appFun:arg:_}
+            | nodeHasAnnotation hsAppAnnotation n ->
+                let (f, args) = appSpine appFun
+                in (f, args <> [arg])
+        _ -> (node, [])
+
+    indexContainerBindings :: Set Name
+    indexContainerBindings =
+        expandTransitively bindingRhsNodes directIndexContainers
+
+    directIndexContainers :: Set Name
+    directIndexContainers = Set.fromList
+        [ name
+        | (name, rhsNode) <- Map.toList bindingRhsNodes
+        , rhsIsIndexContainer rhsNode
+        ]
+
+    rhsIsIndexContainer :: HieAST TypeIndex -> Bool
+    rhsIsIndexContainer rhsNode =
+        subtreeHasAnyOccName redeemerDecodeIndicators rhsNode
+            && (nodeTypeLooksLikeIntegerList rhsNode || nodeTypeContainsTyConName "BuiltinByteString" rhsNode)
+
+    indexValueBindings :: Set Name
+    indexValueBindings =
+        expandTransitively bindingRhsNodes directIndexValues
+
+    directIndexValues :: Set Name
+    directIndexValues = Set.fromList
+        [ name
+        | (name, rhsNode) <- Map.toList bindingRhsNodes
+        , nodeTypeContainsTyConName "Integer" rhsNode
+        , rhsIsIndexValue rhsNode
+        ]
+
+    rhsIsIndexValue :: HieAST TypeIndex -> Bool
+    rhsIsIndexValue rhsNode =
+        (subtreeHasAnyOccName ["indexByteString"] rhsNode
+            && (subtreeHasAnyOccName redeemerDecodeIndicators rhsNode || subtreeUsesAnyName indexContainerBindings rhsNode))
+            || (subtreeHasIndexingCall rhsNode
+                    && (subtreeHasAnyOccName redeemerDecodeIndicators rhsNode || subtreeUsesAnyName indexContainerBindings rhsNode))
+
+    bindingRhsNodes :: Map Name (HieAST TypeIndex)
+    bindingRhsNodes =
+        let allHieAsts = Map.elems $ getAsts $ hie_asts hie
+            spanIndex = foldMap collectSpanIndex allHieAsts
+            bindingSpans = foldMap collectBindingSpans allHieAsts
+        in Map.mapMaybe (`Map.lookup` spanIndex) bindingSpans
+
+    collectSpanIndex :: HieAST TypeIndex -> Map RealSrcSpan (HieAST TypeIndex)
+    collectSpanIndex n@Node{nodeSpan = span', nodeChildren = children} =
+        Map.insertWith (\_old new -> new) span' n (foldMap collectSpanIndex children)
+
+    collectBindingSpans :: HieAST TypeIndex -> Map Name RealSrcSpan
+    collectBindingSpans = go mempty
+      where
+        go acc n@Node{nodeSpan = fallbackSpan, nodeChildren = children} =
+            let info = nodeInfo n
+                acc' = foldl' (insertBinding fallbackSpan) acc (Map.assocs $ nodeIdentifiers info)
+            in foldl' go acc' children
+
+        insertBinding
+            :: RealSrcSpan
+            -> Map Name RealSrcSpan
+            -> (Identifier, IdentifierDetails TypeIndex)
+            -> Map Name RealSrcSpan
+        insertBinding fallbackSpan acc (ident, details) = case ident of
+            Right name | Just bindSpan <- getBindingSpan details ->
+                Map.insertWith (\_old new -> new) name bindSpan acc
+            Right name | isBindingDetails details ->
+                Map.insertWith (\_old new -> new) name fallbackSpan acc
+            _ -> acc
+
+        getBindingSpan :: IdentifierDetails TypeIndex -> Maybe RealSrcSpan
+        getBindingSpan IdentifierDetails{identInfo = identInfo'} =
+            listToMaybe $ mapMaybe spanFromCtx (toList identInfo')
+          where
+            spanFromCtx (ValBind _ _ (Just s)) = Just s
+            spanFromCtx (PatternBind _ _ (Just s)) = Just s
+            spanFromCtx _ = Nothing
+
+        isBindingDetails :: IdentifierDetails TypeIndex -> Bool
+        isBindingDetails IdentifierDetails{identInfo = identInfo'} =
+            any isBindingCtx identInfo'
+          where
+            isBindingCtx (ValBind _ _ _) = True
+            isBindingCtx (PatternBind _ _ _) = True
+            isBindingCtx MatchBind = True
+            isBindingCtx _ = False
+
+    expandTransitively
+        :: Map Name (HieAST TypeIndex)
+        -> Set Name
+        -> Set Name
+    expandTransitively rhsNodes = go
+      where
+        go tainted =
+            let newTainted = Set.fromList
+                    [ name
+                    | (name, rhsNode) <- Map.toList rhsNodes
+                    , not (Set.member name tainted)
+                    , subtreeUsesAnyName tainted rhsNode
+                    ]
+            in if Set.null newTainted
+               then tainted
+               else go (tainted <> newTainted)
+
+    nodeTypeContainsTyConName :: String -> HieAST TypeIndex -> Bool
+    nodeTypeContainsTyConName needle node =
+        any (typeIndexContainsTyConName needle) (nodeTypeIndices node)
+
+    typeIndexContainsTyConName :: String -> TypeIndex -> Bool
+    typeIndexContainsTyConName needle ix =
+        hieTypeContainsTyConName needle (hie_types hie Arr.! ix)
+
+    hieTypeContainsTyConName :: String -> HieTypeFlat -> Bool
+    hieTypeContainsTyConName needle ty = case ty of
+        HTyConApp IfaceTyCon{ifaceTyConName = tyConName} (HieArgs args) ->
+            let here = occNameString (nameOccName tyConName) == needle
+            in here || any (hieTypeContainsTyConName needle . (hie_types hie Arr.!) . snd) args
+        HFunTy _ a b ->
+            hieTypeContainsTyConName needle (hie_types hie Arr.! a)
+                || hieTypeContainsTyConName needle (hie_types hie Arr.! b)
+        HForAllTy _ inner ->
+            hieTypeContainsTyConName needle (hie_types hie Arr.! inner)
+        HQualTy _ inner ->
+            hieTypeContainsTyConName needle (hie_types hie Arr.! inner)
+        _ -> False
 
 {- | Check for occurrences lazy fields in all constructors. Ignores
 @newtype@s. Currently HIE Ast doesn't have information whether the

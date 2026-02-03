@@ -179,3 +179,42 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
 
   it "PLU-STAN-16: division before multiplication (where)" $
     checkObservation AntiPattern.plustan16 502 18 31
+
+  it "PLU-STAN-17: redeemer-supplied indices list without uniqueness check" $
+    checkObservation AntiPattern.plustan17 638 13 84
+
+  it "PLU-STAN-17: redeemer-supplied indices list suppressed via marker" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan17 648
+
+  it "PLU-STAN-17: redeemer-supplied indices bytestring without uniqueness check" $
+    checkObservation AntiPattern.plustan17 657 3 227
+
+  it "PLU-STAN-17: intermediate ix binding from redeemer indices list" $
+    checkObservation AntiPattern.plustan17 667 13 27
+
+  it "PLU-STAN-17: marker on same line suppresses" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan17 679
+
+  it "PLU-STAN-17: intermediate ix binding from redeemer indices bytestring" $
+    checkObservation AntiPattern.plustan17 698 6 26
+
+  it "PLU-STAN-17: map over redeemer indices triggers on indexing" $
+    checkObservation AntiPattern.plustan17 707 29 42
+
+  it "PLU-STAN-17: flags indexing on list argument conservatively" $
+    checkObservation AntiPattern.plustan17 719 13 40
+
+  it "PLU-STAN-17: transitive list binding still triggers" $
+    checkObservation AntiPattern.plustan17 730 13 40
+
+  it "PLU-STAN-17: transitive index value binding still triggers" $
+    checkObservation AntiPattern.plustan17 743 13 27
+
+  it "PLU-STAN-17: indexing via (!!) operator triggers" $
+    checkObservation AntiPattern.plustan17 768 13 34
+
+  it "PLU-STAN-17: (!!) operator suppressed via marker" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan17 780
+
+  it "PLU-STAN-17: dropI-style indexing triggers" $
+    checkObservation AntiPattern.plustan17 791 14 40

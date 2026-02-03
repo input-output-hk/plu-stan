@@ -128,6 +128,8 @@ data InspectionAnalysis
     | ValidityIntervalMisuse
     -- | Precision loss: division before multiplication (including via let/where).
     | PrecisionLossDivisionBeforeMultiply
+    -- | Unsafe redeemer-provided indices without uniqueness enforcement.
+    | RedeemerSuppliedIndicesUniqueness
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

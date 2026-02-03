@@ -584,3 +584,211 @@ plutStan08GetOracleTrigger b_oracleSym tref = go
          )
          (\_ -> go (BI.tail l))
          BI.unitval
+
+-- PLU-STAN-17 fixtures (Redeemer-supplied indices must be unique)
+--
+-- The functions below are intentionally small and are analysed by Stan's
+-- `PLU-STAN-17` inspection. Each one documents whether it should trigger
+-- a warning, and why.
+--
+-- Local indexing helpers used by the PLU-STAN-17 fixtures. The detector identifies
+-- indexing-like sinks by type shape (Integer + []/BuiltinList args), not by name.
+{-# INLINABLE elemAt #-}
+elemAt :: Integer -> [a] -> a
+elemAt n = go n
+  where
+    go i xs =
+      if i == 0
+        then case xs of
+          x : _ -> x
+          [] -> error "elemAt: empty list"
+        else case xs of
+          _ : ys -> go (i - 1) ys
+          [] -> error "elemAt: index too large"
+
+{-# INLINE elemAt' #-}
+elemAt' :: Integer -> BI.BuiltinList a -> a
+elemAt' !n xs =
+  BI.ifThenElse (BI.equalsInteger n 0)
+  (\_ -> BI.head xs)
+  (\_ -> elemAt' (n - 1) (BI.tail xs))
+  BI.unitval
+
+{-# INLINE elemAtFast #-}
+elemAtFast :: Integer -> BI.BuiltinList a -> a
+elemAtFast !n xs =
+  BI.ifThenElse (BI.lessThanInteger 10 n)
+  (\_ -> elemAtFast (n - 10) (BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail xs))
+  (\_ -> elemAtFast2 n xs)
+  BI.unitval
+
+{-# INLINE elemAtFast2 #-}
+elemAtFast2 :: Integer -> BI.BuiltinList a -> a
+elemAtFast2 !n xs =
+  BI.ifThenElse (BI.lessThanInteger 5 n)
+  (\_ -> elemAtFast2 (n - 5) (BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail xs))
+  (\_ -> elemAt' n xs)
+  BI.unitval
+
+plutStan17UnsafeRedeemerIndicesList :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): indexing a ScriptContext-derived outputs list
+-- using a redeemer-supplied indices list, without any uniqueness enforcement.
+plutStan17UnsafeRedeemerIndicesList ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      out = elemAt (elemAt 0 (Tx.unsafeFromBuiltinData redeemer :: [Integer])) outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17SafeRedeemerIndicesList :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should NOT trigger): same as the unsafe case, but we add the
+-- `plutstan uniqueness enforced` marker on the line above the indexing site.
+plutStan17SafeRedeemerIndicesList ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      -- PluTStAn   Uniqueness    Enforced
+      out = elemAt (elemAt 0 (Tx.unsafeFromBuiltinData redeemer :: [Integer])) outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeRedeemerIndicesBytestring :: ScriptContext -> BuiltinData -> BuiltinData
+-- PLU-STAN-17 (should trigger): indexing a ScriptContext-derived list using an
+-- index obtained from a redeemer-supplied bytestring (via `indexByteString`),
+-- without any uniqueness enforcement.
+plutStan17UnsafeRedeemerIndicesBytestring ctx redeemer =
+  elemAtFast (BI.indexByteString (Tx.unsafeFromBuiltinData redeemer :: BI.BuiltinByteString) 0) (BI.unsafeDataAsList $ BI.head $ BI.snd $ BI.unsafeDataAsConstr $ BI.head $ BI.snd $ BI.unsafeDataAsConstr $ Tx.toBuiltinData ctx)
+
+plutStan17UnsafeIxBindingList :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): the indices list and the final index are bound
+-- to intermediate variables (`idxs`, `ix`) before being used to index into the
+-- ScriptContext-derived outputs list. The analysis should be transitive.
+plutStan17UnsafeIxBindingList ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      ix = elemAt 0 idxs
+      out = elemAt ix outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17SafeMarkerSameLine :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should NOT trigger): same as the unsafe ix-binding case, but
+-- the marker is on the SAME line as the indexing site (case/whitespace
+-- insensitive), so it should be suppressed.
+plutStan17SafeMarkerSameLine ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      ix = elemAt 0 idxs
+      out = elemAt ix outs -- plutSTAN    uniqueness enforced
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeIxBindingBytestring :: ScriptContext -> BuiltinData -> BuiltinData
+-- PLU-STAN-17 (should trigger): index is extracted from a redeemer-supplied
+-- bytestring into an intermediate variable (`ix`) and then used to index a
+-- ScriptContext-derived list.
+plutStan17UnsafeIxBindingBytestring ctx redeemer =
+  let inputs =
+        BI.unsafeDataAsList $
+          BI.head $
+            BI.snd $
+              BI.unsafeDataAsConstr $
+                BI.head $
+                  BI.snd $
+                    BI.unsafeDataAsConstr $
+                      Tx.toBuiltinData ctx
+      ix = BI.indexByteString (Tx.unsafeFromBuiltinData redeemer :: BI.BuiltinByteString) 0
+  in elemAtFast ix inputs
+
+plutStan17UnsafeMapIndices :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): mapping over a redeemer-supplied indices list.
+-- The indexing happens inside the lambda, so the detector must look through
+-- `map` and still connect indices -> indexing into a ScriptContext-derived list.
+plutStan17UnsafeMapIndices ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      selected = map (\i -> elemAt i outs) idxs
+  in case selected of
+    [] -> 0
+    _ -> 1
+
+plutStan17UnsafeListArg :: [TxOut] -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): the list being indexed is a function argument.
+-- Stan cannot know at this call site whether the caller supplied a ScriptContext-
+-- derived list (e.g. `txInfoOutputs`) or any other attacker-influenced list, so
+-- the rule flags this conservatively.
+plutStan17UnsafeListArg outs redeemer =
+  let idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      out = elemAt (elemAt 0 idxs) outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeCtxListTransitive :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): ScriptContext-derived list is passed through a
+-- transitive alias (`outs0` -> `outs`) before being indexed.
+plutStan17UnsafeCtxListTransitive ctx redeemer =
+  let outs0 = txInfoOutputs $ scriptContextTxInfo ctx
+      outs = outs0
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      out = elemAt (elemAt 0 idxs) outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeIndexValueTransitive :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): redeemer-derived index is passed through a
+-- transitive alias (`ix0` -> `ix`) before being used to index a ScriptContext-
+-- derived list.
+plutStan17UnsafeIndexValueTransitive ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      ix0 = elemAt 0 idxs
+      ix = ix0
+      out = elemAt ix outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+-- PLU-STAN-17 (should trigger): index-based traversal helper. Even though this
+-- returns a list, it can still be used to select an element (e.g. `head (dropI i xs)`),
+-- so we treat it as indexing-like.
+{-# INLINABLE dropI #-}
+dropI :: Integer -> [a] -> [a]
+dropI n0 xs0 = go n0 xs0
+  where
+    go n xs =
+      if n == 0
+        then xs
+        else case xs of
+          [] -> []
+          _ : ys -> go (n - 1) ys
+
+plutStan17UnsafeBangBangOperator :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): indexing a list using `!!` where the index is
+-- derived from a redeemer-supplied indices list, without uniqueness enforcement.
+plutStan17UnsafeBangBangOperator ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      (!!) xs i = elemAt i xs
+      out = outs !! elemAt 0 idxs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17SafeBangBangOperator :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should NOT trigger): same as the unsafe `!!` case, but we mark
+-- the indexing site as having uniqueness enforced.
+plutStan17SafeBangBangOperator ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      (!!) xs i = elemAt i xs
+      -- plutstan uniqueness enforced
+      out = outs !! elemAt 0 idxs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeDropI :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): using an index-based traversal helper (`dropI`)
+-- with a redeemer-derived index should still be considered unsafe without a
+-- uniqueness check on the indices list.
+plutStan17UnsafeDropI ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      rest = dropI (elemAt 0 idxs) outs
+  in case rest of
+    [] -> 0
+    _ : _ -> 1
