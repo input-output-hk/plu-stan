@@ -100,6 +100,9 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   it "PLU-STAN-08: plutStan08GetOracleTrigger triggers on cred binding" $
     checkObservation AntiPattern.plustan08 579 18 96
 
+  it "PLU-STAN-08: tuple pattern binding used multiple times" $
+    checkObservation AntiPattern.plustan08 854 7 44
+
   it "PLU-STAN-09: valueOf compared directly" $
     checkObservation AntiPattern.plustan09 157 3 50
 

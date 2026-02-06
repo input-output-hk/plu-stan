@@ -5,6 +5,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Redundant if" #-}
 
 module Target.PlutusTx where
 
@@ -847,3 +849,9 @@ pluStan18BooleanConditionTrigger =
   if pluStan18BooleanCondition 6 9 
     then True
     else error "pluStan18BooleanConditionTrigger: condition failed"
+
+pluStan08TuplePatternMultiUse :: Integer
+-- PLU-STAN-08 (should trigger): tuple pattern is non-strict; x is used twice.
+pluStan08TuplePatternMultiUse =
+  let (x, y) = (1 :: Integer, 2 :: Integer)
+  in x + x + y

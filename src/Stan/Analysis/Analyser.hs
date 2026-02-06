@@ -263,6 +263,17 @@ analyseNonStrictLetMultiUse insId hie curNode =
     strictByPrefixSpan bindSpan nameSpan =
         srcSpanStartLine bindSpan == srcSpanStartLine nameSpan
             && srcSpanStartCol bindSpan + 1 == srcSpanStartCol nameSpan
+            && hasBangPrefix bindSpan
+
+    hasBangPrefix :: RealSrcSpan -> Bool
+    hasBangPrefix span' = case lineAt (srcSpanStartLine span') of
+        Nothing -> False
+        Just line ->
+            let col = srcSpanStartCol span'
+            in col > 0 && (line BS8.!? (col - 1) == Just '!')
+
+    lineAt :: Int -> Maybe BS8.ByteString
+    lineAt n = (BS8.lines $ hie_hs_src hie) !!? (n - 1)
 
     matchLocalFunArgMultiUse :: HieAST TypeIndex -> Slist RealSrcSpan
     matchLocalFunArgMultiUse funNode = memptyIfFalse (hieMatchPatternAst hie funNode fun) $
