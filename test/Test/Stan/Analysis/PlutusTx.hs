@@ -196,25 +196,47 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan17 679
 
   it "PLU-STAN-17: intermediate ix binding from redeemer indices bytestring" $
-    checkObservation AntiPattern.plustan17 698 6 26
+    checkObservation AntiPattern.plustan17 697 6 26
 
   it "PLU-STAN-17: map over redeemer indices triggers on indexing" $
-    checkObservation AntiPattern.plustan17 707 29 42
+    checkObservation AntiPattern.plustan17 706 29 42
 
   it "PLU-STAN-17: flags indexing on list argument conservatively" $
-    checkObservation AntiPattern.plustan17 719 13 40
+    checkObservation AntiPattern.plustan17 718 13 40
 
   it "PLU-STAN-17: transitive list binding still triggers" $
-    checkObservation AntiPattern.plustan17 730 13 40
+    checkObservation AntiPattern.plustan17 729 13 40
 
   it "PLU-STAN-17: transitive index value binding still triggers" $
-    checkObservation AntiPattern.plustan17 743 13 27
+    checkObservation AntiPattern.plustan17 742 13 27
 
   it "PLU-STAN-17: indexing via (!!) operator triggers" $
-    checkObservation AntiPattern.plustan17 768 13 34
+    checkObservation AntiPattern.plustan17 752 13 41
 
   it "PLU-STAN-17: (!!) operator suppressed via marker" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan17 780
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan17 763
 
-  it "PLU-STAN-17: dropI-style indexing triggers" $
-    checkObservation AntiPattern.plustan17 791 14 40
+  it "PLU-STAN-17: drop-style indexing triggers" $
+    checkObservation AntiPattern.plustan17 778 34 52
+
+  it "PLU-STAN-18: flags (&&) in if predicate with failing else" $
+    checkObservation AntiPattern.plustan18 795 11 13
+
+  it "PLU-STAN-18: flags (&&) in if predicate with failing then" $
+    checkObservation AntiPattern.plustan18 803 11 13
+
+  it "PLU-STAN-18: does not flag when branches do not fail" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan18 811
+
+  it "PLU-STAN-18: does not flag (&&) inside branch body" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan18 822
+
+  it "PLU-STAN-18: flags (&&) in BI.ifThenElse predicate with failing branch" $
+    checkObservation AntiPattern.plustan18 827 23 25
+
+  it "PLU-STAN-18: nested (&&) only flags the outermost" $ do
+    checkObservation AntiPattern.plustan18 833 11 13
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan18 834
+
+  it "PLU-STAN-18: flags (&&) inside predicate helper with failing branch" $
+    checkObservation AntiPattern.plustan18 841 4 6

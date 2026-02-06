@@ -29,7 +29,7 @@ import PlutusLedgerApi.V3 (
   ScriptContext (..),
   TxInfo (..),
   TxOut (..),
-  txOutAddress,
+  txOutAddress, getRedeemer,
   )
 import PlutusLedgerApi.V3.MintValue qualified as MintValue
 {-# ANN module ("onchain-contract" :: String) #-}
@@ -680,7 +680,7 @@ plutStan17SafeMarkerSameLine ctx redeemer =
   in case txOutAddress out of
     Address _ _ -> 0
 
-plutStan17UnsafeIxBindingBytestring :: ScriptContext -> BuiltinData -> BuiltinData
+plutStan17UnsafeIxBindingBytestring :: BuiltinData -> BuiltinData -> BuiltinData
 -- PLU-STAN-17 (should trigger): index is extracted from a redeemer-supplied
 -- bytestring into an intermediate variable (`ix`) and then used to index a
 -- ScriptContext-derived list.
@@ -692,8 +692,7 @@ plutStan17UnsafeIxBindingBytestring ctx redeemer =
               BI.unsafeDataAsConstr $
                 BI.head $
                   BI.snd $
-                    BI.unsafeDataAsConstr $
-                      Tx.toBuiltinData ctx
+                    BI.unsafeDataAsConstr ctx
       ix = BI.indexByteString (Tx.unsafeFromBuiltinData redeemer :: BI.BuiltinByteString) 0
   in elemAtFast ix inputs
 
@@ -744,28 +743,13 @@ plutStan17UnsafeIndexValueTransitive ctx redeemer =
   in case txOutAddress out of
     Address _ _ -> 0
 
--- PLU-STAN-17 (should trigger): index-based traversal helper. Even though this
--- returns a list, it can still be used to select an element (e.g. `head (dropI i xs)`),
--- so we treat it as indexing-like.
-{-# INLINABLE dropI #-}
-dropI :: Integer -> [a] -> [a]
-dropI n0 xs0 = go n0 xs0
-  where
-    go n xs =
-      if n == 0
-        then xs
-        else case xs of
-          [] -> []
-          _ : ys -> go (n - 1) ys
-
 plutStan17UnsafeBangBangOperator :: ScriptContext -> BuiltinData -> Integer
 -- PLU-STAN-17 (should trigger): indexing a list using `!!` where the index is
 -- derived from a redeemer-supplied indices list, without uniqueness enforcement.
 plutStan17UnsafeBangBangOperator ctx redeemer =
   let outs = txInfoOutputs $ scriptContextTxInfo ctx
       idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
-      (!!) xs i = elemAt i xs
-      out = outs !! elemAt 0 idxs
+      out = outs TxList.!! elemAt 0 idxs
   in case txOutAddress out of
     Address _ _ -> 0
 
@@ -775,20 +759,91 @@ plutStan17SafeBangBangOperator :: ScriptContext -> BuiltinData -> Integer
 plutStan17SafeBangBangOperator ctx redeemer =
   let outs = txInfoOutputs $ scriptContextTxInfo ctx
       idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
-      (!!) xs i = elemAt i xs
       -- plutstan uniqueness enforced
-      out = outs !! elemAt 0 idxs
+      out = outs TxList.!! elemAt 0 idxs
   in case txOutAddress out of
     Address _ _ -> 0
 
-plutStan17UnsafeDropI :: ScriptContext -> BuiltinData -> Integer
--- PLU-STAN-17 (should trigger): using an index-based traversal helper (`dropI`)
+plutStan17UnsafeDrop :: ScriptContext -> BI.BuiltinUnit
+-- PLU-STAN-17 (should trigger): using an index-based traversal helper (`drop`)
 -- with a redeemer-derived index should still be considered unsafe without a
 -- uniqueness check on the indices list.
-plutStan17UnsafeDropI ctx redeemer =
+plutStan17UnsafeDrop ctx =
   let outs = txInfoOutputs $ scriptContextTxInfo ctx
-      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
-      rest = dropI (elemAt 0 idxs) outs
+      idxs = Tx.unsafeFromBuiltinData (getRedeemer $ scriptContextRedeemer ctx) :: [Integer]
+      getScriptOutputs :: [TxOut] -> [Integer] -> [TxOut]
+      getScriptOutputs outs indices = 
+        case indices of
+          [] -> []
+          x : xs -> TxList.head (TxList.drop x outs) : getScriptOutputs outs xs
+      rest = getScriptOutputs outs idxs
   in case rest of
-    [] -> 0
-    _ : _ -> 1
+      [] -> error "plutStan17UnsafeDrop: no script output found"
+      _ -> BI.unitval
+
+-- PLU-STAN-18 fixtures (Avoid lazy (&&) in on-chain code)
+--
+-- PLU-STAN-18 warns about using (&&) in on-chain code. For now, the rule is
+-- only triggers when (&&) appears in the predicate of a branching statement
+-- (`if` or `BI.ifThenElse`) and one of the branches contains a failure
+-- (`error` or `traceError`).
+
+plutStan18TriggerIfElseError :: Bool
+-- PLU-STAN-18 (should trigger): (&&) is used in the predicate of an `if`, and
+-- the else branch fails via `traceError`.
+plutStan18TriggerIfElseError =
+  if True && False
+    then True
+    else P.traceError "boom"
+
+plutStan18TriggerIfThenError :: Bool
+-- PLU-STAN-18 (should trigger): (&&) is used in the predicate of an `if`, and
+-- the then branch fails via `traceError`.
+plutStan18TriggerIfThenError =
+  if True && False
+    then P.traceError "boom"
+    else False
+
+plutStan18NoTriggerNoError :: Bool
+-- PLU-STAN-18 (should NOT trigger): predicate uses (&&) but neither branch
+-- fails, so no warning is emitted.
+plutStan18NoTriggerNoError =
+  if True && False
+    then True
+    else False
+
+plutStan18NoTriggerAndInBranch :: Bool
+-- PLU-STAN-18 (should NOT trigger): (&&) appears in a branch body, not in the
+-- predicate.
+plutStan18NoTriggerAndInBranch =
+  if True
+    then True && False
+    else P.traceError "boom"
+
+plutStan18TriggerBuiltinIfThenElse :: Bool
+-- PLU-STAN-18 (should trigger): (&&) is used in the predicate of
+-- `BI.ifThenElse` and a branch fails.
+plutStan18TriggerBuiltinIfThenElse =
+  BI.ifThenElse (True && False) (P.traceError "boom") False
+
+plutStan18TriggerOutermostOnly :: Bool
+-- PLU-STAN-18 (should trigger ONCE): nested (&&) inside the predicate should
+-- only report the outermost operator occurrence.
+plutStan18TriggerOutermostOnly =
+  if True &&
+     (False && True)
+    then P.traceError "boom"
+    else False
+
+pluStan18BooleanCondition :: Integer -> Integer -> Bool 
+pluStan18BooleanCondition x y =
+  x > 5 
+   && y < 10
+   && x < y 
+
+-- PLU-STAN-18 (should trigger): boolean condition uses (&&) and one of the branches fails.
+pluStan18BooleanConditionTrigger :: Bool 
+pluStan18BooleanConditionTrigger = 
+  if pluStan18BooleanCondition 6 9 
+    then True
+    else error "pluStan18BooleanConditionTrigger: condition failed"

@@ -62,6 +62,7 @@ module Stan.Inspection.AntiPattern
     , plustan12
     , plustan16
     , plustan17
+    , plustan18
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -123,6 +124,7 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan12
     , plustan16
     , plustan17
+    , plustan18
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -757,6 +759,18 @@ plustan17 = mkAntiPatternInspection (Id "PLU-STAN-17") "Redeemer-supplied indice
         [ "Enforce that all provided indices are unique (e.g. via a bitset / pow2 trick)"
         , "Prefer selecting by stable identifiers (e.g. TxOutRef) instead of indices when possible"
         , "If uniqueness is enforced, annotate the indexing site with a comment containing: plutstan uniqueness enforced"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan18 :: Inspection
+plustan18 = mkAntiPatternInspection (Id "PLU-STAN-18") "Avoid lazy (&&) in on-chain code"
+    LazyAndInOnChainCode
+    & descriptionL .~ "Using lazy (&&) in the predicate of a branching statement where one branch fails can introduce extra delay/force overhead in the generated UPLC. Prefer a strict boolean combinator when you don't care about optimizing the failure case."
+    & solutionL .~
+        [ "Use a strict combinator such as:"
+        , "{-# INLINE builtinAnd #-}; builtinAnd :: Bool -> Bool -> Bool; builtinAnd b1 b2 = BI.ifThenElse b1 b2 False"
+        , "If the RHS intentionally throws (e.g. error/traceError), keep (&&) to preserve behaviour."
         ]
     & withPlutusCategory
     & severityL .~ Warning
