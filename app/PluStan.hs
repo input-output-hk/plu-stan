@@ -1,17 +1,21 @@
-module Main (main) where
+  module Main (main) where
 
 import Colourista (errorMessage, infoMessage, successMessage, warningMessage)
-import Control.Exception (SomeException, handle)
+import Control.Exception (SomeException, handle, try)
 import Control.Monad (forM, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.List (isPrefixOf)
 import Data.Maybe (catMaybes, mapMaybe)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
-import System.Directory (doesDirectoryExist, getCurrentDirectory, listDirectory)
+import System.Directory (doesDirectoryExist, getCurrentDirectory, listDirectory, setCurrentDirectory)
+import System.Directory (findExecutable)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.FilePath ((</>), takeExtension, takeFileName)
 import System.Process (callProcess)
+import System.Info (compilerVersion)
+import Data.Version (showVersion)
+import qualified Data.ByteString.Char8 as BS8
 import Trial (withTag, whenResult_)
 
 import Stan (getAnalysis)
@@ -61,9 +65,18 @@ runPluStan :: IO ()
 runPluStan =
   whenResult_ (finaliseConfig pluStanConfig) $ \warnings config -> do
     cli <- parsePluStanArgs
+    case plustanProjectDir cli of
+      Nothing -> pure ()
+      Just dir -> do
+        exists <- doesDirectoryExist dir
+        if exists
+          then setCurrentDirectory dir
+          else do
+            errorMessage . Text.pack $ "Project directory does not exist: " <> dir
+            exitFailure
     let hieDir = plustanHieDir cli
     ensureHieFiles hieDir
-    hieFiles <- readHieFiles hieDir
+    hieFiles <- readHieFilesOrRebuild hieDir
     when (null hieFiles) $ do
       warningMessage "No .hie files found after build. Ensure the project is compiled with -fwrite-ide-info and -hiedir=.hie."
       exitFailure
@@ -124,6 +137,7 @@ generatePluStanReport PluStanArgs{..} config warnings hieFiles analysis = do
 data PluStanArgs = PluStanArgs
   { plustanReport :: Bool
   , plustanBrowse :: Bool
+  , plustanProjectDir :: Maybe FilePath
   , plustanHieDir :: FilePath
   }
 
@@ -137,11 +151,12 @@ parsePluStanArgs = do
       exitFailure
     Right parsed -> pure parsed
   where
-    defaultArgs = PluStanArgs False False ".hie"
+    defaultArgs = PluStanArgs False False Nothing ".hie"
     usage = Text.unlines
-      [ "Usage: plustan [--report] [--browse] [--hiedir DIR]"
+      [ "Usage: plustan [--report] [--browse] [--project DIR] [--hiedir DIR] [PROJECT_DIR]"
       , "  --report      Generate stan.html report"
       , "  --browse      Open report in browser (implies --report)"
+      , "  --project DIR Change into project DIR before running (same as positional PROJECT_DIR)"
       , "  --hiedir DIR  Directory with .hie/.hi files (default: .hie)"
       ]
 
@@ -149,12 +164,20 @@ parsePluStanArgs = do
     go acc [] = Right acc
     go acc ("--report":xs) = go acc { plustanReport = True } xs
     go acc ("--browse":xs) = go acc { plustanReport = True, plustanBrowse = True } xs
+    go acc ("--project":dir:xs) = go acc { plustanProjectDir = Just dir } xs
     go acc ("--hiedir":dir:xs) = go acc { plustanHieDir = dir } xs
     go acc (arg:xs)
+      | "--project=" `isPrefixOf` arg =
+          let prefix = "--project=" :: String
+          in go acc { plustanProjectDir = Just (drop (length prefix) arg) } xs
       | "--hiedir=" `isPrefixOf` arg =
           let prefix = "--hiedir=" :: String
           in go acc { plustanHieDir = drop (length prefix) arg } xs
-      | otherwise = Left ("Unknown argument: " <> arg)
+      | "-" `isPrefixOf` arg = Left ("Unknown argument: " <> arg)
+      | otherwise =
+          case plustanProjectDir acc of
+            Nothing -> go acc { plustanProjectDir = Just arg } xs
+            Just _ -> Left ("Unexpected extra positional argument: " <> arg)
 
 ensureHieFiles :: FilePath -> IO ()
 ensureHieFiles hieDir = do
@@ -162,14 +185,33 @@ ensureHieFiles hieDir = do
   hasHi <- hasFilesWithExt hieDir ".hi"
   when (not (hasHie && hasHi)) $ do
     infoMessage "Missing .hie/.hi files. Running cabal build to generate artifacts..."
-    callProcess "cabal"
-      [ "build"
-      , "all"
-      , "--disable-tests"
-      , "--ghc-options=-fwrite-ide-info"
-      , "--ghc-options=-hiedir=" <> hieDir
-      , "--ghc-options=-hidir=" <> hieDir
-      ]
+    buildHieFiles hieDir
+
+readHieFilesOrRebuild :: FilePath -> IO [HieFile]
+readHieFilesOrRebuild hieDir = do
+  res <- try (readHieFiles hieDir)
+  case res of
+    Right hieFiles -> pure hieFiles
+    Left (_ :: SomeException) -> do
+      warningMessage "Failed to read .hie files (possibly built by a different GHC). Rebuilding..."
+      buildHieFiles hieDir
+      readHieFiles hieDir
+
+buildHieFiles :: FilePath -> IO ()
+buildHieFiles hieDir = do
+  let ghcVer = "ghc-" <> showVersion compilerVersion
+  ghc <- maybe "ghc" id <$> findExecutable ghcVer
+  callProcess "cabal"
+    [ "build"
+    , "all"
+    , "--disable-tests"
+    , "-w"
+    , ghc
+    , "--ghc-options=-fforce-recomp"
+    , "--ghc-options=-fwrite-ide-info"
+    , "--ghc-options=-hiedir=" <> hieDir
+    , "--ghc-options=-hidir=" <> hieDir
+    ]
 
 hasFilesWithExt :: FilePath -> String -> IO Bool
 hasFilesWithExt dir ext = do
@@ -226,7 +268,19 @@ onchainFiles hieDir hieFiles =
       pure $ iface >>= \modIface -> if hasOnchainAnnotation modIface
         then Just (mi_module modIface)
         else Nothing
-    pure $ Set.fromList $ mapMaybe (`Map.lookup` moduleToFile) annotatedModules
+    let fromHi = Set.fromList $ mapMaybe (`Map.lookup` moduleToFile) annotatedModules
+    let fromHie =
+          Set.fromList
+            [ hie_hs_file
+            | HieFile{..} <- hieFiles
+            , hasOnchainAnnotationInSource hie_hs_src
+            ]
+    pure $ Set.union fromHi fromHie
+
+hasOnchainAnnotationInSource :: BS8.ByteString -> Bool
+hasOnchainAnnotationInSource src =
+  "ANN module" `BS8.isInfixOf` src
+    && "onchain-contract" `BS8.isInfixOf` src
 
 isOnchainObservations :: Set.Set FilePath -> Observation -> Bool
 isOnchainObservations files obs = Set.member (observationFile obs) files

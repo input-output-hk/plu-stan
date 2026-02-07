@@ -4,6 +4,8 @@ import Stan.Hie.Compat (HieFile (..))
 import System.Directory (doesFileExist, getModificationTime)
 import System.FilePath ((</>))
 import System.Process (callProcess)
+import System.Directory (findExecutable)
+import System.Info (compilerVersion)
 import Test.Hspec (hspec)
 
 import Stan.Hie (readHieFiles)
@@ -14,7 +16,8 @@ import Test.Stan.Number (linesOfCodeSpec, modulesNumSpec)
 import Test.Stan.Observation (observationSpec)
 import Test.Stan.Toml (tomlSpec)
 
-import Control.Monad (when)
+import Control.Exception (try)
+import Data.Version (showVersion)
 
 
 main :: IO ()
@@ -44,11 +47,16 @@ ensureHieFiles :: FilePath -> IO ()
 ensureHieFiles hieDir = do
     needsRebuild <- hieFilesStale hieDir
     when needsRebuild $ do
+        let ghcVer = "ghc-" <> showVersion compilerVersion
+        ghc <- maybe "ghc" id <$> findExecutable ghcVer
         putStrLn "Rebuilding to generate fresh .hie files for tests..."
         callProcess "cabal"
             [ "build"
             , "all"
             , "--disable-tests"
+            , "-w"
+            , ghc
+            , "--ghc-options=-fforce-recomp"
             , "--ghc-options=-fwrite-ide-info"
             , "--ghc-options=-hiedir=" <> hieDir
             , "--ghc-options=-hidir=" <> hieDir
@@ -64,4 +72,10 @@ hieFilesStale hieDir = do
         else do
             srcTime <- getModificationTime src
             hieTime <- getModificationTime hie
-            pure (srcTime > hieTime)
+            if srcTime > hieTime
+                then pure True
+                else do
+                    readable <- try (readHieFiles hieDir) :: IO (Either SomeException [HieFile])
+                    pure $ case readable of
+                        Left _  -> True
+                        Right _ -> False

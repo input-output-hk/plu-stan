@@ -4,12 +4,15 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Redundant if" #-}
 
 module Target.PlutusTx where
 
 import PlutusTx qualified as Tx
 import PlutusTx.Builtins.HasOpaque qualified as BI
-import PlutusTx.Builtins.Internal qualified as BIInternal
+import PlutusTx.Builtins.Internal qualified as BI
 import PlutusTx.Foldable qualified as TxFoldable
 import PlutusTx.Maybe qualified as Maybe
 import PlutusTx.List qualified as TxList
@@ -28,7 +31,7 @@ import PlutusLedgerApi.V3 (
   ScriptContext (..),
   TxInfo (..),
   TxOut (..),
-  txOutAddress,
+  txOutAddress, getRedeemer,
   )
 import PlutusLedgerApi.V3.MintValue qualified as MintValue
 {-# ANN module ("onchain-contract" :: String) #-}
@@ -217,14 +220,14 @@ currencySymbolValueOfMintedValue ctx =
 
 unvalidatedPubKeyHashEqFromBuiltinData :: Bool
 unvalidatedPubKeyHashEqFromBuiltinData =
-  Tx.unsafeFromBuiltinData (BIInternal.mkB (BI.stringToBuiltinByteStringHex "deadbeef")) == pubKeyHash
+  Tx.unsafeFromBuiltinData (BI.mkB (BI.stringToBuiltinByteStringHex "deadbeef")) == pubKeyHash
   where
     pubKeyHash :: PubKeyHash
     pubKeyHash = PubKeyHash (BI.stringToBuiltinByteStringHex "deadbeef")
 
 unvalidatedScriptHashEqFromBuiltinData :: Bool
 unvalidatedScriptHashEqFromBuiltinData =
-  Tx.unsafeFromBuiltinData (BIInternal.mkB (BI.stringToBuiltinByteStringHex "deadbeef")) == scriptHash
+  Tx.unsafeFromBuiltinData (BI.mkB (BI.stringToBuiltinByteStringHex "deadbeef")) == scriptHash
   where
     scriptHash :: ScriptHash
     scriptHash = ScriptHash (BI.stringToBuiltinByteStringHex "deadbeef")
@@ -499,3 +502,356 @@ precisionLossWhere a b c = multResult
   where
     divResult = a `div` b
     multResult = divResult * c
+
+strictBangArgMultiUseWhere :: Integer
+strictBangArgMultiUseWhere = go ([1, 2, 3] :: [Integer])
+  where
+    go :: [Integer] -> Integer
+    go !xs = TxFoldable.length xs + TxFoldable.length xs
+
+multiUseLazyArgBindingWhere :: Integer
+multiUseLazyArgBindingWhere = go ([1, 2, 3] :: [Integer])
+  where
+    go :: [Integer] -> Integer
+    go xs = TxFoldable.length xs + TxFoldable.length xs
+
+pluStan08OracleLikeCredStrictLet :: Integer
+pluStan08OracleLikeCredStrictLet = go 1
+  where
+    go :: Integer -> Integer
+    go x =
+      let !cred = (x, x + 1)
+      in if fst cred == 1 then fst cred else snd cred
+
+pluStan08OracleLikeCredLazyLet :: Integer
+pluStan08OracleLikeCredLazyLet = go 1
+  where
+    go :: Integer -> Integer
+    go !x =
+      let !cred = (x, x + 1)
+      in if fst cred == 1 then fst cred else snd cred
+
+{-# INLINE plutStan08GetOracle #-}
+plutStan08GetOracle ::
+  BI.BuiltinByteString
+  -- oracle minting currency symbol
+  -> BuiltinData 
+  -> BI.BuiltinList BuiltinData
+  -> BuiltinData 
+plutStan08GetOracle b_oracleSym tref = go
+  where
+    go :: BI.BuiltinList BuiltinData -> BuiltinData
+    go l =
+      let !infoFields = BI.snd $ BI.unsafeDataAsConstr (BI.head l) -- error if l is null
+          tInfoRef = BI.head infoFields
+          r_txout = BI.head $ BI.tail infoFields
+          !txout_fields = BI.snd $ BI.unsafeDataAsConstr r_txout
+      in BI.ifThenElse (BI.equalsData tInfoRef tref)
+         (\_ ->
+             let r_v = BI.head $ BI.tail txout_fields
+                 r_addr = BI.head txout_fields
+                 !cred = BI.unsafeDataAsConstr $ BI.head $ BI.snd $ BI.unsafeDataAsConstr r_addr
+             in BI.ifThenElse (BI.equalsInteger (BI.fst cred) 1)
+                (\_ -> BI.head $ BI.snd cred)
+                (\_ -> error "retrieveOracleHash: only one script input expected or NFT token missing !!!")
+                BI.unitval
+         )
+         (\_ -> go (BI.tail l))
+         BI.unitval
+
+{-# INLINE plutStan08GetOracleTrigger #-}
+plutStan08GetOracleTrigger ::
+  BI.BuiltinByteString
+  -- oracle minting currency symbol
+  -> BuiltinData 
+  -> BI.BuiltinList BuiltinData
+  -> BuiltinData 
+plutStan08GetOracleTrigger b_oracleSym tref = go
+  where
+    go :: BI.BuiltinList BuiltinData -> BuiltinData
+    go l =
+      let !infoFields = BI.snd $ BI.unsafeDataAsConstr (BI.head l) -- error if l is null
+          tInfoRef = BI.head infoFields
+          r_txout = BI.head $ BI.tail infoFields
+          !txout_fields = BI.snd $ BI.unsafeDataAsConstr r_txout
+      in BI.ifThenElse (BI.equalsData tInfoRef tref)
+         (\_ ->
+             let r_v = BI.head $ BI.tail txout_fields
+                 r_addr = BI.head txout_fields
+                 cred = BI.unsafeDataAsConstr $ BI.head $ BI.snd $ BI.unsafeDataAsConstr r_addr
+             in BI.ifThenElse (BI.equalsInteger (BI.fst cred) 1)
+                (\_ -> BI.head $ BI.snd cred)
+                (\_ -> error "retrieveOracleHash: only one script input expected or NFT token missing !!!")
+                BI.unitval
+         )
+         (\_ -> go (BI.tail l))
+         BI.unitval
+
+-- PLU-STAN-17 fixtures (Redeemer-supplied indices must be unique)
+--
+-- The functions below are intentionally small and are analysed by Stan's
+-- `PLU-STAN-17` inspection. Each one documents whether it should trigger
+-- a warning, and why.
+--
+-- Local indexing helpers used by the PLU-STAN-17 fixtures. The detector identifies
+-- indexing-like sinks by type shape (Integer + []/BuiltinList args), not by name.
+{-# INLINABLE elemAt #-}
+elemAt :: Integer -> [a] -> a
+elemAt n = go n
+  where
+    go i xs =
+      if i == 0
+        then case xs of
+          x : _ -> x
+          [] -> error "elemAt: empty list"
+        else case xs of
+          _ : ys -> go (i - 1) ys
+          [] -> error "elemAt: index too large"
+
+{-# INLINE elemAt' #-}
+elemAt' :: Integer -> BI.BuiltinList a -> a
+elemAt' !n xs =
+  BI.ifThenElse (BI.equalsInteger n 0)
+  (\_ -> BI.head xs)
+  (\_ -> elemAt' (n - 1) (BI.tail xs))
+  BI.unitval
+
+{-# INLINE elemAtFast #-}
+elemAtFast :: Integer -> BI.BuiltinList a -> a
+elemAtFast !n xs =
+  BI.ifThenElse (BI.lessThanInteger 10 n)
+  (\_ -> elemAtFast (n - 10) (BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail xs))
+  (\_ -> elemAtFast2 n xs)
+  BI.unitval
+
+{-# INLINE elemAtFast2 #-}
+elemAtFast2 :: Integer -> BI.BuiltinList a -> a
+elemAtFast2 !n xs =
+  BI.ifThenElse (BI.lessThanInteger 5 n)
+  (\_ -> elemAtFast2 (n - 5) (BI.tail $ BI.tail $ BI.tail $ BI.tail $ BI.tail xs))
+  (\_ -> elemAt' n xs)
+  BI.unitval
+
+plutStan17UnsafeRedeemerIndicesList :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): indexing a ScriptContext-derived outputs list
+-- using a redeemer-supplied indices list, without any uniqueness enforcement.
+plutStan17UnsafeRedeemerIndicesList ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      out = elemAt (elemAt 0 (Tx.unsafeFromBuiltinData redeemer :: [Integer])) outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17SafeRedeemerIndicesList :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should NOT trigger): same as the unsafe case, but we add the
+-- `plutstan uniqueness enforced` marker on the line above the indexing site.
+plutStan17SafeRedeemerIndicesList ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      -- PluTStAn   Uniqueness    Enforced
+      out = elemAt (elemAt 0 (Tx.unsafeFromBuiltinData redeemer :: [Integer])) outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeRedeemerIndicesBytestring :: ScriptContext -> BuiltinData -> BuiltinData
+-- PLU-STAN-17 (should trigger): indexing a ScriptContext-derived list using an
+-- index obtained from a redeemer-supplied bytestring (via `indexByteString`),
+-- without any uniqueness enforcement.
+plutStan17UnsafeRedeemerIndicesBytestring ctx redeemer =
+  elemAtFast (BI.indexByteString (Tx.unsafeFromBuiltinData redeemer :: BI.BuiltinByteString) 0) (BI.unsafeDataAsList $ BI.head $ BI.snd $ BI.unsafeDataAsConstr $ BI.head $ BI.snd $ BI.unsafeDataAsConstr $ Tx.toBuiltinData ctx)
+
+plutStan17UnsafeIxBindingList :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): the indices list and the final index are bound
+-- to intermediate variables (`idxs`, `ix`) before being used to index into the
+-- ScriptContext-derived outputs list. The analysis should be transitive.
+plutStan17UnsafeIxBindingList ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      ix = elemAt 0 idxs
+      out = elemAt ix outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17SafeMarkerSameLine :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should NOT trigger): same as the unsafe ix-binding case, but
+-- the marker is on the SAME line as the indexing site (case/whitespace
+-- insensitive), so it should be suppressed.
+plutStan17SafeMarkerSameLine ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      ix = elemAt 0 idxs
+      out = elemAt ix outs -- plutSTAN    uniqueness enforced
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeIxBindingBytestring :: BuiltinData -> BuiltinData -> BuiltinData
+-- PLU-STAN-17 (should trigger): index is extracted from a redeemer-supplied
+-- bytestring into an intermediate variable (`ix`) and then used to index a
+-- ScriptContext-derived list.
+plutStan17UnsafeIxBindingBytestring ctx redeemer =
+  let inputs =
+        BI.unsafeDataAsList $
+          BI.head $
+            BI.snd $
+              BI.unsafeDataAsConstr $
+                BI.head $
+                  BI.snd $
+                    BI.unsafeDataAsConstr ctx
+      ix = BI.indexByteString (Tx.unsafeFromBuiltinData redeemer :: BI.BuiltinByteString) 0
+  in elemAtFast ix inputs
+
+plutStan17UnsafeMapIndices :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): mapping over a redeemer-supplied indices list.
+-- The indexing happens inside the lambda, so the detector must look through
+-- `map` and still connect indices -> indexing into a ScriptContext-derived list.
+plutStan17UnsafeMapIndices ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      selected = map (\i -> elemAt i outs) idxs
+  in case selected of
+    [] -> 0
+    _ -> 1
+
+plutStan17UnsafeListArg :: [TxOut] -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): the list being indexed is a function argument.
+-- Stan cannot know at this call site whether the caller supplied a ScriptContext-
+-- derived list (e.g. `txInfoOutputs`) or any other attacker-influenced list, so
+-- the rule flags this conservatively.
+plutStan17UnsafeListArg outs redeemer =
+  let idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      out = elemAt (elemAt 0 idxs) outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeCtxListTransitive :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): ScriptContext-derived list is passed through a
+-- transitive alias (`outs0` -> `outs`) before being indexed.
+plutStan17UnsafeCtxListTransitive ctx redeemer =
+  let outs0 = txInfoOutputs $ scriptContextTxInfo ctx
+      outs = outs0
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      out = elemAt (elemAt 0 idxs) outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeIndexValueTransitive :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): redeemer-derived index is passed through a
+-- transitive alias (`ix0` -> `ix`) before being used to index a ScriptContext-
+-- derived list.
+plutStan17UnsafeIndexValueTransitive ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      ix0 = elemAt 0 idxs
+      ix = ix0
+      out = elemAt ix outs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeBangBangOperator :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should trigger): indexing a list using `!!` where the index is
+-- derived from a redeemer-supplied indices list, without uniqueness enforcement.
+plutStan17UnsafeBangBangOperator ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      out = outs TxList.!! elemAt 0 idxs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17SafeBangBangOperator :: ScriptContext -> BuiltinData -> Integer
+-- PLU-STAN-17 (should NOT trigger): same as the unsafe `!!` case, but we mark
+-- the indexing site as having uniqueness enforced.
+plutStan17SafeBangBangOperator ctx redeemer =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData redeemer :: [Integer]
+      -- plutstan uniqueness enforced
+      out = outs TxList.!! elemAt 0 idxs
+  in case txOutAddress out of
+    Address _ _ -> 0
+
+plutStan17UnsafeDrop :: ScriptContext -> BI.BuiltinUnit
+-- PLU-STAN-17 (should trigger): using an index-based traversal helper (`drop`)
+-- with a redeemer-derived index should still be considered unsafe without a
+-- uniqueness check on the indices list.
+plutStan17UnsafeDrop ctx =
+  let outs = txInfoOutputs $ scriptContextTxInfo ctx
+      idxs = Tx.unsafeFromBuiltinData (getRedeemer $ scriptContextRedeemer ctx) :: [Integer]
+      getScriptOutputs :: [TxOut] -> [Integer] -> [TxOut]
+      getScriptOutputs outs indices = 
+        case indices of
+          [] -> []
+          x : xs -> TxList.head (TxList.drop x outs) : getScriptOutputs outs xs
+      rest = getScriptOutputs outs idxs
+  in case rest of
+      [] -> error "plutStan17UnsafeDrop: no script output found"
+      _ -> BI.unitval
+
+-- PLU-STAN-18 fixtures (Avoid lazy (&&) in on-chain code)
+--
+-- PLU-STAN-18 warns about using (&&) in on-chain code. For now, the rule is
+-- only triggers when (&&) appears in the predicate of a branching statement
+-- (`if` or `BI.ifThenElse`) and one of the branches contains a failure
+-- (`error` or `traceError`).
+
+plutStan18TriggerIfElseError :: Bool
+-- PLU-STAN-18 (should trigger): (&&) is used in the predicate of an `if`, and
+-- the else branch fails via `traceError`.
+plutStan18TriggerIfElseError =
+  if True && False
+    then True
+    else P.traceError "boom"
+
+plutStan18TriggerIfThenError :: Bool
+-- PLU-STAN-18 (should trigger): (&&) is used in the predicate of an `if`, and
+-- the then branch fails via `traceError`.
+plutStan18TriggerIfThenError =
+  if True && False
+    then P.traceError "boom"
+    else False
+
+plutStan18NoTriggerNoError :: Bool
+-- PLU-STAN-18 (should NOT trigger): predicate uses (&&) but neither branch
+-- fails, so no warning is emitted.
+plutStan18NoTriggerNoError =
+  if True && False
+    then True
+    else False
+
+plutStan18NoTriggerAndInBranch :: Bool
+-- PLU-STAN-18 (should NOT trigger): (&&) appears in a branch body, not in the
+-- predicate.
+plutStan18NoTriggerAndInBranch =
+  if True
+    then True && False
+    else P.traceError "boom"
+
+plutStan18TriggerBuiltinIfThenElse :: Bool
+-- PLU-STAN-18 (should trigger): (&&) is used in the predicate of
+-- `BI.ifThenElse` and a branch fails.
+plutStan18TriggerBuiltinIfThenElse =
+  BI.ifThenElse (True && False) (P.traceError "boom") False
+
+plutStan18TriggerOutermostOnly :: Bool
+-- PLU-STAN-18 (should trigger ONCE): nested (&&) inside the predicate should
+-- only report the outermost operator occurrence.
+plutStan18TriggerOutermostOnly =
+  if True &&
+     (False && True)
+    then P.traceError "boom"
+    else False
+
+pluStan18BooleanCondition :: Integer -> Integer -> Bool 
+pluStan18BooleanCondition x y =
+  x > 5 
+   && y < 10
+   && x < y 
+
+-- PLU-STAN-18 (should trigger): boolean condition uses (&&) and one of the branches fails.
+pluStan18BooleanConditionTrigger :: Bool 
+pluStan18BooleanConditionTrigger = 
+  if pluStan18BooleanCondition 6 9 
+    then True
+    else error "pluStan18BooleanConditionTrigger: condition failed"
+
+pluStan08TuplePatternMultiUse :: Integer
+-- PLU-STAN-08 (should trigger): tuple pattern is non-strict; x is used twice.
+pluStan08TuplePatternMultiUse =
+  let (x, y) = (1 :: Integer, 2 :: Integer)
+  in x + x + y
