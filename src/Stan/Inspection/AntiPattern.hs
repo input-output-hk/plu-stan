@@ -61,6 +61,8 @@ module Stan.Inspection.AntiPattern
     , plustan11
     , plustan12
     , plustan16
+    , plustan17
+    , plustan18
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -121,6 +123,8 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan11
     , plustan12
     , plustan16
+    , plustan17
+    , plustan18
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -696,6 +700,8 @@ plustan09 = mkAntiPatternInspection (Id "PLU-STAN-09") "valueOf in boolean condi
     & solutionL .~
         [ "Use a bounded token check or a stronger value-level comparison"
         , "Consider 'valueEq' when comparing full values"
+        , "Consider that minimum lovelace requirements are dynamic based on UTxO size"
+        , "and theexact calculation can change with protocol updates"
         ]
     & withPlutusCategory
     & severityL .~ Warning
@@ -741,6 +747,30 @@ plustan16 = mkAntiPatternInspection (Id "PLU-STAN-16") "Precision loss: division
     & solutionL .~
         [ "Multiply before dividing to delay rounding"
         , "Rewrite (a `div` b) * c as (a * c) `div` b"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan17 :: Inspection
+plustan17 = mkAntiPatternInspection (Id "PLU-STAN-17") "Redeemer-supplied indices must be unique"
+    RedeemerSuppliedIndicesUniqueness
+    & descriptionL .~ "Using redeemer-supplied indices to select elements from lists without enforcing uniqueness can allow duplicates, tricking the validator into validating the same element multiple times."
+    & solutionL .~
+        [ "Enforce that all provided indices are unique (e.g. via a bitset / pow2 trick)"
+        , "Prefer selecting by stable identifiers (e.g. TxOutRef) instead of indices when possible"
+        , "If uniqueness is enforced, annotate the indexing site with a comment containing: plutstan uniqueness enforced"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan18 :: Inspection
+plustan18 = mkAntiPatternInspection (Id "PLU-STAN-18") "Avoid lazy (&&) in on-chain code"
+    LazyAndInOnChainCode
+    & descriptionL .~ "Using lazy (&&) in the predicate of a branching statement where one branch fails can introduce extra delay/force overhead in the generated UPLC. Prefer a strict boolean combinator when you don't care about optimizing the failure case."
+    & solutionL .~
+        [ "Use a strict combinator such as:"
+        , "{-# INLINE builtinAnd #-}; builtinAnd :: Bool -> Bool -> Bool; builtinAnd b1 b2 = BI.ifThenElse b1 b2 False"
+        , "If the RHS intentionally throws (e.g. error/traceError), keep (&&) to preserve behaviour."
         ]
     & withPlutusCategory
     & severityL .~ Warning
