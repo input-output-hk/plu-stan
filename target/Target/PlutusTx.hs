@@ -19,7 +19,7 @@ import PlutusTx.List qualified as TxList
 import PlutusTx.Prelude qualified as P
 
 -- Place for future imports
-import PlutusLedgerApi.V1 (Credential (..), POSIXTimeRange, PubKeyHash (..), ScriptHash (..))
+import PlutusLedgerApi.V1 (Credential (..), POSIXTime, POSIXTimeRange, PubKeyHash (..), ScriptHash (..))
 import PlutusLedgerApi.V1.Contexts qualified as V1
 import PlutusLedgerApi.V1.Interval qualified as Interval
 import PlutusLedgerApi.V1.Value qualified as Value
