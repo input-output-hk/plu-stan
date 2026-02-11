@@ -240,6 +240,30 @@ plustan12Spec analysis = describe "PLU-STAN-12" $ do
   it "txInfoValidRange with finite bound check does not trigger" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 429
 
+  it "both bounds checked does not trigger" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 864
+
+  it "custom intervals with utilities should not trigger" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 870
+
+  it "literal intervals with always should not trigger" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 877
+
+  it "singleton (bounded) interval should not trigger" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 883
+
+  it "intersection with finite bounds should not trigger" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 889
+
+  it "helper with validation should not trigger" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 901
+
+  it "extract and check bounds should not trigger" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 910
+
+  it "custom full validation (both bounds) should not trigger" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 932
+
 plustan16Spec :: Analysis -> Spec
 plustan16Spec analysis = describe "PLU-STAN-16" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
