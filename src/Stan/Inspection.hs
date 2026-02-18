@@ -132,6 +132,14 @@ data InspectionAnalysis
     | RedeemerSuppliedIndicesUniqueness
     -- | `&&` used in on-chain code (prefer strict builtinAnd).
     | LazyAndInOnChainCode
+    -- | TxOut validation misses reference script checks.
+    | MissingTxOutReferenceScriptCheck
+    -- | TxOut validation misses staking credential checks.
+    | MissingTxOutStakingCredentialCheck
+    -- | TxOut validation misses value checks.
+    | MissingTxOutValueCheck
+    -- | TxOut validation misses datum checks.
+    | MissingTxOutDatumCheck
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

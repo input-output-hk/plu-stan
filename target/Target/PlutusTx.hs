@@ -934,3 +934,352 @@ customFullValidation ctx =
   in if isFiniteLowerBound txRange && isFiniteUpperBound txRange
      then not $ Interval.isEmpty txRange
      else False
+
+-- PLU-STAN-13/14/15/19 fixtures (TxOut field coverage checks)
+
+hasOutputAddress :: TxOut -> Bool
+hasOutputAddress out =
+  case txOutAddress out of
+    Address (ScriptCredential _) _ -> True
+    _ -> False
+
+hasStakingCredential :: TxOut -> Bool
+hasStakingCredential out =
+  case txOutAddress out of
+    Address _ (Just _) -> True
+    _ -> False
+
+hasOutputValue :: TxOut -> Bool
+hasOutputValue out =
+  Value.valueOf (extractTxOutValue out) Value.adaSymbol Value.adaToken >= 0
+  where
+    extractTxOutValue :: TxOut -> Value.Value
+    extractTxOutValue (TxOut _ v _ _) = v
+
+hasOutputDatum :: TxOut -> Bool
+hasOutputDatum out =
+  case txOutDatum out of
+    OutputDatum _ -> True
+    _ -> False
+
+hasReferenceScript :: TxOut -> Bool
+hasReferenceScript out =
+  case out of
+    TxOut _ _ _ (Just _) -> True
+    _ -> False
+
+plutStan13MissingReferenceScriptCheck :: TxOut -> Bool
+-- PLU-STAN-13 (should trigger): validates address, staking, value and datum
+-- but never constrains reference script.
+plutStan13MissingReferenceScriptCheck out =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputValue out
+    && hasOutputDatum out
+
+plutStan14MissingStakingCredentialCheck :: TxOut -> Bool
+-- PLU-STAN-14 (should trigger): validates address, value, datum and reference
+-- script but never constrains staking credential.
+plutStan14MissingStakingCredentialCheck out =
+  hasOutputAddress out
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript out
+
+plutStan15MissingValueCheck :: TxOut -> Bool
+-- PLU-STAN-15 (should trigger): validates address, staking, datum and
+-- reference script but never constrains value.
+plutStan15MissingValueCheck out =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputDatum out
+    && hasReferenceScript out
+
+plutStan19MissingDatumCheck :: TxOut -> Bool
+-- PLU-STAN-19 (should trigger): validates address, staking, value and
+-- reference script but never constrains datum.
+plutStan19MissingDatumCheck out =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputValue out
+    && hasReferenceScript out
+
+plutStanFieldsAllChecked :: TxOut -> Bool
+-- PLU-STAN-13/14/15/19 (should NOT trigger): all fields are validated.
+plutStanFieldsAllChecked out =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript out
+
+-- Edge matrix for PLU-STAN-13/14/15/19
+
+infixr 3 .&&.
+(.&&.) :: Bool -> Bool -> Bool
+(.&&.) x y = BI.ifThenElse x y False
+
+plutStan13EdgeExactlyThreeChecks :: TxOut -> Bool
+-- PLU-STAN-13 (should trigger): exactly three recognized field checks.
+plutStan13EdgeExactlyThreeChecks out =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputValue out
+
+plutStan14EdgeExactlyThreeChecks :: TxOut -> Bool
+-- PLU-STAN-14 (should trigger): exactly three recognized field checks.
+plutStan14EdgeExactlyThreeChecks out =
+  hasOutputAddress out
+    && hasOutputValue out
+    && hasReferenceScript out
+
+plutStan15EdgeHelperIndirection :: TxOut -> Bool
+-- PLU-STAN-15 (should trigger): checks are routed through helper bindings.
+plutStan15EdgeHelperIndirection out =
+  let addrOk = hasOutputAddress out
+      stakingOk = hasStakingCredential out
+      datumOk = hasOutputDatum out
+      refOk = hasReferenceScript out
+  in addrOk && stakingOk && datumOk && refOk
+
+plutStan19EdgePatternMix :: TxOut -> Bool
+-- PLU-STAN-19 (should trigger): mixed case-pattern and helper checks.
+plutStan19EdgePatternMix out =
+  (case txOutAddress out of
+      Address _ _ -> True
+      _ -> False)
+    && hasStakingCredential out
+    && hasOutputValue out
+    && hasReferenceScript out
+
+plutStanEdgeTwoFieldsOnly :: TxOut -> Bool
+-- PLU-STAN-13/14/15/19 (should NOT trigger): below threshold (2 fields only).
+plutStanEdgeTwoFieldsOnly out =
+  hasOutputAddress out
+    && hasOutputValue out
+
+plutStanEdgeNoConjunctionIf :: TxOut -> Bool
+-- PLU-STAN-13/14/15/19 (should NOT trigger): no (&&) present.
+plutStanEdgeNoConjunctionIf out =
+  if hasOutputAddress out
+    then hasStakingCredential out
+    else hasOutputValue out
+
+plutStanEdgeNoConjunctionBuiltinAnd :: TxOut -> Bool
+-- PLU-STAN-13/14/15/19 (should NOT trigger): strict combinator, no (&&).
+plutStanEdgeNoConjunctionBuiltinAnd out =
+  let builtinAnd b1 b2 = BI.ifThenElse b1 b2 False
+      ab = builtinAnd (hasOutputAddress out) (hasStakingCredential out)
+  in builtinAnd ab (hasOutputValue out)
+
+plutStanEdgeLongSpanMissingReference :: TxOut -> Bool
+-- PLU-STAN-13/14/15/19 (should NOT trigger): intentionally long binding span.
+plutStanEdgeLongSpanMissingReference out =
+  let a0 = hasOutputAddress out
+      a1 = hasStakingCredential out
+      a2 = hasOutputValue out
+      keep1 = True
+      keep2 = True
+      keep3 = True
+      keep4 = True
+      keep5 = True
+      keep6 = True
+      keep7 = True
+      keep8 = True
+      keep9 = True
+      keep10 = True
+  in a0
+      && a1
+      && a2
+      && keep1
+      && keep2
+      && keep3
+      && keep4
+      && keep5
+      && keep6
+      && keep7
+      && keep8
+      && keep9
+      && keep10
+
+plutStanEdgeAliasAndMissingReference :: TxOut -> Bool
+-- PLU-STAN-13/14/15/19 (should NOT trigger): conjunction via alias operator.
+plutStanEdgeAliasAndMissingReference out =
+  hasOutputAddress out
+    .&&. hasStakingCredential out
+    .&&. hasOutputValue out
+    .&&. hasOutputDatum out
+
+plutStanEdgeFalsePositiveNonTxOut :: Bool -> Bool -> Bool -> Bool -> Bool
+-- PLU-STAN-13 (currently triggers): token-like local names on non-TxOut code.
+plutStanEdgeFalsePositiveNonTxOut a b c d =
+  let txOutAddress = a
+      hasStakingCredential = b
+      hasOutputValue = c
+      hasOutputDatum = d
+  in txOutAddress && hasStakingCredential && hasOutputValue && hasOutputDatum
+
+plutStanEdgeFullAddressConservative :: TxOut -> Address -> Bool
+-- PLU-STAN-14 (currently triggers): full-address equality still lacks staking token.
+plutStanEdgeFullAddressConservative out expectedAddress =
+  txOutAddress out == expectedAddress
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript out
+
+-- TxOutAsData and realistic-control-flow edge fixtures
+
+type TxOutAsData = BuiltinData
+
+decodeTxOutAsData :: TxOutAsData -> TxOut
+decodeTxOutAsData = Tx.unsafeFromBuiltinData
+
+plutStan13EdgeTxOutAsDataMissingReference :: TxOutAsData -> Bool
+-- PLU-STAN-13 (should trigger): TxOut decoded from BuiltinData.
+plutStan13EdgeTxOutAsDataMissingReference outData =
+  let out = decodeTxOutAsData outData
+  in hasOutputAddress out
+      && hasStakingCredential out
+      && hasOutputValue out
+      && hasOutputDatum out
+
+plutStan14EdgeTxOutAsDataMissingStaking :: TxOutAsData -> Bool
+-- PLU-STAN-14 (should trigger): TxOut decoded from BuiltinData.
+plutStan14EdgeTxOutAsDataMissingStaking outData =
+  let out = decodeTxOutAsData outData
+  in hasOutputAddress out
+      && hasOutputValue out
+      && hasOutputDatum out
+      && hasReferenceScript out
+
+plutStan15EdgeTxOutAsDataMissingValue :: TxOutAsData -> Bool
+-- PLU-STAN-15 (should trigger): TxOut decoded from BuiltinData.
+plutStan15EdgeTxOutAsDataMissingValue outData =
+  let out = decodeTxOutAsData outData
+  in hasOutputAddress out
+      && hasStakingCredential out
+      && hasOutputDatum out
+      && hasReferenceScript out
+
+plutStan19EdgeTxOutAsDataMissingDatum :: TxOutAsData -> Bool
+-- PLU-STAN-19 (should trigger): TxOut decoded from BuiltinData.
+plutStan19EdgeTxOutAsDataMissingDatum outData =
+  let out = decodeTxOutAsData outData
+  in hasOutputAddress out
+      && hasStakingCredential out
+      && hasOutputValue out
+      && hasReferenceScript out
+
+plutStanEdgeTxOutAsDataAllChecked :: TxOutAsData -> Bool
+-- PLU-STAN-13/14/15/19 (should NOT trigger): TxOutAsData with full coverage.
+plutStanEdgeTxOutAsDataAllChecked outData =
+  let out = decodeTxOutAsData outData
+  in hasOutputAddress out
+      && hasStakingCredential out
+      && hasOutputValue out
+      && hasOutputDatum out
+      && hasReferenceScript out
+
+plutStan13EdgeNoAndRecursiveMissingReference :: TxOut -> Bool
+-- PLU-STAN-13 (should NOT trigger): realistic control flow without (&&).
+plutStan13EdgeNoAndRecursiveMissingReference out =
+  if hasOutputAddress out
+    then if hasStakingCredential out
+      then if hasOutputValue out
+        then hasOutputDatum out
+        else False
+      else False
+    else False
+
+plutStan14EdgeNoAndRecursiveMissingStaking :: TxOut -> Bool
+-- PLU-STAN-14 (should NOT trigger): realistic control flow without (&&).
+plutStan14EdgeNoAndRecursiveMissingStaking out =
+  if hasOutputAddress out
+    then if hasOutputValue out
+      then if hasOutputDatum out
+        then hasReferenceScript out
+        else False
+      else False
+    else False
+
+plutStan15EdgeNoAndRecursiveMissingValue :: TxOut -> Bool
+-- PLU-STAN-15 (should NOT trigger): realistic control flow without (&&).
+plutStan15EdgeNoAndRecursiveMissingValue out =
+  if hasOutputAddress out
+    then if hasStakingCredential out
+      then if hasOutputDatum out
+        then hasReferenceScript out
+        else False
+      else False
+    else False
+
+plutStan19EdgeNoAndRecursiveMissingDatum :: TxOut -> Bool
+-- PLU-STAN-19 (should NOT trigger): realistic control flow without (&&).
+plutStan19EdgeNoAndRecursiveMissingDatum out =
+  if hasOutputAddress out
+    then if hasStakingCredential out
+      then if hasOutputValue out
+        then hasReferenceScript out
+        else False
+      else False
+    else False
+
+plutStan14EdgeUnrelatedEqNoStaking :: TxOut -> Integer -> Bool
+-- PLU-STAN-14 (should trigger): unrelated (==) must not imply staking checks.
+plutStan14EdgeUnrelatedEqNoStaking out n =
+  let _addr = txOutAddress out
+      unrelatedEq = n == 0
+  in hasOutputAddress out
+      && hasOutputValue out
+      && hasOutputDatum out
+      && hasReferenceScript out
+      && BI.ifThenElse unrelatedEq True True
+
+plutStan13EdgeCrossOutputReference :: TxOut -> TxOut -> Bool
+-- PLU-STAN-13 (should trigger): reference check on a different TxOut does not count.
+plutStan13EdgeCrossOutputReference out otherOut =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript otherOut
+
+plutStan19EdgeCrossOutputDatum :: TxOut -> TxOut -> Bool
+-- PLU-STAN-19 (should trigger): datum check on a different TxOut does not count.
+plutStan19EdgeCrossOutputDatum out otherOut =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputValue out
+    && hasReferenceScript out
+    && hasOutputDatum otherOut
+
+plutStan13EdgeAliasSplitSameOutput :: TxOut -> Bool
+-- PLU-STAN-13 (should trigger): checks split across direct alias names still target one TxOut.
+plutStan13EdgeAliasSplitSameOutput out =
+  let outAlias = out
+  in hasOutputAddress outAlias
+      && hasStakingCredential outAlias
+      && hasOutputValue out
+      && hasOutputDatum out
+
+plutStan13EdgePatternDestructureMissingReference :: TxOut -> Bool
+-- PLU-STAN-13 (should trigger): pattern-destructured checks still count per-field.
+plutStan13EdgePatternDestructureMissingReference out =
+  case out of
+    TxOut addr val dat _ref ->
+      (case addr of
+          Address _ (Just _) -> True
+          _ -> False)
+        && Value.valueOf val Value.adaSymbol Value.adaToken >= 0
+        && case dat of
+             OutputDatum _ -> True
+             _ -> False
+
+plutStan13EdgeUnusedReferenceBinding :: TxOut -> Bool
+-- PLU-STAN-13 (should trigger): unused reference-binding checks should not count.
+plutStan13EdgeUnusedReferenceBinding out =
+  let refIgnored = hasReferenceScript out
+  in hasOutputAddress out
+      && hasStakingCredential out
+      && hasOutputValue out
+      && hasOutputDatum out
