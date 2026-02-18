@@ -60,9 +60,13 @@ module Stan.Inspection.AntiPattern
     , plustan10
     , plustan11
     , plustan12
+    , plustan13
+    , plustan14
+    , plustan15
     , plustan16
     , plustan17
     , plustan18
+    , plustan19
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -122,9 +126,13 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan10
     , plustan11
     , plustan12
+    , plustan13
+    , plustan14
+    , plustan15
     , plustan16
     , plustan17
     , plustan18
+    , plustan19
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -740,6 +748,39 @@ plustan12 = mkAntiPatternInspection (Id "PLU-STAN-12") "Validity interval / POSI
     & withPlutusCategory
     & severityL .~ Warning
 
+plustan13 :: Inspection
+plustan13 = mkAntiPatternInspection (Id "PLU-STAN-13") "TxOut validation misses reference script checks"
+    MissingTxOutReferenceScriptCheck
+    & descriptionL .~ "Validation logic over TxOut/TxOutAsData checks multiple output fields but does not enforce reference script constraints."
+    & solutionL .~
+        [ "If the output is security-critical, assert expected reference-script policy explicitly"
+        , "Document intentional omission and suppress with an inline ignore when reference script is irrelevant"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan14 :: Inspection
+plustan14 = mkAntiPatternInspection (Id "PLU-STAN-14") "TxOut validation misses staking credential checks"
+    MissingTxOutStakingCredentialCheck
+    & descriptionL .~ "Validation logic over TxOut/TxOutAsData checks multiple output fields but does not enforce staking credential constraints."
+    & solutionL .~
+        [ "Validate staking credential policy for critical outputs (or enforce it indirectly via full address checks)"
+        , "If staking credential is intentionally irrelevant, document that decision and suppress the warning"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan15 :: Inspection
+plustan15 = mkAntiPatternInspection (Id "PLU-STAN-15") "TxOut validation misses value checks"
+    MissingTxOutValueCheck
+    & descriptionL .~ "Validation logic over TxOut/TxOutAsData checks multiple output fields but does not constrain output value."
+    & solutionL .~
+        [ "Add explicit value/accounting constraints for the validated output"
+        , "At minimum, assert required assets/amounts and disallow unauthorized extras where relevant"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
 plustan16 :: Inspection
 plustan16 = mkAntiPatternInspection (Id "PLU-STAN-16") "Precision loss: division before multiplication"
     PrecisionLossDivisionBeforeMultiply
@@ -771,6 +812,17 @@ plustan18 = mkAntiPatternInspection (Id "PLU-STAN-18") "Avoid lazy (&&) in on-ch
         [ "Use a strict combinator such as:"
         , "{-# INLINE builtinAnd #-}; builtinAnd :: Bool -> Bool -> Bool; builtinAnd b1 b2 = BI.ifThenElse b1 b2 False"
         , "If the RHS intentionally throws (e.g. error/traceError), keep (&&) to preserve behaviour."
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan19 :: Inspection
+plustan19 = mkAntiPatternInspection (Id "PLU-STAN-19") "TxOut validation misses datum checks"
+    MissingTxOutDatumCheck
+    & descriptionL .~ "Validation logic over TxOut/TxOutAsData checks multiple output fields but does not validate datum/output-datum constraints."
+    & solutionL .~
+        [ "Validate datum shape and critical datum fields for security-sensitive outputs"
+        , "If datum is intentionally unconstrained, document this and suppress the warning"
         ]
     & withPlutusCategory
     & severityL .~ Warning

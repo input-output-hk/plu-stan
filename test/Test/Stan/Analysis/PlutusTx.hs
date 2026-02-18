@@ -12,9 +12,13 @@ module Test.Stan.Analysis.PlutusTx (
   plustan10Spec,
   plustan11Spec,
   plustan12Spec,
+  plustan13Spec,
+  plustan14Spec,
+  plustan15Spec,
   plustan16Spec,
   plustan17Spec,
   plustan18Spec,
+  plustan19Spec,
 ) where
 
 import Test.Hspec (Spec, describe, it)
@@ -38,9 +42,13 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   plustan10Spec analysis
   plustan11Spec analysis
   plustan12Spec analysis
+  plustan13Spec analysis
+  plustan14Spec analysis
+  plustan15Spec analysis
   plustan16Spec analysis
   plustan17Spec analysis
   plustan18Spec analysis
+  plustan19Spec analysis
 
 plustan01Spec :: Analysis -> Spec
 plustan01Spec analysis = describe "PLU-STAN-01" $ do
@@ -264,6 +272,138 @@ plustan12Spec analysis = describe "PLU-STAN-12" $ do
   it "custom full validation (both bounds) should not trigger" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan12 932
 
+plustan13Spec :: Analysis -> Spec
+plustan13Spec analysis = describe "PLU-STAN-13" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags output validation that omits reference script checks" $
+    checkObservation AntiPattern.plustan13 975 3 19
+
+  it "flags exact-3-field coverage that omits reference script" $
+    checkObservation AntiPattern.plustan13 1025 3 19
+
+  it "does not flag non-TxOut code with token-like local names" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan13 1116
+
+  it "does not flag when only two output fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan13 1058
+
+  it "flags if/then/else validation that omits reference script checks" $
+    checkObservation AntiPattern.plustan13 1064 6 22
+
+  it "flags strict combinator validation that omits reference script checks" $
+    checkObservation AntiPattern.plustan13 1072 24 40
+
+  it "flags long-spanning validation bindings that omit reference script checks" $
+    checkObservation AntiPattern.plustan13 1078 12 28
+
+  it "flags custom conjunction operators that omit reference script checks" $
+    checkObservation AntiPattern.plustan13 1108 3 19
+
+  it "flags TxOutAsData coverage that omits reference script checks" $
+    checkObservation AntiPattern.plustan13 1141 6 22
+
+  it "does not flag TxOutAsData when all fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan13 1178
+
+  it "flags recursive if-based validation that omits reference script checks" $
+    checkObservation AntiPattern.plustan13 1186 6 22
+
+  it "flags cross-output reference checks as missing on the validated output" $
+    checkObservation AntiPattern.plustan13 1241 3 19
+
+  it "flags alias-split checks as one output missing reference checks" $
+    checkObservation AntiPattern.plustan13 1260 6 22
+
+  it "flags pattern-destructured checks that omit reference script checks" $
+    checkObservation AntiPattern.plustan13 1271 11 18
+
+  it "flags unused reference-binding checks as still missing reference checks" $
+    checkObservation AntiPattern.plustan13 1281 20 38
+
+  it "does not flag when all TxOut fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan13 1010
+
+plustan14Spec :: Analysis -> Spec
+plustan14Spec analysis = describe "PLU-STAN-14" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags output validation that omits staking credential checks" $
+    checkObservation AntiPattern.plustan14 984 3 19
+
+  it "flags exact-3-field coverage that omits staking checks" $
+    checkObservation AntiPattern.plustan14 1032 3 19
+
+  it "does not flag full-address equality as missing staking checks" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1125
+
+  it "does not flag when only two output fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1058
+
+  it "does not flag when validation has no (&&) (if/then/else form)" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1064
+
+  it "does not flag when conjunction is encoded without (&&)" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1071
+
+  it "does not flag long-spanning validation bindings" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1078
+
+  it "does not flag custom conjunction operators that avoid (&&) token" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1108
+
+  it "flags TxOutAsData coverage that omits staking checks" $
+    checkObservation AntiPattern.plustan14 1150 6 22
+
+  it "does not flag TxOutAsData when all fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1178
+
+  it "flags recursive if-based validation that omits staking checks" $
+    checkObservation AntiPattern.plustan14 1197 6 22
+
+  it "flags unrelated (==) + address-token usage as missing staking checks" $
+    checkObservation AntiPattern.plustan14 1230 15 27
+
+  it "does not flag when all TxOut fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1010
+
+plustan15Spec :: Analysis -> Spec
+plustan15Spec analysis = describe "PLU-STAN-15" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags output validation that omits value checks" $
+    checkObservation AntiPattern.plustan15 993 3 19
+
+  it "flags helper-indirected checks that omit value constraints" $
+    checkObservation AntiPattern.plustan15 1039 16 32
+
+  it "does not flag when only two output fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan15 1058
+
+  it "does not flag when validation has no (&&) (if/then/else form)" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan15 1064
+
+  it "does not flag when conjunction is encoded without (&&)" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan15 1071
+
+  it "does not flag long-spanning validation bindings" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan15 1078
+
+  it "does not flag custom conjunction operators that avoid (&&) token" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan15 1108
+
+  it "flags TxOutAsData coverage that omits value checks" $
+    checkObservation AntiPattern.plustan15 1159 6 22
+
+  it "does not flag TxOutAsData when all fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan15 1178
+
+  it "flags recursive if-based validation that omits value checks" $
+    checkObservation AntiPattern.plustan15 1208 6 22
+
+  it "does not flag when all TxOut fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan15 1010
+
 plustan16Spec :: Analysis -> Spec
 plustan16Spec analysis = describe "PLU-STAN-16" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
@@ -354,3 +494,43 @@ plustan18Spec analysis = describe "PLU-STAN-18" $ do
 
   it "flags (&&) inside predicate helper with failing branch" $
     checkObservation AntiPattern.plustan18 843 4 6
+
+plustan19Spec :: Analysis -> Spec
+plustan19Spec analysis = describe "PLU-STAN-19" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags output validation that omits datum checks" $
+    checkObservation AntiPattern.plustan19 1002 3 19
+
+  it "flags mixed pattern/helper validation that omits datum checks" $
+    checkObservation AntiPattern.plustan19 1048 9 21
+
+  it "does not flag when only two output fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan19 1058
+
+  it "flags if/then/else validation that omits datum checks" $
+    checkObservation AntiPattern.plustan19 1064 6 22
+
+  it "flags strict combinator validation that omits datum checks" $
+    checkObservation AntiPattern.plustan19 1072 24 40
+
+  it "flags long-spanning validation bindings that omit datum checks" $
+    checkObservation AntiPattern.plustan19 1078 12 28
+
+  it "does not flag custom conjunction operators that avoid (&&) token" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan19 1108
+
+  it "flags TxOutAsData coverage that omits datum checks" $
+    checkObservation AntiPattern.plustan19 1168 6 22
+
+  it "does not flag TxOutAsData when all fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan19 1178
+
+  it "flags recursive if-based validation that omits datum checks" $
+    checkObservation AntiPattern.plustan19 1219 6 22
+
+  it "flags cross-output datum checks as missing on the validated output" $
+    checkObservation AntiPattern.plustan19 1250 3 19
+
+  it "does not flag when all TxOut fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan19 1010
