@@ -97,6 +97,23 @@ cabal test
 cabal run stan-test
   ```
 
+### Plu-Stan CLI (JSON + Onchain modules)
+
+`plustan` now supports machine-readable output for editor integrations.
+
+```bash
+# list onchain modules (detected via annotation)
+plustan list-onchain --json
+
+# run on full codebase
+plustan analyze --json
+
+# run on one onchain module
+plustan analyze --json --module Target.PlutusTx
+```
+
+The repository also includes a standalone VS Code/Cursor extension scaffold in `vscode-plustan/`.
+
 ### Haskell language server integration
 
 There is a fork of haskell language server that uses plu-stan as the stan plugin alternative.

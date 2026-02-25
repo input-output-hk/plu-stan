@@ -321,6 +321,21 @@ plustan13Spec analysis = describe "PLU-STAN-13" $ do
   it "flags unused reference-binding checks as still missing reference checks" $
     checkObservation AntiPattern.plustan13 1281 20 38
 
+  it "does not flag multiline reference checks split across lines" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan13 1298
+
+  it "flags when reference appears only in a comment" $
+    checkObservation AntiPattern.plustan13 1317 3 19
+
+  it "does not flag multiline reference checks with an intervening comment line" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan13 1336
+
+  it "flags record-destructured TxOut checks that omit reference script validation" $
+    checkObservation AntiPattern.plustan13 1354 10 23
+
+  it "does not flag record-destructured TxOut checks when all fields are validated" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan13 1368
+
   it "does not flag when all TxOut fields are checked" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan13 1010
 
@@ -363,6 +378,21 @@ plustan14Spec analysis = describe "PLU-STAN-14" $ do
 
   it "flags unrelated (==) + address-token usage as missing staking checks" $
     checkObservation AntiPattern.plustan14 1230 15 27
+
+  it "does not flag address equality when (==) and (/=) share a line" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1290
+
+  it "does not flag address equality when (==) is split across lines" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1308
+
+  it "flags when address equality appears only in a comment" $
+    checkObservation AntiPattern.plustan14 1326 3 19
+
+  it "flags record-destructured TxOut checks that omit staking validation" $
+    checkObservation AntiPattern.plustan14 1385 9 16
+
+  it "does not flag record-destructured address equality with full field checks" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1402
 
   it "does not flag when all TxOut fields are checked" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan14 1010

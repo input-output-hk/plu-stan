@@ -1283,3 +1283,125 @@ plutStan13EdgeUnusedReferenceBinding out =
       && hasStakingCredential out
       && hasOutputValue out
       && hasOutputDatum out
+
+plutStan14EqNeqSameLineShouldPass :: TxOut -> Address -> Integer -> Bool
+-- PLU-STAN-14 (should NOT trigger): address equality remains valid even with (/=) on same line.
+plutStan14EqNeqSameLineShouldPass out expected n =
+  txOutAddress out == expected && n /= 0
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript out
+
+plutStan13MultilineReferenceShouldPass :: TxOut -> Bool
+-- PLU-STAN-13 (should NOT trigger): reference check function/value split across lines still counts.
+plutStan13MultilineReferenceShouldPass out =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript
+         out
+
+plutStan14MultilineAddressEqShouldPass :: TxOut -> Address -> Bool
+-- PLU-STAN-14 (should NOT trigger): address equality split across lines still implies staking checks.
+plutStan14MultilineAddressEqShouldPass out expected =
+  txOutAddress out
+    == expected
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript out
+
+plutStan13CommentedReferenceShouldTrigger :: TxOut -> Bool
+-- PLU-STAN-13 (should trigger): comment-only reference token must not count as a check.
+plutStan13CommentedReferenceShouldTrigger out =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputValue out
+    && hasOutputDatum out
+    -- hasReferenceScript out
+
+plutStan14CommentedAddressEqShouldTrigger :: TxOut -> Integer -> Bool
+-- PLU-STAN-14 (should trigger): comment-only address equality token must not imply staking checks.
+plutStan14CommentedAddressEqShouldTrigger out n =
+  hasOutputAddress out
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript out
+    && n == 0
+    -- txOutAddress out == expected
+
+plutStan13MultilineReferenceWithCommentShouldPass :: TxOut -> Bool
+-- PLU-STAN-13 (should NOT trigger): comment line between function and argument still counts the check.
+plutStan13MultilineReferenceWithCommentShouldPass out =
+  hasOutputAddress out
+    && hasStakingCredential out
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript
+    -- intentionally split for formatter behavior
+    out
+
+plutStan13RecordDestructureMissingReferenceShouldTrigger :: TxOut -> Address -> Bool
+-- PLU-STAN-13 (should trigger): record-destructured TxOut checks omit reference script validation.
+plutStan13RecordDestructureMissingReferenceShouldTrigger out ownAddress =
+  let TxOut
+        { txOutAddress = address
+        , txOutValue = value
+        , txOutDatum = datum
+        , txOutReferenceScript = _referenceScript
+        } = out
+  in address == ownAddress
+      && Value.valueOf value Value.adaSymbol Value.adaToken >= 0
+      && case datum of
+           OutputDatum _ -> True
+           _ -> False
+
+plutStan13RecordDestructureAllCheckedShouldPass :: TxOut -> Address -> Bool
+-- PLU-STAN-13 (should NOT trigger): record-destructured TxOut validates all fields.
+plutStan13RecordDestructureAllCheckedShouldPass out ownAddress =
+  let TxOut
+        { txOutAddress = address
+        , txOutValue = value
+        , txOutDatum = datum
+        , txOutReferenceScript = referenceScript
+        } = out
+  in address == ownAddress
+      && Value.valueOf value Value.adaSymbol Value.adaToken >= 0
+      && case datum of
+           OutputDatum _ -> True
+           _ -> False
+      && referenceScript == Nothing
+
+plutStan14RecordDestructureMissingStakingShouldTrigger :: TxOut -> Bool
+-- PLU-STAN-14 (should trigger): record-destructured checks omit staking validation.
+plutStan14RecordDestructureMissingStakingShouldTrigger out =
+  let TxOut
+        { txOutAddress = address
+        , txOutValue = value
+        , txOutDatum = datum
+        , txOutReferenceScript = referenceScript
+        } = out
+  in (case address of
+        Address _ _ -> True
+        _ -> False)
+      && Value.valueOf value Value.adaSymbol Value.adaToken >= 0
+      && case datum of
+           OutputDatum _ -> True
+           _ -> False
+      && referenceScript == Nothing
+
+plutStan14RecordDestructureAddressEqShouldPass :: TxOut -> Address -> Bool
+-- PLU-STAN-14 (should NOT trigger): address equality on destructured address implies staking checks.
+plutStan14RecordDestructureAddressEqShouldPass out ownAddress =
+  let TxOut
+        { txOutAddress = address
+        , txOutValue = value
+        , txOutDatum = datum
+        , txOutReferenceScript = referenceScript
+        } = out
+  in address == ownAddress
+      && Value.valueOf value Value.adaSymbol Value.adaToken >= 0
+      && case datum of
+           OutputDatum _ -> True
+           _ -> False
+      && referenceScript == Nothing
