@@ -85,6 +85,10 @@ createVisitor hie exts inspections = Visitor $ \node ->
         PrecisionLossDivisionBeforeMultiply -> analysePrecisionLossDivisionBeforeMultiply inspectionId hie node
         RedeemerSuppliedIndicesUniqueness -> analyseRedeemerSuppliedIndicesUniqueness inspectionId hie node
         LazyAndInOnChainCode -> analyseLazyAndInOnChainCode inspectionId hie node
+        MissingTxOutReferenceScriptCheck -> analyseMissingTxOutReferenceScriptCheck inspectionId hie node
+        MissingTxOutStakingCredentialCheck -> analyseMissingTxOutStakingCredentialCheck inspectionId hie node
+        MissingTxOutValueCheck -> analyseMissingTxOutValueCheck inspectionId hie node
+        MissingTxOutDatumCheck -> analyseMissingTxOutDatumCheck inspectionId hie node
 
 {- | Check for big tuples (size >= 4) in the following places:
 
@@ -1543,11 +1547,8 @@ analyseUnsafeFromBuiltinDataInHashComparison insId hie curNode =
               || (operandFromUnsafe rhsNode && typeMatchesHash lhs)
               || (comparisonMentionsUnsafeBinding node && (typeMatchesHash lhs || typeMatchesHash rhsNode))
               || (comparisonLineMentionsUnsafeBinding node && (typeMatchesHash lhs || typeMatchesHash rhsNode)) ->
-                -- If we've matched a comparison expression, don't recurse into it;
-                -- the HIE tree can contain nested nodes with the same span.
                 S.one $ nodeSpan node
-        _ ->
-            foldMap matchNode (nodeChildren node)
+        _ -> mempty
 
     -- Check if operand either:
     -- 1. Directly contains unsafeFromBuiltinData, OR
@@ -2821,6 +2822,911 @@ analyseInfix hie curNode = do
             let occName = nameOccName name
             -- return empty list if identifier name is not operator name
             in [(toText $ occNameString occName, srcSpan) | isSymOcc occName]
+
+data MissingTxOutField
+    = MissingReferenceScript
+    | MissingStakingCredential
+    | MissingValue
+    | MissingDatum
+
+instance Eq MissingTxOutField where
+    MissingReferenceScript == MissingReferenceScript = True
+    MissingStakingCredential == MissingStakingCredential = True
+    MissingValue == MissingValue = True
+    MissingDatum == MissingDatum = True
+    _ == _ = False
+
+data TxOutFieldUsage = TxOutFieldUsage
+    { txOutFieldAddressChecked :: !Bool
+    , txOutFieldStakingChecked :: !Bool
+    , txOutFieldValueChecked :: !Bool
+    , txOutFieldDatumChecked :: !Bool
+    , txOutFieldReferenceChecked :: !Bool
+    }
+
+analyseMissingTxOutReferenceScriptCheck
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseMissingTxOutReferenceScriptCheck =
+    analyseMissingTxOutFieldCheck MissingReferenceScript
+
+analyseMissingTxOutStakingCredentialCheck
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseMissingTxOutStakingCredentialCheck =
+    analyseMissingTxOutFieldCheck MissingStakingCredential
+
+analyseMissingTxOutValueCheck
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseMissingTxOutValueCheck =
+    analyseMissingTxOutFieldCheck MissingValue
+
+analyseMissingTxOutDatumCheck
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseMissingTxOutDatumCheck =
+    analyseMissingTxOutFieldCheck MissingDatum
+
+analyseMissingTxOutFieldCheck
+    :: MissingTxOutField
+    -> Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseMissingTxOutFieldCheck missingField insId hie curNode =
+    addObservations $ mkObservation insId hie <$> matchNode curNode
+  where
+    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchNode node =
+        memptyIfFalse
+            (hieMatchPatternAst hie node fun && shouldFlagNode node)
+            (S.one $ observationSpan node)
+
+    observationSpan :: HieAST TypeIndex -> RealSrcSpan
+    observationSpan node =
+        fromMaybe (nodeSpan node) (findAnchor node)
+
+    findAnchor :: HieAST TypeIndex -> Maybe RealSrcSpan
+    findAnchor n@Node{nodeSpan = span', nodeChildren = children}
+        | isOneLineSpan span'
+            && nodeHasAnyOccName allFieldTokens n
+            && not (spanLooksLikeBinding span') = Just span'
+        | otherwise = asum (map findAnchor children)
+
+    isOneLineSpan :: RealSrcSpan -> Bool
+    isOneLineSpan span' =
+        srcSpanStartLine span' == srcSpanEndLine span'
+
+    spanLooksLikeBinding :: RealSrcSpan -> Bool
+    spanLooksLikeBinding span' = case srcLineAt (srcSpanStartLine span') of
+        Nothing -> False
+        Just line -> case parseBindingLhs line of
+            Nothing -> False
+            Just lhsOcc -> lhsOcc `elem`
+                [ "txOutAddress"
+                , "txOutValue"
+                , "txOutDatum"
+                , "txOutReferenceScript"
+                , "referenceScript"
+                ]
+    shouldFlagNode :: HieAST TypeIndex -> Bool
+    shouldFlagNode node =
+        let txOutUsageCandidates = usageCandidates node
+            txOutEvidence = hasTxOutEvidence node
+        in txOutEvidence
+            && any (\usage -> checkedFieldsCount usage >= 3 && isMissingField missingField usage) txOutUsageCandidates
+
+    usageCandidates :: HieAST TypeIndex -> [TxOutFieldUsage]
+    usageCandidates node = case Set.toList txOutVars of
+        [] -> [detectTxOutFieldUsage node]
+        _ ->
+            let varGroups = txOutAliasGroups txOutVars (nodeSpan node)
+                allowGlobalAliasFallback = length varGroups == 1
+                groupedUsage =
+                    map
+                        (\varGroup ->
+                            detectTxOutFieldUsageForVars
+                                allowGlobalAliasFallback
+                                varGroup
+                                node
+                        )
+                        varGroups
+                fallbackGeneric =
+                    [ detectTxOutFieldUsage node
+                    | allowGlobalAliasFallback
+                    ]
+            in groupedUsage <> fallbackGeneric
+      where
+        txOutVars = collectTxOutVariableNames node
+
+    detectTxOutFieldUsage :: HieAST TypeIndex -> TxOutFieldUsage
+    detectTxOutFieldUsage node =
+        let addressEqImpliesStaking =
+                subtreeHasAddressEquality node
+        in TxOutFieldUsage
+        { txOutFieldAddressChecked = subtreeHasAnyTxOutFieldToken addressTokens node
+        , txOutFieldStakingChecked =
+            subtreeHasAnyTxOutFieldToken stakingTokens node || addressEqImpliesStaking
+        , txOutFieldValueChecked = subtreeHasAnyTxOutFieldToken valueTokens node
+        , txOutFieldDatumChecked = subtreeHasAnyTxOutFieldToken datumTokens node
+        , txOutFieldReferenceChecked = subtreeHasAnyTxOutFieldToken referenceTokens node
+        }
+
+    detectTxOutFieldUsageForVars :: Bool -> Set Name -> HieAST TypeIndex -> TxOutFieldUsage
+    detectTxOutFieldUsageForVars allowGlobalAliasFallback varGroup node =
+        let span' = nodeSpan node
+            aliasOccsByField =
+                let scopedAliasOccs = spanRecordFieldAliasesForVars varGroup span'
+                in if Map.null scopedAliasOccs && allowGlobalAliasFallback
+                    then spanRecordFieldAliasesForVars Set.empty span'
+                    else scopedAliasOccs
+            addressAliasOccs = lookupFieldAliasOccs fieldKeyAddress aliasOccsByField
+            valueAliasOccs = lookupFieldAliasOccs fieldKeyValue aliasOccsByField
+            datumAliasOccs = lookupFieldAliasOccs fieldKeyDatum aliasOccsByField
+            referenceAliasOccs = lookupFieldAliasOccs fieldKeyReference aliasOccsByField
+            addressCheckedByAliases =
+                spanMentionsAnyFieldTokenForOccs addressTokens addressAliasOccs span'
+                    || spanMentionsAddressEqForOccs addressAliasOccs span'
+            addressEqImpliesStaking =
+                spanMentionsAddressEqForVars varGroup span'
+                    || spanMentionsAddressEqForOccs addressAliasOccs span'
+        in TxOutFieldUsage
+        { txOutFieldAddressChecked =
+            spanMentionsAnyFieldTokenForVars addressTokens varGroup span'
+                || addressCheckedByAliases
+        , txOutFieldStakingChecked =
+            spanMentionsAnyFieldTokenForVars stakingTokens varGroup span'
+                || spanMentionsAnyFieldTokenForOccs stakingTokens addressAliasOccs span'
+                || addressEqImpliesStaking
+        , txOutFieldValueChecked =
+            spanMentionsAnyFieldTokenForVars valueTokens varGroup span'
+                || spanMentionsAnyFieldTokenForOccs valueTokens valueAliasOccs span'
+        , txOutFieldDatumChecked =
+            spanMentionsAnyFieldTokenForVars datumTokens varGroup span'
+                || spanMentionsAnyFieldTokenForOccs datumTokens datumAliasOccs span'
+        , txOutFieldReferenceChecked =
+            spanMentionsAnyFieldTokenForVars referenceTokens varGroup span'
+                || spanMentionsAnyFieldTokenForOccs referenceTokens referenceAliasOccs span'
+        }
+
+    collectTxOutVariableNames :: HieAST TypeIndex -> Set Name
+    collectTxOutVariableNames = go
+      where
+        go n@Node{nodeChildren = children} =
+            namesHere n <> foldMap go children
+
+        namesHere n =
+            Set.fromList
+                [ name
+                | (Right name, details) <- Map.assocs $ nodeIdentifiers $ nodeInfo n
+                , not (isExternalName name)
+                , identTypeRootTyConName details == Just "TxOut"
+                ]
+
+    identTypeRootTyConName :: IdentifierDetails TypeIndex -> Maybe String
+    identTypeRootTyConName IdentifierDetails{identType = identType'} = do
+        ix <- identType'
+        typeIndexRootTyConName ix
+
+    typeIndexRootTyConName :: TypeIndex -> Maybe String
+    typeIndexRootTyConName ix = case hie_types hie Arr.! ix of
+        HTyConApp IfaceTyCon{ifaceTyConName = tyConName} _ ->
+            Just $ occNameString $ nameOccName tyConName
+        _ -> Nothing
+
+    txOutAliasGroups :: Set Name -> RealSrcSpan -> [Set Name]
+    txOutAliasGroups vars span' =
+        connectedComponents vars aliasEdges
+      where
+        occToName = Map.fromList
+            [ (occNameString $ nameOccName name, name)
+            | name <- Set.toList vars
+            ]
+
+        aliasEdges :: [(Name, Name)]
+        aliasEdges = mapMaybe (aliasEdge occToName) (srcLinesInSpan span')
+
+    aliasEdge :: Map String Name -> ByteString -> Maybe (Name, Name)
+    aliasEdge occToName line = do
+        (lhsOcc, rhsOcc) <- parseSimpleAliasLine line
+        lhsName <- Map.lookup lhsOcc occToName
+        rhsName <- Map.lookup rhsOcc occToName
+        guard (lhsName /= rhsName)
+        pure (lhsName, rhsName)
+
+    parseSimpleAliasLine :: ByteString -> Maybe (String, String)
+    parseSimpleAliasLine line = do
+        let noComment = fst $ BS8.breakSubstring "--" line
+            (lhsRaw, eqAndRhs) = BS8.break (== '=') noComment
+        guard (not $ BS8.null eqAndRhs)
+        guard (not $ BS8.isPrefixOf "==" eqAndRhs)
+        lhsOcc <- lastWordOcc lhsRaw
+        (rhsOcc, rhsRest) <- firstWordAndRest $ BS8.drop 1 eqAndRhs
+        guard (BS8.all isSpace rhsRest)
+        pure (lhsOcc, rhsOcc)
+
+    fieldKeyAddress, fieldKeyValue, fieldKeyDatum, fieldKeyReference :: String
+    fieldKeyAddress = "address"
+    fieldKeyValue = "value"
+    fieldKeyDatum = "datum"
+    fieldKeyReference = "reference"
+
+    lookupFieldAliasOccs :: String -> Map String (Set String) -> Set String
+    lookupFieldAliasOccs fieldKey aliases =
+        Map.findWithDefault Set.empty fieldKey aliases
+
+    mergeFieldAliasMaps :: Map String (Set String) -> Map String (Set String) -> Map String (Set String)
+    mergeFieldAliasMaps = Map.unionWith (<>)
+
+    spanRecordFieldAliasesForVars :: Set Name -> RealSrcSpan -> Map String (Set String)
+    spanRecordFieldAliasesForVars vars span' =
+        let varOccs = Set.fromList $ map (occNameString . nameOccName) $ Set.toList vars
+            (_, _, aliasesByField) =
+                foldl' (collectRecordFieldAliases varOccs) (False, Nothing, Map.empty) (srcLinesInSpan span')
+        in aliasesByField
+
+    collectRecordFieldAliases
+        :: Set String
+        -> (Bool, Maybe (Map String (Set String), Bool), Map String (Set String))
+        -> ByteString
+        -> (Bool, Maybe (Map String (Set String), Bool), Map String (Set String))
+    collectRecordFieldAliases varOccs (pendingTxOutIntro, activeCapture, aliasesByField) rawLine =
+        let line = lineCodePart rawLine
+            hasTxOutWord = containsWordBS "TxOut" line
+            hasOpenBrace = BS8.elem '{' line
+            lineAliases = parseRecordFieldAliasesFromLine line
+            commitAliases rhsOcc aliasesToCommit =
+                if Set.null varOccs || rhsOcc `Set.member` varOccs
+                    then mergeFieldAliasMaps aliasesByField aliasesToCommit
+                    else aliasesByField
+        in case activeCapture of
+            Nothing
+                | hasOpenBrace && (hasTxOutWord || pendingTxOutIntro) ->
+                    case parseRecordPatternBoundVar line of
+                        Just rhsOcc ->
+                            ( False
+                            , Nothing
+                            , commitAliases rhsOcc lineAliases
+                            )
+                        Nothing ->
+                            (False, Just (lineAliases, BS8.elem '}' line), aliasesByField)
+                | otherwise ->
+                    (hasTxOutWord && not hasOpenBrace, Nothing, aliasesByField)
+            Just (capturedAliases, waitingBoundVarAfterClose) ->
+                let capturedAliases' = mergeFieldAliasMaps capturedAliases lineAliases
+                    rhsOcc = if waitingBoundVarAfterClose
+                        then parseRecordPatternBoundVarOnly line
+                        else parseRecordPatternBoundVar line
+                in case rhsOcc of
+                    Just boundOcc ->
+                        ( False
+                        , Nothing
+                        , commitAliases boundOcc capturedAliases'
+                        )
+                    Nothing ->
+                        ( False
+                        , Just (capturedAliases', waitingBoundVarAfterClose || BS8.elem '}' line)
+                        , aliasesByField
+                        )
+
+    parseRecordFieldAliasesFromLine :: ByteString -> Map String (Set String)
+    parseRecordFieldAliasesFromLine line =
+        foldl'
+            (\acc segment -> case parseRecordFieldAliasSegment segment of
+                Nothing -> acc
+                Just (fieldKey, aliasOcc) ->
+                    Map.insertWith (<>) fieldKey (Set.singleton aliasOcc) acc
+            )
+            Map.empty
+            (BS8.split ',' line)
+
+    parseRecordFieldAliasSegment :: ByteString -> Maybe (String, String)
+    parseRecordFieldAliasSegment segment = case parseRecordFieldAliasAssignment segment of
+        Just parsedAlias -> Just parsedAlias
+        Nothing -> parseRecordFieldAliasPun segment
+
+    parseRecordFieldAliasAssignment :: ByteString -> Maybe (String, String)
+    parseRecordFieldAliasAssignment segment = do
+        let (lhsRaw, eqAndRhs) = BS8.break (== '=') segment
+        guard (not $ BS8.null eqAndRhs)
+        guard (not $ BS8.isPrefixOf "==" eqAndRhs)
+        fieldOcc <- lastWordOcc lhsRaw
+        fieldKey <- txOutFieldKeyFromOcc fieldOcc
+        aliasOcc <- firstWordOccLoose $ BS8.drop 1 eqAndRhs
+        pure (fieldKey, aliasOcc)
+
+    parseRecordFieldAliasPun :: ByteString -> Maybe (String, String)
+    parseRecordFieldAliasPun segment = do
+        let (_lhsRaw, eqAndRhs) = BS8.break (== '=') segment
+        guard (BS8.null eqAndRhs)
+        fieldOcc <- lastWordOcc segment
+        fieldKey <- txOutFieldKeyFromOcc fieldOcc
+        pure (fieldKey, fieldOcc)
+
+    txOutFieldKeyFromOcc :: String -> Maybe String
+    txOutFieldKeyFromOcc = \case
+        "txOutAddress" -> Just fieldKeyAddress
+        "txOutValue" -> Just fieldKeyValue
+        "txOutDatum" -> Just fieldKeyDatum
+        "txOutReferenceScript" -> Just fieldKeyReference
+        "referenceScript" -> Just fieldKeyReference
+        _ -> Nothing
+
+    parseRecordPatternBoundVar :: ByteString -> Maybe String
+    parseRecordPatternBoundVar line = do
+        let (_beforeClose, closeAndRest) = BS8.break (== '}') line
+        guard (not $ BS8.null closeAndRest)
+        parseRecordPatternBoundVarOnly $ BS8.drop 1 closeAndRest
+
+    parseRecordPatternBoundVarOnly :: ByteString -> Maybe String
+    parseRecordPatternBoundVarOnly line = do
+        let (_beforeEq, eqAndRhs) = BS8.break (== '=') line
+        guard (not $ BS8.null eqAndRhs)
+        guard (not $ BS8.isPrefixOf "==" eqAndRhs)
+        firstWordOccLoose $ BS8.drop 1 eqAndRhs
+    connectedComponents :: Set Name -> [(Name, Name)] -> [Set Name]
+    connectedComponents vars edges = go vars []
+      where
+        adjacency :: Map Name (Set Name)
+        adjacency = Map.fromListWith (<>)
+            [ (a, Set.singleton b)
+            | (a, b) <- edges
+            ]
+            <> Map.fromListWith (<>)
+            [ (b, Set.singleton a)
+            | (a, b) <- edges
+            ]
+
+        go unvisited acc
+            | Set.null unvisited = reverse acc
+            | otherwise =
+                let start = Set.findMin unvisited
+                    component = dfs Set.empty [start]
+                    remaining = unvisited Set.\\ component
+                in go remaining (component : acc)
+
+        dfs visited = \case
+            [] -> visited
+            x:xs
+                | Set.member x visited -> dfs visited xs
+                | otherwise ->
+                    let neighbours = Set.toList $ Map.findWithDefault Set.empty x adjacency
+                    in dfs (Set.insert x visited) (neighbours <> xs)
+
+    subtreeHasAnyOccName :: [String] -> HieAST TypeIndex -> Bool
+    subtreeHasAnyOccName targets = go
+      where
+        go n@Node{nodeChildren = children} =
+            nodeHasAnyOccName targets n || any go children
+
+    nodeHasAnyOccName :: [String] -> HieAST TypeIndex -> Bool
+    nodeHasAnyOccName targets node =
+        any hasTargetOccName (Map.keys $ nodeIdentifiers $ nodeInfo node)
+      where
+        hasTargetOccName = \case
+            Left _ -> False
+            Right name -> occNameString (nameOccName name) `elem` targets
+
+    subtreeHasEqOperator :: HieAST TypeIndex -> Bool
+    subtreeHasEqOperator node =
+        subtreeHasAnyOccName ["=="] node
+            || subtreeHasEqName node
+            || spanMentionsEqOperator (nodeSpan node)
+
+    subtreeHasAddressEquality :: HieAST TypeIndex -> Bool
+    subtreeHasAddressEquality = go
+      where
+        go n@Node{nodeChildren = children} =
+            nodeLooksLikeAddressEquality n || any go children
+
+        nodeLooksLikeAddressEquality :: HieAST TypeIndex -> Bool
+        nodeLooksLikeAddressEquality n =
+            (isOneLineSpan (nodeSpan n)
+                && nodeHasAnyTxOutFieldToken ["txOutAddress"] n
+                && subtreeHasEqOperator n
+            )
+                || spanLooksLikeAddressEquality (nodeSpan n)
+
+        spanLooksLikeAddressEquality :: RealSrcSpan -> Bool
+        spanLooksLikeAddressEquality span' =
+            any lineHasAddressEqualityPattern (srcNumberedLinesInSpan span')
+
+        lineHasAddressEqualityPattern :: (Int, ByteString) -> Bool
+        lineHasAddressEqualityPattern (lineNumber, line) =
+            let prevLine = srcLineAt (lineNumber - 1)
+                nextLine = srcLineAt (lineNumber + 1)
+                lineIsAddressOperand = lineLooksLikeAddressOperandToken line
+                adjacentEq =
+                    maybe False lineHasEqOperator prevLine
+                        || lineHasEqOperator line
+                        || maybe False lineHasEqOperator nextLine
+                adjacentAddressOperand =
+                    maybe False lineLooksLikeAddressOperandToken prevLine
+                        || lineIsAddressOperand
+                        || maybe False lineLooksLikeAddressOperandToken nextLine
+            in adjacentEq && adjacentAddressOperand
+
+        lineLooksLikeAddressOperandToken :: ByteString -> Bool
+        lineLooksLikeAddressOperandToken line =
+            parseBindingLhs line == Nothing
+                && containsWordBS "txOutAddress" (lineCodePart line)
+
+    subtreeHasEqName :: HieAST TypeIndex -> Bool
+    subtreeHasEqName n@Node{nodeChildren = children} =
+        nodeHasEqName n || any subtreeHasEqName children
+
+    nodeHasEqName :: HieAST TypeIndex -> Bool
+    nodeHasEqName node =
+        let idents = Map.assocs $ nodeIdentifiers $ nodeInfo node
+            eqNameMeta = ("==" `ghcPrimNameFrom` "GHC.Classes")
+        in any (hieMatchNameMeta eqNameMeta) idents
+
+    spanMentionsEqOperator :: RealSrcSpan -> Bool
+    spanMentionsEqOperator span' =
+        any lineHasEqOperator (srcLinesInSpan span')
+
+    lineCodePart :: ByteString -> ByteString
+    lineCodePart = fst . BS8.breakSubstring "--"
+
+    lineHasEqOperator :: ByteString -> Bool
+    lineHasEqOperator line =
+        "==" `BS8.isInfixOf` lineCodePart line
+
+    srcLinesInSpan :: RealSrcSpan -> [ByteString]
+    srcLinesInSpan span' =
+        map snd (srcNumberedLinesInSpan span')
+
+    srcNumberedLinesInSpan :: RealSrcSpan -> [(Int, ByteString)]
+    srcNumberedLinesInSpan span' =
+        let start = srcSpanStartLine span'
+            end = srcSpanEndLine span'
+            allLines = BS8.lines $ hie_hs_src hie
+        in mapMaybe
+            (\lineNumber -> (lineNumber,) <$> (allLines !!? (lineNumber - 1)))
+            [start .. end]
+
+
+    srcLineAt :: Int -> Maybe ByteString
+    srcLineAt lineNumber =
+        (BS8.lines $ hie_hs_src hie) !!? (lineNumber - 1)
+
+    subtreeHasAnyTxOutFieldToken :: [String] -> HieAST TypeIndex -> Bool
+    subtreeHasAnyTxOutFieldToken targets = go
+      where
+        go n@Node{nodeChildren = children} =
+            nodeHasAnyTxOutFieldToken targets n || any go children
+
+    nodeHasAnyTxOutFieldToken :: [String] -> HieAST TypeIndex -> Bool
+    nodeHasAnyTxOutFieldToken targets node =
+        any hasTargetOccName (Map.assocs $ nodeIdentifiers $ nodeInfo node)
+      where
+        hasTargetOccName = \case
+            (Left _, _details) -> False
+            (Right name, details) ->
+                occNameString (nameOccName name) `elem` targets
+                    && (isExternalName name || identTypeContainsTyConName "TxOut" details)
+
+    spanMentionsAnyFieldTokenForVars :: [String] -> Set Name -> RealSrcSpan -> Bool
+    spanMentionsAnyFieldTokenForVars tokens vars span' =
+        let varOccs = map (occNameString . nameOccName) $ Set.toList vars
+            numberedLines = srcNumberedLinesInSpan span'
+            lineByNumber = srcLineAt
+        in any
+            (\(lineNumber, line) ->
+                let prevPrevLine = lineByNumber (lineNumber - 2)
+                    prevLine = lineByNumber (lineNumber - 1)
+                    nextLine = lineByNumber (lineNumber + 1)
+                    nextNextLine = lineByNumber (lineNumber + 2)
+                    mentionsField =
+                        any
+                            (\varOcc ->
+                                lineMentionsFieldTokenForVarAdjacent
+                                    tokens
+                                    varOcc
+                                    prevLine
+                                    line
+                                    nextLine
+                                    || (maybe False isSkippableCodeLine nextLine
+                                        && lineMentionsFieldTokenForVarAdjacent
+                                            tokens
+                                            varOcc
+                                            prevLine
+                                            line
+                                            nextNextLine
+                                       )
+                                    || (maybe False isSkippableCodeLine prevLine
+                                        && lineMentionsFieldTokenForVarAdjacent
+                                            tokens
+                                            varOcc
+                                            prevPrevLine
+                                            line
+                                            nextLine
+                                       )
+                            )
+                            varOccs
+                in mentionsField
+                    && not (isUnusedBindingLine numberedLines lineNumber line)
+            )
+            numberedLines
+    spanMentionsAddressEqForVars :: Set Name -> RealSrcSpan -> Bool
+    spanMentionsAddressEqForVars vars span' =
+        let varOccs = map (occNameString . nameOccName) $ Set.toList vars
+            numberedLines = srcNumberedLinesInSpan span'
+            lineByNumber = srcLineAt
+        in any
+            (\(lineNumber, line) ->
+                let prevLine = lineByNumber (lineNumber - 1)
+                    nextLine = lineByNumber (lineNumber + 1)
+                    mentionsEq =
+                        any
+                            (\varOcc ->
+                                lineMentionsAddressEqForVarAdjacent
+                                    varOcc
+                                    prevLine
+                                    line
+                                    nextLine
+                            )
+                            varOccs
+                in mentionsEq
+                    && not (isUnusedBindingLine numberedLines lineNumber line)
+            )
+            numberedLines
+
+    spanMentionsAnyFieldTokenForOccs :: [String] -> Set String -> RealSrcSpan -> Bool
+    spanMentionsAnyFieldTokenForOccs tokens occs span'
+        | Set.null occs = False
+        | otherwise =
+            let occNames = Set.toList occs
+                numberedLines = srcNumberedLinesInSpan span'
+                lineByNumber = srcLineAt
+            in any
+                (\(lineNumber, line) ->
+                    let prevPrevLine = lineByNumber (lineNumber - 2)
+                        prevLine = lineByNumber (lineNumber - 1)
+                        nextLine = lineByNumber (lineNumber + 1)
+                        nextNextLine = lineByNumber (lineNumber + 2)
+                        mentionsField =
+                            any
+                                (\occ ->
+                                    lineMentionsFieldTokenForVarAdjacent
+                                        tokens
+                                        occ
+                                        prevLine
+                                        line
+                                        nextLine
+                                        || (maybe False isSkippableCodeLine nextLine
+                                            && lineMentionsFieldTokenForVarAdjacent
+                                                tokens
+                                                occ
+                                                prevLine
+                                                line
+                                                nextNextLine
+                                           )
+                                        || (maybe False isSkippableCodeLine prevLine
+                                            && lineMentionsFieldTokenForVarAdjacent
+                                                tokens
+                                                occ
+                                                prevPrevLine
+                                                line
+                                                nextLine
+                                           )
+                                )
+                                occNames
+                    in mentionsField
+                        && not (isUnusedBindingLine numberedLines lineNumber line)
+                )
+                numberedLines
+
+    spanMentionsAddressEqForOccs :: Set String -> RealSrcSpan -> Bool
+    spanMentionsAddressEqForOccs occs span'
+        | Set.null occs = False
+        | otherwise =
+            let occNames = Set.toList occs
+                numberedLines = srcNumberedLinesInSpan span'
+                lineByNumber = srcLineAt
+            in any
+                (\(lineNumber, line) ->
+                    let prevLine = lineByNumber (lineNumber - 1)
+                        nextLine = lineByNumber (lineNumber + 1)
+                        mentionsEq =
+                            any
+                                (\occ ->
+                                    lineMentionsAddressEqForOccAdjacent
+                                        occ
+                                        prevLine
+                                        line
+                                        nextLine
+                                )
+                                occNames
+                    in mentionsEq
+                        && not (isUnusedBindingLine numberedLines lineNumber line)
+                )
+                numberedLines
+
+    lineMentionsAddressEqForVarAdjacent :: String -> Maybe ByteString -> ByteString -> Maybe ByteString -> Bool
+    lineMentionsAddressEqForVarAdjacent varOcc prevLine line nextLine =
+        lineMentionsAddressEqForVar varOcc line
+            || (lineHasEqOperator line
+                && maybe False (lineLooksLikeAddressOperand varOcc) prevLine
+               )
+            || (lineHasEqOperator line
+                && maybe False (lineLooksLikeAddressOperand varOcc) nextLine
+               )
+            || (lineLooksLikeAddressOperand varOcc line
+                && maybe False lineHasEqOperator prevLine
+               )
+            || (lineLooksLikeAddressOperand varOcc line
+                && maybe False lineHasEqOperator nextLine
+               )
+
+    lineMentionsAddressEqForVar :: String -> ByteString -> Bool
+    lineMentionsAddressEqForVar varOcc line =
+        lineHasEqOperator line
+            && lineMentionsFieldTokenForVar ["txOutAddress"] varOcc line
+
+    lineLooksLikeAddressOperand :: String -> ByteString -> Bool
+    lineLooksLikeAddressOperand varOcc line =
+        parseBindingLhs line == Nothing
+            && lineMentionsFieldTokenForVar ["txOutAddress"] varOcc line
+
+    lineMentionsAddressEqForOccAdjacent :: String -> Maybe ByteString -> ByteString -> Maybe ByteString -> Bool
+    lineMentionsAddressEqForOccAdjacent occ prevLine line nextLine =
+        lineMentionsAddressEqForOcc occ line
+            || maybe False (lineMentionsAddressEqForOcc occ) prevLine
+            || maybe False (lineMentionsAddressEqForOcc occ) nextLine
+            || (lineHasEqOperator line
+                && maybe False (lineLooksLikeAddressAliasOperand occ) prevLine
+               )
+            || (lineHasEqOperator line
+                && maybe False (lineLooksLikeAddressAliasOperand occ) nextLine
+               )
+            || (lineLooksLikeAddressAliasOperand occ line
+                && maybe False lineHasEqOperator prevLine
+               )
+            || (lineLooksLikeAddressAliasOperand occ line
+                && maybe False lineHasEqOperator nextLine
+               )
+    lineMentionsAddressEqForOcc :: String -> ByteString -> Bool
+    lineMentionsAddressEqForOcc occ line =
+        lineHasEqOperator line
+            && lineMentionsVarOcc occ line
+
+    lineLooksLikeAddressAliasOperand :: String -> ByteString -> Bool
+    lineLooksLikeAddressAliasOperand occ line =
+        parseBindingLhs line == Nothing
+            && lineMentionsVarOcc occ line
+
+    lineMentionsFieldTokenForVarAdjacent :: [String] -> String -> Maybe ByteString -> ByteString -> Maybe ByteString -> Bool
+    lineMentionsFieldTokenForVarAdjacent tokens varOcc prevLine line nextLine =
+        lineMentionsFieldTokenForVar tokens varOcc line
+            || (lineHasAnyFieldToken tokens line
+                && parseBindingLhs line == Nothing
+                && maybe False (lineMentionsVarOcc varOcc) nextLine
+               )
+            || (lineMentionsVarOcc varOcc line
+                && maybe False
+                    (\prev -> parseBindingLhs prev == Nothing && lineHasAnyFieldToken tokens prev)
+                    prevLine
+               )
+            || (lineLooksLikeCaseScrutinee varOcc line
+                && maybe False
+                    (\next -> parseBindingLhs next == Nothing && lineHasAnyFieldToken tokens next)
+                    nextLine
+               )
+
+    lineMentionsVarOcc :: String -> ByteString -> Bool
+    lineMentionsVarOcc varOcc line =
+        containsWordBS (BS8.pack varOcc) (lineCodePart line)
+
+    lineLooksLikeCaseScrutinee :: String -> ByteString -> Bool
+    lineLooksLikeCaseScrutinee varOcc line =
+        let code = lineCodePart line
+        in parseBindingLhs line == Nothing
+            && containsWordBS "case" code
+            && containsWordBS "of" code
+            && containsWordBS (BS8.pack varOcc) code
+    isSkippableCodeLine :: ByteString -> Bool
+    isSkippableCodeLine line =
+        BS8.null $ BS8.dropWhile isSpace $ lineCodePart line
+
+    lineMentionsFieldTokenForVar :: [String] -> String -> ByteString -> Bool
+    lineMentionsFieldTokenForVar tokens varOcc line =
+        lineMentionsVarOcc varOcc line
+            && lineHasAnyFieldToken tokens line
+
+    lineHasAnyFieldToken :: [String] -> ByteString -> Bool
+    lineHasAnyFieldToken tokens line =
+        let code = lineCodePart line
+        in any (\tok -> containsWordBS (BS8.pack tok) code) tokens
+
+    isUnusedBindingLine :: [(Int, ByteString)] -> Int -> ByteString -> Bool
+    isUnusedBindingLine numberedLines lineNumber line = case parseBindingLhs line of
+        Nothing -> False
+        Just lhsOcc ->
+            not $ any
+                (\(n, candidateLine) ->
+                    n > lineNumber && containsWordBS (BS8.pack lhsOcc) candidateLine
+                )
+                numberedLines
+
+    parseBindingLhs :: ByteString -> Maybe String
+    parseBindingLhs line = do
+        let noComment = fst $ BS8.breakSubstring "--" line
+            (lhsRaw, eqAndRhs) = BS8.break (== '=') noComment
+            lhsTrimmed = trimRight lhsRaw
+            beforeEq = if BS8.null lhsTrimmed then Nothing else Just (BS8.last lhsTrimmed)
+        guard (not $ BS8.null eqAndRhs)
+        guard (not $ BS8.isPrefixOf "==" eqAndRhs)
+        guard $ case beforeEq of
+            Just c -> c `notElem` ['<', '>', '!', '/', ':']
+            Nothing -> False
+        lastWordOcc lhsRaw
+
+    firstWordAndRest :: ByteString -> Maybe (String, ByteString)
+    firstWordAndRest bs = do
+        let trimmed = BS8.dropWhile isSpace bs
+            (word, rest) = BS8.span isIdentifierChar trimmed
+        guard (not $ BS8.null word)
+        pure (BS8.unpack word, BS8.dropWhile isSpace rest)
+
+
+    firstWordOccLoose :: ByteString -> Maybe String
+    firstWordOccLoose bs = do
+        let trimmed = BS8.dropWhile (\c -> isSpace c || c == '{' || c == '}') bs
+            word = BS8.takeWhile isIdentifierChar trimmed
+        guard (not $ BS8.null word)
+        pure (BS8.unpack word)
+    lastWordOcc :: ByteString -> Maybe String
+    lastWordOcc bs = do
+        let trimmed = trimRight bs
+            revWord = BS8.takeWhile isIdentifierChar (BS8.reverse trimmed)
+            word = BS8.reverse revWord
+        guard (not $ BS8.null word)
+        pure (BS8.unpack word)
+
+    trimRight :: ByteString -> ByteString
+    trimRight = BS8.reverse . BS8.dropWhile isSpace . BS8.reverse
+
+    isIdentifierChar :: Char -> Bool
+    isIdentifierChar c = isAlphaNum c || c == '_' || c == '\''
+
+    containsWordBS :: ByteString -> ByteString -> Bool
+    containsWordBS needle haystack
+        | BS8.null needle = False
+        | otherwise = go haystack
+      where
+        go bs = case BS8.breakSubstring needle bs of
+            (_before, after)
+                | BS8.null after -> False
+                | otherwise ->
+                    let idx = BS8.length bs - BS8.length after
+                        beforeCh = bs BS8.!? (idx - 1)
+                        afterCh = bs BS8.!? (idx + BS8.length needle)
+                        beforeOk = maybe True (not . isIdentifierChar) beforeCh
+                        afterOk = maybe True (not . isIdentifierChar) afterCh
+                    in if beforeOk && afterOk
+                        then True
+                        else go (BS8.drop 1 after)
+
+    identTypeContainsTyConName :: String -> IdentifierDetails TypeIndex -> Bool
+    identTypeContainsTyConName needle IdentifierDetails{identType = identType'} = case identType' of
+        Nothing -> False
+        Just ix -> typeIndexContainsTyConName needle ix
+
+    checkedFieldsCount :: TxOutFieldUsage -> Int
+    checkedFieldsCount TxOutFieldUsage{..} =
+        length $ filter id
+            [ txOutFieldAddressChecked
+            , txOutFieldStakingChecked
+            , txOutFieldValueChecked
+            , txOutFieldDatumChecked
+            , txOutFieldReferenceChecked
+            ]
+
+    isMissingField :: MissingTxOutField -> TxOutFieldUsage -> Bool
+    isMissingField missing = \case
+        TxOutFieldUsage{txOutFieldReferenceChecked = False} | missing == MissingReferenceScript -> True
+        TxOutFieldUsage{txOutFieldStakingChecked = False} | missing == MissingStakingCredential -> True
+        TxOutFieldUsage{txOutFieldValueChecked = False} | missing == MissingValue -> True
+        TxOutFieldUsage{txOutFieldDatumChecked = False} | missing == MissingDatum -> True
+        _ -> False
+
+    hasTxOutEvidence :: HieAST TypeIndex -> Bool
+    hasTxOutEvidence node =
+        nodeTypeContainsTyConName "TxOut" node
+            || subtreeHasAnyTxOutFieldToken txOutEvidenceTokens node
+
+    nodeTypeContainsTyConName :: String -> HieAST TypeIndex -> Bool
+    nodeTypeContainsTyConName needle node =
+        any (typeIndexContainsTyConName needle) (nodeTypeIndices node)
+
+    typeIndexContainsTyConName :: String -> TypeIndex -> Bool
+    typeIndexContainsTyConName needle ix =
+        hieTypeContainsTyConName needle (hie_types hie Arr.! ix)
+
+    hieTypeContainsTyConName :: String -> HieTypeFlat -> Bool
+    hieTypeContainsTyConName needle ty = case ty of
+        HTyConApp IfaceTyCon{ifaceTyConName = tyConName} (HieArgs args) ->
+            let here = occNameString (nameOccName tyConName) == needle
+            in here || any (hieTypeContainsTyConName needle . (hie_types hie Arr.!) . snd) args
+        HFunTy _ a b ->
+            hieTypeContainsTyConName needle (hie_types hie Arr.! a)
+                || hieTypeContainsTyConName needle (hie_types hie Arr.! b)
+        HForAllTy _ inner ->
+            hieTypeContainsTyConName needle (hie_types hie Arr.! inner)
+        HQualTy _ inner ->
+            hieTypeContainsTyConName needle (hie_types hie Arr.! inner)
+        _ -> False
+
+    nodeTypeIndices :: HieAST TypeIndex -> [TypeIndex]
+    nodeTypeIndices node =
+        let NodeInfo{nodeType = nodeTypes, nodeIdentifiers = idents} = nodeInfo node
+            identTypes =
+                [ ty
+                | (_ident, IdentifierDetails{identType = Just ty}) <- Map.assocs idents
+                ]
+        in nodeTypes <> identTypes
+
+    addressTokens, stakingTokens, valueTokens, datumTokens, referenceTokens :: [String]
+    addressTokens =
+        [ "txOutAddress"
+        , "hasOutputAddress"
+        , "getOutputPkh"
+        , "Address"
+        , "ScriptCredential"
+        , "PubKeyCredential"
+        ]
+
+    stakingTokens =
+        [ "hasStakingCredential"
+        , "addressStakingCredential"
+        , "StakingCredential"
+        , "stakingCredential"
+        , "StakingHash"
+        , "StakingPtr"
+        ]
+
+    valueTokens =
+        [ "txOutValue"
+        , "hasOutputValue"
+        , "valueOf"
+        , "currencySymbolValueOf"
+        ]
+
+    datumTokens =
+        [ "txOutDatum"
+        , "hasOutputDatum"
+        , "OutputDatum"
+        , "getDatumData"
+        ]
+
+    referenceTokens =
+        [ "txOutReferenceScript"
+        , "hasReferenceScript"
+        , "referenceScript"
+        , "ReferenceScript"
+        ]
+
+    allFieldTokens :: [String]
+    allFieldTokens =
+        addressTokens <> stakingTokens <> valueTokens <> datumTokens <> referenceTokens
+
+    txOutEvidenceTokens :: [String]
+    txOutEvidenceTokens =
+        allFieldTokens
+            <> [ "TxOut"
+               , "Address"
+               , "OutputDatum"
+               ]
 
 -- | Returns source spans of matched AST nodes.
 createMatch

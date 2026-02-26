@@ -1,0 +1,129 @@
+{
+  "name": "vscode-plustan",
+  "displayName": "Plu-Stan (VS Code/Cursor)",
+  "description": "Standalone VS Code/Cursor extension for onchain module discovery and Plu-Stan analysis.",
+  "version": "0.0.8",
+  "publisher": "local",
+  "license": "MPL-2.0",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "keywords": [
+    "plu-stan",
+    "plutus",
+    "cardano",
+    "cursor",
+    "vscode"
+  ],
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onView:plustanOnchainModules",
+    "onCommand:plustan.refreshOnchainModules",
+    "onCommand:plustan.runWorkspace",
+    "onCommand:plustan.runModule",
+    "onCommand:plustan.clearDiagnostics",
+    "onCommand:plustan.openOutput",
+    "onCommand:plustan.openSettings"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "plustan.refreshOnchainModules",
+        "title": "Plu-Stan: Refresh Onchain Modules"
+      },
+      {
+        "command": "plustan.runWorkspace",
+        "title": "Plu-Stan: Run Workspace"
+      },
+      {
+        "command": "plustan.runModule",
+        "title": "Plu-Stan: Run Module"
+      },
+      {
+        "command": "plustan.clearDiagnostics",
+        "title": "Plu-Stan: Clear Diagnostics"
+      },
+      {
+        "command": "plustan.openOutput",
+        "title": "Plu-Stan: Show Output"
+      },
+      {
+        "command": "plustan.openSettings",
+        "title": "Plu-Stan: Open Settings"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "plustan",
+          "title": "Plu-Stan",
+          "icon": "media/plustan.svg"
+        }
+      ]
+    },
+    "views": {
+      "plustan": [
+        {
+          "id": "plustanOnchainModules",
+          "name": "Plu-Stan Onchain Modules"
+        }
+      ]
+    },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "plustan.runModule",
+          "when": "view == plustanOnchainModules && viewItem == plustanModule",
+          "group": "inline@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Plu-Stan",
+      "properties": {
+        "plustan.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the plustan executable (required)."
+        },
+        "plustan.projectDir": {
+          "type": "string",
+          "default": "",
+          "description": "Optional project directory. If empty, uses the active workspace folder."
+        },
+        "plustan.hieDir": {
+          "type": "string",
+          "default": ".hie",
+          "description": "Directory containing .hie/.hi files, relative to projectDir unless absolute."
+        },
+        "plustan.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional CLI arguments appended to `plustan analyze` runs."
+        },
+        "plustan.showOutputChannel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Plu-Stan output channel automatically when running commands."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package:vsix": "npx @vscode/vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.5.4"
+  }
+}
