@@ -190,6 +190,9 @@ isMaybeStakingCredential' b =
   ```
   This passes the `Burn` check while still minting `TokenB`.
 
+- **Minting logic without burning logic:** Policies that validate only positive mint amounts can block required burn flows (or make protocol paths unfulfillable). (**Stan:** implemented via `PLU-STAN-20`)
+  - **Detector:** Flags `valueOf`/`flattenValue` checks over `txInfoMint` that validate minting (`> 0`, `>= 0`, or `== positive`) but do not validate burning (`< 0`, `<= 0`, or `== negative`) in the same function logic.
+
 ## Equality
 
 - **Eq on `ScriptHash` / `PubKeyHash` / `PaymentCredential`:** Potential staking value theft. Prefer equality on full `Address`. (**Stan:** implemented via `PLU-STAN-04`)
