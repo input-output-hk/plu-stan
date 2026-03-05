@@ -19,6 +19,7 @@ module Test.Stan.Analysis.PlutusTx (
   plustan17Spec,
   plustan18Spec,
   plustan19Spec,
+  plustan20Spec,
 ) where
 
 import Test.Hspec (Spec, describe, it)
@@ -49,6 +50,7 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   plustan17Spec analysis
   plustan18Spec analysis
   plustan19Spec analysis
+  plustan20Spec analysis
 
 plustan01Spec :: Analysis -> Spec
 plustan01Spec analysis = describe "PLU-STAN-01" $ do
@@ -564,3 +566,82 @@ plustan19Spec analysis = describe "PLU-STAN-19" $ do
 
   it "does not flag when all TxOut fields are checked" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan19 1010
+
+plustan20Spec :: Analysis -> Spec
+plustan20Spec analysis = describe "PLU-STAN-20" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags valueOf mint-only logic without burn path" $
+    checkObservation AntiPattern.plustan20 1413 6 22
+
+  it "does not flag valueOf logic with mint and burn checks" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1419
+
+  it "flags flattenValue mint-only logic without burn path" $
+    checkObservation AntiPattern.plustan20 1425 25 36
+
+  it "does not flag flattenValue logic with mint and burn checks" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1432
+
+  it "flags valueOf mint-only checks when txInfoMint is passed through local aliases" $
+    checkObservation AntiPattern.plustan20 1489 6 16
+
+  it "flags flattenValue mint-only checks when txInfoMint is passed through local aliases" $
+    checkObservation AntiPattern.plustan20 1504 27 37
+
+  it "does not flag let-bound valueOf checks split across conditional mint/burn branches" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1511
+
+  it "flags valueOf >= mint-only logic without burn checks" $
+    checkObservation AntiPattern.plustan20 1550 6 23
+
+  it "does not flag valueOf logic that pairs >= and <= checks" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1556
+
+  it "flags direct valueOf == positive checks without negative counterpart" $
+    checkObservation AntiPattern.plustan20 1561 3 132
+
+  it "does not flag direct valueOf == checks when positive and negative literals are both present" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1566
+
+  it "flags flattenValue >= mint-only logic without <= burn checks" $
+    checkObservation AntiPattern.plustan20 1580 25 36
+
+  it "does not flag flattenValue logic that pairs >= and <= checks" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1587
+
+  it "does not flag guard-based mint/burn sign dispatch" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1755
+
+  it "flags direct valueOf mint-only logic when opposite-sign direct checks are unused" $
+    checkObservation AntiPattern.plustan20 1846 9 137
+
+  it "does not flag inline guard predicate sign dispatch" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1880
+
+  it "flags mint-only logic when burn check is in an unrelated ||-prefixed continuation" $
+    checkObservation AntiPattern.plustan20 1892 14 30
+
+  it "does not flag guard dispatch with an intervening comment line" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1907
+
+  it "flags mint-only logic when guard context would otherwise leak from a previous declaration" $
+    checkObservation AntiPattern.plustan20 1922 7 135
+
+  it "does not flag let-bound mint/burn predicates selected via conditional branches" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1932
+
+  it "flags partially-applied valueOf checks when token args differ between mint and burn paths" $
+    checkObservation AntiPattern.plustan20 1941 6 26
+
+  it "flags partially-applied valueOf checks when same currency symbol is paired with different token args" $
+    checkObservation AntiPattern.plustan20 1951 6 29
+
+  it "does not flag mint/burn checks preserved through transitive let aliases" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1961
+
+  it "does not flag shadowed local valueOf helpers fed by real mint aliases" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1969
+
+  it "does not flag shadowed local flattenValue helpers fed by real mint aliases" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1976
