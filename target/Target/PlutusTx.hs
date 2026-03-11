@@ -1569,7 +1569,7 @@ plutStan20DirectValueOfEqPositiveAndNegativeShouldPass ctx =
 plutStan20DirectValueOfEqDifferentKeysShouldTrigger :: ScriptContext -> Bool
 -- PLU-STAN-20 (should trigger): mint and burn checks on different valueOf keys must not be paired.
 plutStan20DirectValueOfEqDifferentKeysShouldTrigger ctx =
-  let otherToken = Value.adaToken
+  let otherToken = Value.TokenName "other-token"
   in Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken == 1
       || Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol otherToken == (-1)
 
@@ -1976,3 +1976,112 @@ plutStan20ShadowedLocalFlattenValueMintCarrierCaseShouldPass ctx =
   in case flattenValue mintedValue of
       [(_, _, amount)] -> amount > 0
       _ -> False
+
+
+plutStan20DirectBacktickValueOfMintOnlyShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): direct backtick valueOf over mint aliases still needs burn checks.
+plutStan20DirectBacktickValueOfMintOnlyShouldTrigger ctx =
+  let minted = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+  in (minted `Value.valueOf` Value.adaSymbol) Value.adaToken > 0
+
+plutStan20DirectValueOfEqTokenAliasShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): aliases that resolve to the same token key must pair mint and burn checks.
+plutStan20DirectValueOfEqTokenAliasShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      canonicalToken = Value.adaToken
+      aliasToken = canonicalToken
+  in Value.valueOf mintedValue Value.adaSymbol canonicalToken == 1
+      || Value.valueOf mintedValue Value.adaSymbol aliasToken == (-1)
+
+plutStan20IntegerEquivalentUpperBoundShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): integer strict upper-bound `< 1` is equivalent to burn-side `<= 0` when paired with `> 0`.
+plutStan20IntegerEquivalentUpperBoundShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in mintedAmount > 0 || mintedAmount < 1
+
+plutStan20DirectValueOfEqMultilineAliasShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): multiline alias RHS resolving to the same token key should still pair mint/burn checks.
+plutStan20DirectValueOfEqMultilineAliasShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      canonicalToken = Value.adaToken
+      aliasToken =
+        canonicalToken
+  in Value.valueOf mintedValue Value.adaSymbol canonicalToken == 1
+      || Value.valueOf mintedValue Value.adaSymbol aliasToken == (-1)
+
+plutStan20BacktickHelperMintOnlyShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): helper invoked in backtick/infix form still validates mint-only logic.
+plutStan20BacktickHelperMintOnlyShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      helper minted _token = Value.valueOf minted Value.adaSymbol Value.adaToken > 0
+  in mintedValue `helper` Value.adaToken
+
+plutStan20MultilineHelperParamsMintOnlyShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): multiline helper parameter declarations should still propagate mint operand keys.
+plutStan20MultilineHelperParamsMintOnlyShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      helper
+        minted
+        token =
+          Value.valueOf minted Value.adaSymbol token > 0
+  in helper mintedValue Value.adaToken
+
+plutStan20DuplicateHelperParamNamesMintOnlyShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): helper parameter resolution must stay scoped to each binding when names repeat.
+plutStan20DuplicateHelperParamNamesMintOnlyShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      helperA minted token = minted == minted
+      helperB
+        minted
+        token =
+          let tokenMirror = token
+          in Value.valueOf minted Value.adaSymbol tokenMirror > 0
+  in helperB mintedValue Value.adaToken || helperA mintedValue Value.adaToken
+
+plutStan20HelperDollarPrefixCollisionShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): `$` argument extraction must not match helper names by substring.
+plutStan20HelperDollarPrefixCollisionShouldPass ctx =
+  let helper x = x > 0
+      helper2 y = y == y
+  in helper 1 || (helper2 $ Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken)
+
+plutStan20CompositeTokenExpressionAliasShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): composite token expressions containing aliases must not collapse to alias-only keys.
+plutStan20CompositeTokenExpressionAliasShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      canonicalToken = Value.adaToken
+      tokenExpr t = case True of
+        True -> t
+        False -> Value.TokenName (BI.stringToBuiltinByteStringHex "deadc0de")
+  in Value.valueOf mintedValue Value.adaSymbol canonicalToken == 1 || Value.valueOf mintedValue Value.adaSymbol (tokenExpr canonicalToken) == (-1)
+
+plutStan20CompositeTokenAliasViaIdShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): wrapping an alias in `id` must not collapse token keys.
+plutStan20CompositeTokenAliasViaIdShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      canonicalToken = Value.adaToken
+  in Value.valueOf mintedValue Value.adaSymbol canonicalToken == 1 || Value.valueOf mintedValue Value.adaSymbol (P.id canonicalToken) == (-1)
+
+plutStan20DuplicateHelperParamScopesShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): duplicate helper parameter names must resolve within each helper scope.
+plutStan20DuplicateHelperParamScopesShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      helperB
+        minted
+        token =
+          let helperToken = token
+          in Value.valueOf minted Value.adaSymbol helperToken > 0
+      helperA minted token = minted == minted
+  in helperB mintedValue Value.adaToken
+
+plutStan20HelperWildcardParamAlignmentShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): unresolved helper params (like `_`) must not shift propagated argument positions.
+plutStan20HelperWildcardParamAlignmentShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      unrelatedValue = Value.singleton Value.adaSymbol Value.adaToken 0
+      helper
+        _
+        token
+        minted =
+          Value.valueOf minted Value.adaSymbol token > 0
+  in helper unrelatedValue Value.adaToken mintedValue
