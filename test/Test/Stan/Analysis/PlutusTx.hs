@@ -645,3 +645,30 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
 
   it "does not flag shadowed local flattenValue helpers fed by real mint aliases" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1976
+
+  it "does not flag direct valueOf equality checks when alias RHS is multiline but resolves to the same token key" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2009
+
+  it "flags mint-only logic when helper checks are invoked via backtick/infix form" $
+    checkObservation AntiPattern.plustan20 2016 30 85
+
+  it "flags mint-only logic when helper parameters are declared across multiple lines" $
+    checkObservation AntiPattern.plustan20 2026 11 57
+
+  it "flags mint-only helper logic when repeated parameter names are reused across sibling helpers" $
+    checkObservation AntiPattern.plustan20 2038 14 66
+
+  it "does not leak `$` helper arguments across prefix-matching helper names" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2044
+
+  it "flags valueOf equality checks when token expression is composite despite alias usage" $
+    checkObservation AntiPattern.plustan20 2056 6 67
+
+  it "flags valueOf equality checks when alias token is wrapped in id" $
+    checkObservation AntiPattern.plustan20 2063 6 67
+
+  it "flags mint-only helper logic when duplicate parameter names appear in sibling helper scopes" $
+    checkObservation AntiPattern.plustan20 2073 14 66
+
+  it "flags mint-only helper logic when wildcard helper params precede propagated operands" $
+    checkObservation AntiPattern.plustan20 2086 11 57
