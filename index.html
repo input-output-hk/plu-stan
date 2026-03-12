@@ -350,8 +350,8 @@
 mkValidator datum redeemer ctx =
   <span class="kw">let</span> signer = <span class="fn">txInfoSignatories</span> (scriptContextTxInfo ctx)
   <span class="kw">in</span>  <span class="fn">any</span> (\s -> <span class="fn">credential</span> s == requiredCred) signer
-<span class="warn">  ⚠  ANTI-PATTERN: Comparing only credentials, not full addresses</span>
-<span class="warn">     → Risk of staking value theft (PST-SEC-002)</span></pre>
+<span class="warn">  ⚠  PLU-STAN-04: Equality on PubKeyHash / ScriptHash / Credential</span>
+<span class="warn">     → Comparing only credentials, not full Address — risk of staking value theft</span></pre>
   </div>
 </section>
 
