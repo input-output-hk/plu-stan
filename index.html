@@ -370,8 +370,8 @@ mkValidator datum redeemer ctx =
     </div>
     <div class="feature-card">
       <div class="feature-icon" style="background: rgba(96,165,250,0.1);">🔌</div>
-      <h3>IDE Integration</h3>
-      <p>Integrates with VS Code and Neovim via a custom <a href="https://github.com/input-output-hk/haskell-language-server" style="color:var(--accent);text-decoration:none;">Haskell Language Server fork</a>. See warnings as you type.</p>
+      <h3>VS Code / Cursor Extension</h3>
+      <p>Standalone <a href="https://github.com/input-output-hk/plu-stan/tree/main/vscode-plustan" style="color:var(--accent);text-decoration:none;">extension</a> with explorer tree view, per-module or workspace analysis, and diagnostics in the Problems panel.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon" style="background: rgba(167,139,250,0.1);">🧬</div>
@@ -499,21 +499,25 @@ mkValidator datum redeemer ctx =
 <section id="ide">
   <div class="section-label">IDE Integration</div>
   <h2>Warnings as you type</h2>
-  <p class="section-desc">Plu-Stan integrates with your editor via a custom HLS fork, or use the <code>plustan</code> CLI with JSON output for CI pipelines and editor plugins.</p>
+  <p class="section-desc">Install the standalone VS Code / Cursor extension for the best experience, or use the <code>plustan</code> CLI directly. HLS integration is also available for Neovim.</p>
 
   <div class="ide-block">
     <div class="ide-tabs">
-      <button class="ide-tab active" onclick="showTab('vscode')">VS Code</button>
-      <button class="ide-tab" onclick="showTab('neovim')">Neovim</button>
+      <button class="ide-tab active" onclick="showTab('extension')">Extension</button>
       <button class="ide-tab" onclick="showTab('cli')">CLI</button>
-      <button class="ide-tab" onclick="showTab('setup')">Setup</button>
+      <button class="ide-tab" onclick="showTab('hls-vscode')">HLS (VS Code)</button>
+      <button class="ide-tab" onclick="showTab('hls-neovim')">HLS (Neovim)</button>
     </div>
     <div class="ide-content" id="tab-content">
-      <pre id="code-display"><span style="color:#4a5568">// .vscode/settings.json</span>
-{
-  <span style="color:#a78bfa">"haskell.serverExecutablePath"</span>: <span style="color:#fbbf24">"/path/to/haskell-language-server-wrapper"</span>,
-  <span style="color:#a78bfa">"haskell.plugin.stan.globalOn"</span>: <span style="color:#00d4aa">true</span>
-}</pre>
+      <pre id="code-display"><span style="color:#4a5568"># Recommended: VS Code / Cursor extension</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cd</span> vscode-plustan
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">npm install</span> && <span style="color:#00d4aa">npm run compile</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">npm run</span> package:vsix
+
+<span style="color:#4a5568"># Then in VS Code / Cursor:</span>
+<span style="color:#4a5568"># Extensions → Install from VSIX...</span>
+
+<span style="color:#4a5568"># Set plustan.binaryPath to your plustan executable</span></pre>
     </div>
   </div>
 </section>
@@ -555,12 +559,33 @@ mkValidator datum redeemer ctx =
 
 <script>
 const tabs = {
-  vscode: `<span style="color:#4a5568">// .vscode/settings.json</span>
+  extension: `<span style="color:#4a5568"># Recommended: VS Code / Cursor extension</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cd</span> vscode-plustan
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">npm install</span> && <span style="color:#00d4aa">npm run compile</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">npm run</span> package:vsix
+
+<span style="color:#4a5568"># Then in VS Code / Cursor:</span>
+<span style="color:#4a5568"># Extensions → Install from VSIX...</span>
+
+<span style="color:#4a5568"># Set plustan.binaryPath to your plustan executable</span>`,
+  cli: `<span style="color:#4a5568"># list onchain modules (detected via annotation)</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">plustan</span> list-onchain --json
+
+<span style="color:#4a5568"># run analysis on full codebase</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">plustan</span> analyze --json
+
+<span style="color:#4a5568"># run on one onchain module</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">plustan</span> analyze --json --module Target.PlutusTx`,
+  'hls-vscode': `<span style="color:#4a5568">// Alternative: HLS integration via .vscode/settings.json</span>
 {
   <span style="color:#a78bfa">"haskell.serverExecutablePath"</span>: <span style="color:#fbbf24">"/path/to/haskell-language-server-wrapper"</span>,
   <span style="color:#a78bfa">"haskell.plugin.stan.globalOn"</span>: <span style="color:#00d4aa">true</span>
-}`,
-  neovim: `<span style="color:#4a5568">-- init.lua / lspconfig setup</span>
+}
+
+<span style="color:#4a5568"># Build the custom HLS fork first:</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">git clone</span> https://github.com/input-output-hk/haskell-language-server.git
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">git checkout</span> feat/plu-stan && <span style="color:#00d4aa">cabal build</span>`,
+  'hls-neovim': `<span style="color:#4a5568">-- Alternative: HLS integration via init.lua / lspconfig</span>
 {
   <span style="color:#a78bfa">cmd</span> = { <span style="color:#fbbf24">"/path/to/haskell-language-server-wrapper"</span>, <span style="color:#fbbf24">"--lsp"</span> },
   <span style="color:#a78bfa">settings</span> = {
@@ -570,22 +595,7 @@ const tabs = {
       },
     },
   },
-}`,
-  cli: `<span style="color:#4a5568"># list onchain modules (detected via annotation)</span>
-<span style="color:#4a5468">$ </span><span style="color:#00d4aa">plustan</span> list-onchain --json
-
-<span style="color:#4a5568"># run analysis on full codebase</span>
-<span style="color:#4a5468">$ </span><span style="color:#00d4aa">plustan</span> analyze --json
-
-<span style="color:#4a5568"># run on one onchain module</span>
-<span style="color:#4a5468">$ </span><span style="color:#00d4aa">plustan</span> analyze --json --module Target.PlutusTx`,
-  setup: `<span style="color:#4a5468">$ </span><span style="color:#00d4aa">git clone</span> https://github.com/input-output-hk/haskell-language-server.git
-<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cd</span> haskell-language-server
-<span style="color:#4a5468">$ </span><span style="color:#00d4aa">git checkout</span> feat/plu-stan
-<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cabal update</span>
-<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cabal build</span>
-<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cabal list-bin</span> exe:haskell-language-server
-<span style="color:#4a5568"># Copy the binary path to your IDE settings</span>`
+}`
 };
 
 function showTab(id) {
