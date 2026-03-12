@@ -297,6 +297,75 @@
   footer a { color: var(--accent); text-decoration: none; }
   footer a:hover { text-decoration: underline; }
 
+  /* ── Animated editor demo ── */
+  .demo-editor {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
+    overflow: hidden; margin-bottom: 40px; position: relative;
+  }
+  .demo-titlebar {
+    padding: 12px 16px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02);
+  }
+  .demo-titlebar span { width: 10px; height: 10px; border-radius: 50%; }
+  .demo-titlebar span:nth-child(1) { background: #f87171; }
+  .demo-titlebar span:nth-child(2) { background: #fbbf24; }
+  .demo-titlebar span:nth-child(3) { background: #34d399; }
+  .demo-titlebar .demo-filename {
+    margin-left: 8px; font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem; color: var(--text-dim); width: auto; height: auto;
+    border-radius: 0; background: none;
+  }
+  .demo-body {
+    padding: 20px 0; font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem; line-height: 1.8; min-height: 260px; position: relative;
+  }
+  .demo-line {
+    display: flex; padding: 0 24px 0 0; white-space: pre; position: relative;
+  }
+  .demo-lineno {
+    display: inline-block; width: 44px; text-align: right; padding-right: 16px;
+    color: #334155; user-select: none; flex-shrink: 0;
+  }
+  .demo-code { flex: 1; min-width: 0; position: relative; }
+  .demo-cursor {
+    display: inline-block; width: 2px; height: 1.1em; background: var(--accent);
+    vertical-align: text-bottom; animation: blink-cursor 0.8s step-end infinite;
+    margin-left: 1px;
+  }
+  @keyframes blink-cursor { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+  .demo-line.has-error .demo-code { position: relative; }
+  .demo-squiggly {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    background: repeating-linear-gradient(90deg, var(--red) 0px, var(--red) 3px, transparent 3px, transparent 6px);
+    opacity: 0; transition: opacity 0.3s;
+  }
+  .demo-squiggly.visible { opacity: 1; }
+
+  .demo-diagnostic {
+    margin: 4px 0 0 44px; padding: 8px 14px; border-radius: 8px;
+    background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.2);
+    font-size: 0.75rem; line-height: 1.5; color: var(--text-dim);
+    opacity: 0; transform: translateY(-4px); transition: all 0.4s ease-out;
+    display: none;
+  }
+  .demo-diagnostic.visible { opacity: 1; transform: translateY(0); display: block; }
+  .demo-diagnostic .diag-severity {
+    color: var(--red); font-weight: 700; margin-right: 6px;
+  }
+  .demo-diagnostic .diag-rule {
+    color: var(--amber); font-weight: 600;
+  }
+  .demo-diagnostic .diag-msg { color: var(--text-dim); }
+
+  .demo-status {
+    padding: 6px 16px; border-top: 1px solid var(--border);
+    font-size: 0.7rem; color: var(--text-dim); display: flex;
+    align-items: center; gap: 12px; background: rgba(255,255,255,0.01);
+  }
+  .demo-status .status-ok { color: var(--accent); }
+  .demo-status .status-err { color: var(--red); }
+
   /* ── Responsive ── */
   @media (max-width: 700px) {
     nav { padding: 14px 20px; }
@@ -505,6 +574,18 @@ mkValidator datum redeemer ctx =
   <h2>Warnings as you type</h2>
   <p class="section-desc">Install the standalone VS Code / Cursor extension for the best experience, or use the <code>plustan</code> CLI directly. HLS integration is also available for Neovim.</p>
 
+  <div class="demo-editor" id="demo-editor">
+    <div class="demo-titlebar">
+      <span></span><span></span><span></span>
+      <span class="demo-filename">Validator.hs</span>
+    </div>
+    <div class="demo-body" id="demo-body"></div>
+    <div class="demo-status" id="demo-status">
+      <span class="status-ok">Plu-Stan</span>
+      <span>Haskell</span>
+    </div>
+  </div>
+
   <div class="ide-block">
     <div class="ide-tabs">
       <button class="ide-tab active" onclick="showTab('extension')">Extension</button>
@@ -607,6 +688,140 @@ function showTab(id) {
   event.target.classList.add('active');
   document.getElementById('code-display').innerHTML = tabs[id];
 }
+</script>
+
+<script>
+// ── Animated editor demo ──
+(function() {
+  const lines = [
+    { code: '<span style="color:#4a5568">-- | Spending validator: check authorised signer</span>', delay: 40 },
+    { code: '<span style="color:#a78bfa">mkValidator</span> :: Datum -> Redeemer -> ScriptContext -> <span style="color:#00d4aa">Bool</span>', delay: 30 },
+    { code: '<span style="color:#a78bfa">mkValidator</span> datum redeemer ctx =', delay: 35 },
+    { code: '  <span style="color:#a78bfa">let</span> info    = <span style="color:#00d4aa">scriptContextTxInfo</span> ctx', delay: 30 },
+    { code: '      signers = <span style="color:#00d4aa">txInfoSignatories</span> info', delay: 30 },
+    { code: '  <span style="color:#a78bfa">in</span>  <span style="color:#00d4aa">any</span> (\\s -> <span style="color:#00d4aa">credential</span> s == requiredCred) signers', delay: 25, error: true },
+  ];
+
+  const diagnostic = {
+    severity: 'Warning',
+    rule: 'PLU-STAN-04',
+    message: 'Equality on Credential — comparing only credentials instead of full Address can lead to staking value theft.',
+  };
+
+  const demoBody = document.getElementById('demo-body');
+  const demoStatus = document.getElementById('demo-status');
+  let observer;
+
+  function stripTags(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || '';
+  }
+
+  async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  async function typeLine(lineEl, codeEl, html, charDelay) {
+    const plain = stripTags(html);
+    const cursor = document.createElement('span');
+    cursor.className = 'demo-cursor';
+    codeEl.appendChild(cursor);
+
+    for (let i = 0; i <= plain.length; i++) {
+      // Build partial HTML: map plain-text index to HTML position
+      let plainCount = 0, htmlIdx = 0, inTag = false;
+      for (htmlIdx = 0; htmlIdx < html.length && plainCount < i; htmlIdx++) {
+        if (html[htmlIdx] === '<') inTag = true;
+        else if (html[htmlIdx] === '>') inTag = false;
+        else if (!inTag) plainCount++;
+      }
+      // Include any trailing tags
+      while (htmlIdx < html.length && html[htmlIdx] === '<') {
+        const close = html.indexOf('>', htmlIdx);
+        if (close === -1) break;
+        htmlIdx = close + 1;
+      }
+
+      const partial = html.substring(0, htmlIdx);
+      codeEl.innerHTML = partial;
+      codeEl.appendChild(cursor);
+
+      await sleep(charDelay + Math.random() * 20);
+    }
+
+    cursor.remove();
+    codeEl.innerHTML = html;
+  }
+
+  async function runDemo() {
+    demoBody.innerHTML = '';
+    demoStatus.innerHTML = '<span class="status-ok">Plu-Stan — analyzing...</span><span>Haskell</span>';
+
+    let errorLineEl = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const { code, delay, error } = lines[i];
+
+      const lineEl = document.createElement('div');
+      lineEl.className = 'demo-line' + (error ? ' has-error' : '');
+
+      const lineNo = document.createElement('span');
+      lineNo.className = 'demo-lineno';
+      lineNo.textContent = i + 1;
+
+      const codeEl = document.createElement('span');
+      codeEl.className = 'demo-code';
+
+      lineEl.appendChild(lineNo);
+      lineEl.appendChild(codeEl);
+
+      if (error) {
+        const squiggly = document.createElement('div');
+        squiggly.className = 'demo-squiggly';
+        codeEl.appendChild(squiggly);
+        errorLineEl = { lineEl, squiggly };
+      }
+
+      demoBody.appendChild(lineEl);
+      await typeLine(lineEl, codeEl, code, delay);
+
+      if (i < lines.length - 1) await sleep(200);
+    }
+
+    // Pause, then show the error
+    await sleep(600);
+
+    if (errorLineEl) {
+      errorLineEl.squiggly.classList.add('visible');
+
+      const diagEl = document.createElement('div');
+      diagEl.className = 'demo-diagnostic';
+      diagEl.innerHTML =
+        '<span class="diag-severity">' + diagnostic.severity + '</span>' +
+        '<span class="diag-rule">[' + diagnostic.rule + ']</span> ' +
+        '<span class="diag-msg">' + diagnostic.message + '</span>';
+      demoBody.appendChild(diagEl);
+
+      await sleep(50);
+      diagEl.classList.add('visible');
+
+      demoStatus.innerHTML =
+        '<span class="status-err">Plu-Stan — 1 warning</span><span>Haskell</span>';
+    }
+
+    // Hold, then restart
+    await sleep(5000);
+    runDemo();
+  }
+
+  // Start when section scrolls into view
+  observer = new IntersectionObserver(function(entries) {
+    if (entries[0].isIntersecting) {
+      observer.disconnect();
+      runDemo();
+    }
+  }, { threshold: 0.3 });
+  observer.observe(document.getElementById('demo-editor'));
+})();
 </script>
 
 <script type="importmap">
