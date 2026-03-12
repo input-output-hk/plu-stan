@@ -644,7 +644,7 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1969
 
   it "does not flag shadowed local flattenValue helpers fed by real mint aliases" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1976
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1977
 
   it "does not flag direct valueOf equality checks when alias RHS is multiline but resolves to the same token key" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2009
@@ -672,3 +672,21 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
 
   it "flags mint-only helper logic when wildcard helper params precede propagated operands" $
     checkObservation AntiPattern.plustan20 2086 11 57
+
+  it "flags mint-only logic routed through lambda helper arguments" $
+    checkObservation AntiPattern.plustan20 2094 9 19
+
+  it "does not flag mint/burn logic when burn side uses negated-operand equivalence" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2101
+
+  it "flags lambda helper mint-only logic when direct binders precede the rhs lambda" $
+    checkObservation AntiPattern.plustan20 2108 9 19
+
+  it "flags lambda helper mint-only logic when a wildcard direct binder precedes the rhs lambda" $
+    checkObservation AntiPattern.plustan20 2116 9 19
+
+  it "flags mint-only logic routed through nested curried lambda helper binders" $
+    checkObservation AntiPattern.plustan20 2124 9 19
+
+  it "does not flag mint/burn logic when burn side uses `$`-applied negation equivalence" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2131
