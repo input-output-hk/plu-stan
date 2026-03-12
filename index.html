@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plu-Stan — Static Analysis for Plinth Smart Contracts</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0b0f;
+    --bg2: #12141c;
+    --bg3: #1a1d2a;
+    --accent: #00d4aa;
+    --accent2: #00b894;
+    --accent-glow: rgba(0, 212, 170, 0.15);
+    --purple: #a78bfa;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --blue: #60a5fa;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --border: rgba(255,255,255,0.06);
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ── Animated background ── */
+  .bg-grid {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+  .bg-glow {
+    position: fixed; z-index: 0; pointer-events: none;
+    width: 600px; height: 600px; border-radius: 50%;
+    filter: blur(120px); opacity: 0.4;
+  }
+  .bg-glow.g1 { top: -200px; left: -100px; background: rgba(0,212,170,0.12); }
+  .bg-glow.g2 { bottom: -200px; right: -100px; background: rgba(167,139,250,0.10); }
+
+  .content { position: relative; z-index: 1; }
+
+  /* ── Nav ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    padding: 16px 40px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: rgba(10,11,15,0.8);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 1.2rem; color: var(--text);
+    text-decoration: none;
+  }
+  .nav-logo .logo-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; color: #000;
+  }
+  .nav-links { display: flex; gap: 32px; align-items: center; }
+  .nav-links a {
+    color: var(--text-dim); text-decoration: none; font-size: 0.9rem;
+    font-weight: 500; transition: color 0.2s;
+  }
+  .nav-links a:hover { color: var(--accent); }
+  .nav-cta {
+    padding: 8px 20px; border-radius: 8px; font-weight: 600; font-size: 0.85rem;
+    background: var(--accent); color: #000; text-decoration: none;
+    transition: all 0.2s;
+  }
+  .nav-cta:hover { background: #00eabb; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,212,170,0.3); }
+
+  /* ── Hero ── */
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    padding: 120px 40px 80px;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 16px; border-radius: 100px;
+    background: var(--accent-glow); border: 1px solid rgba(0,212,170,0.2);
+    font-size: 0.8rem; font-weight: 600; color: var(--accent);
+    margin-bottom: 28px;
+    animation: fadeInUp 0.6s ease-out both;
+  }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse-dot 2s infinite; }
+  @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .hero h1 {
+    font-size: clamp(2.8rem, 6vw, 5rem);
+    font-weight: 800; line-height: 1.08;
+    letter-spacing: -0.03em;
+    max-width: 800px;
+    animation: fadeInUp 0.6s ease-out 0.1s both;
+  }
+  .hero h1 .gradient {
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .hero .subtitle {
+    font-size: 1.15rem; color: var(--text-dim); max-width: 580px;
+    margin-top: 20px; line-height: 1.7; font-weight: 400;
+    animation: fadeInUp 0.6s ease-out 0.2s both;
+  }
+  .hero-actions {
+    margin-top: 36px; display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+    animation: fadeInUp 0.6s ease-out 0.3s both;
+  }
+  .btn {
+    padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 0.95rem;
+    text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+    transition: all 0.25s; cursor: pointer; border: none;
+  }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { background: #00eabb; transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,212,170,0.25); }
+  .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: rgba(255,255,255,0.15); transform: translateY(-2px); }
+
+  .hero-code {
+    margin-top: 56px; max-width: 600px; width: 100%; text-align: left;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
+    overflow: hidden;
+    animation: fadeInUp 0.6s ease-out 0.4s both;
+  }
+  .hero-code-bar {
+    padding: 12px 16px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02);
+  }
+  .hero-code-bar span { width: 10px; height: 10px; border-radius: 50%; }
+  .hero-code-bar span:nth-child(1) { background: #f87171; }
+  .hero-code-bar span:nth-child(2) { background: #fbbf24; }
+  .hero-code-bar span:nth-child(3) { background: #34d399; }
+  .hero-code pre {
+    padding: 20px 24px; font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem; line-height: 1.7; overflow-x: auto;
+  }
+  .hero-code .dim { color: #475569; }
+  .hero-code .kw { color: var(--purple); }
+  .hero-code .fn { color: var(--accent); }
+  .hero-code .str { color: var(--amber); }
+  .hero-code .cmt { color: #4a5568; font-style: italic; }
+  .hero-code .warn { color: var(--red); }
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Section shared ── */
+  section { padding: 100px 40px; max-width: 1100px; margin: 0 auto; }
+  .section-label {
+    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 12px;
+  }
+  section h2 {
+    font-size: 2.4rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 16px;
+  }
+  section .section-desc {
+    color: var(--text-dim); font-size: 1.05rem; max-width: 600px; line-height: 1.7;
+    margin-bottom: 48px;
+  }
+
+  /* ── Features grid ── */
+  .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  .feature-card {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 16px;
+    padding: 32px; transition: all 0.3s;
+  }
+  .feature-card:hover {
+    border-color: rgba(0,212,170,0.2); transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+  }
+  .feature-icon {
+    width: 44px; height: 44px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem; margin-bottom: 18px;
+  }
+  .feature-card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 8px; }
+  .feature-card p { color: var(--text-dim); font-size: 0.9rem; line-height: 1.65; }
+
+  /* ── Rules section ── */
+  .rules-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .rule-item {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: center;
+    padding: 18px 24px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 12px; transition: all 0.2s;
+  }
+  .rule-item:hover { border-color: rgba(0,212,170,0.15); }
+  .rule-severity {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 700;
+    padding: 4px 10px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .sev-security { background: rgba(248,113,113,0.12); color: var(--red); }
+  .sev-performance { background: rgba(251,191,36,0.12); color: var(--amber); }
+  .rule-item .rule-name { font-weight: 600; font-size: 0.92rem; }
+  .rule-item .rule-desc { color: var(--text-dim); font-size: 0.82rem; margin-top: 2px; }
+
+  /* ── IDE section ── */
+  .ide-block {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 16px;
+    overflow: hidden;
+  }
+  .ide-tabs {
+    display: flex; border-bottom: 1px solid var(--border);
+  }
+  .ide-tab {
+    padding: 14px 24px; font-size: 0.85rem; font-weight: 600;
+    color: var(--text-dim); cursor: pointer; transition: all 0.2s;
+    border-bottom: 2px solid transparent; background: none; border-top: none; border-left: none; border-right: none;
+  }
+  .ide-tab.active { color: var(--accent); border-bottom-color: var(--accent); background: rgba(0,212,170,0.04); }
+  .ide-tab:hover { color: var(--text); }
+  .ide-content { padding: 24px 28px; }
+  .ide-content pre {
+    font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; line-height: 1.7;
+  }
+
+  /* ── CTA ── */
+  .cta-section {
+    text-align: center; padding: 80px 40px 120px;
+    max-width: 700px; margin: 0 auto;
+  }
+  .cta-section h2 { font-size: 2.2rem; font-weight: 800; margin-bottom: 16px; }
+  .cta-section p { color: var(--text-dim); font-size: 1.05rem; margin-bottom: 36px; line-height: 1.7; }
+  .cta-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+  /* ── Built By ── */
+  .built-by {
+    text-align: center; padding: 60px 40px 80px;
+    max-width: 800px; margin: 0 auto;
+  }
+  .built-by-label {
+    font-size: 1rem; color: var(--text-dim); font-weight: 500; margin-bottom: 32px;
+  }
+  .built-by-logos {
+    display: flex; gap: 20px; justify-content: center; flex-wrap: wrap;
+  }
+  .org-card {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 24px; border-radius: 12px;
+    background: var(--bg2); border: 1px solid var(--border);
+    text-decoration: none; color: var(--text); font-weight: 600; font-size: 0.92rem;
+    transition: all 0.25s;
+  }
+  .org-card:hover {
+    border-color: rgba(0,212,170,0.2); transform: translateY(-3px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  }
+  .org-icon {
+    width: 40px; height: 40px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; flex-shrink: 0;
+  }
+  .org-icon img {
+    max-width: 100%; max-height: 100%; object-fit: contain;
+  }
+  .org-icon--iog { background: #1a1d2a; padding: 6px; }
+  .org-icon--iog img { filter: brightness(0) invert(1); }
+  .org-icon--txpipe { background: #1a1d2a; padding: 4px; }
+  .org-icon--al { background: #1a1d2a; padding: 4px; border-radius: 8px; }
+
+  /* ── Footer ── */
+  footer {
+    padding: 32px 40px; border-top: 1px solid var(--border);
+    text-align: center; color: var(--text-dim); font-size: 0.82rem;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  /* ── Responsive ── */
+  @media (max-width: 700px) {
+    nav { padding: 14px 20px; }
+    .nav-links { display: none; }
+    section { padding: 60px 20px; }
+    .hero { padding: 100px 20px 60px; }
+    .rule-item { grid-template-columns: 1fr; gap: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="bg-glow g1"></div>
+<div class="bg-glow g2"></div>
+
+<div class="content">
+
+<!-- Nav -->
+<nav>
+  <a href="#" class="nav-logo">
+    <div class="logo-icon">PS</div>
+    Plu-Stan
+  </a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#rules">Rules</a>
+    <a href="#ide">IDE</a>
+    <a href="https://github.com/input-output-hk/plu-stan" class="nav-cta" target="_blank">GitHub →</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="badge"><span class="dot"></span> Proof of Concept — Actively Developed</div>
+  <h1>Static Analysis for <span class="gradient">Plinth</span> Smart Contracts</h1>
+  <p class="subtitle">Catch security vulnerabilities and performance pitfalls in your Cardano smart contracts before they hit the chain. Built on top of Haskell's Stan analyzer.</p>
+  <div class="hero-actions">
+    <a href="https://github.com/input-output-hk/plu-stan" class="btn btn-primary" target="_blank">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+      View on GitHub
+    </a>
+    <a href="#rules" class="btn btn-secondary">Explore Rules ↓</a>
+  </div>
+
+  <div class="hero-code">
+    <div class="hero-code-bar"><span></span><span></span><span></span></div>
+    <pre><span class="cmt">-- Plu-Stan catches this:</span>
+<span class="kw">mkValidator</span> :: Datum -> Redeemer -> ScriptContext -> <span class="fn">Bool</span>
+mkValidator datum redeemer ctx =
+  <span class="kw">let</span> signer = <span class="fn">txInfoSignatories</span> (scriptContextTxInfo ctx)
+  <span class="kw">in</span>  <span class="fn">any</span> (\s -> <span class="fn">credential</span> s == requiredCred) signer
+<span class="warn">  ⚠  ANTI-PATTERN: Comparing only credentials, not full addresses</span>
+<span class="warn">     → Risk of staking value theft (PST-SEC-002)</span></pre>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+  <div class="section-label">Why Plu-Stan</div>
+  <h2>Ship safer Plinth code</h2>
+  <p class="section-desc">Automated detection of common pitfalls specific to on-chain Cardano code — security flaws, performance issues, and unsafe patterns.</p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(248,113,113,0.1);">🛡️</div>
+      <h3>Security Rules</h3>
+      <p>Detect missing signature verification, unsafe credential comparisons, and unvalidated deserialization from untrusted builtin data.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(251,191,36,0.1);">⚡</div>
+      <h3>Performance Rules</h3>
+      <p>Flag expensive on-chain patterns like nested list operations, non-strict bindings, and higher-order functions that inflate execution costs.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(96,165,250,0.1);">🔌</div>
+      <h3>IDE Integration</h3>
+      <p>Runs natively inside VS Code and Neovim via a custom Haskell Language Server fork — see warnings as you type.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(167,139,250,0.1);">🧬</div>
+      <h3>Built on Stan</h3>
+      <p>Inherits the battle-tested Haskell Stan analyzer and extends it with Plinth-specific rules for on-chain Cardano code.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(0,212,170,0.1);">📖</div>
+      <h3>Open Source</h3>
+      <p>MPL-2.0 licensed. Contributions welcome — from new rules and docs to full feature implementations.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background: rgba(251,146,60,0.1);">🎯</div>
+      <h3>Cardano-Native</h3>
+      <p>Purpose-built for the Cardano ecosystem. Every rule targets real patterns seen in deployed Plinth validators and minting policies.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Rules -->
+<section id="rules">
+  <div class="section-label">Detection Rules</div>
+  <h2>What Plu-Stan catches</h2>
+  <p class="section-desc">A growing set of automated rules covering security vulnerabilities and performance anti-patterns specific to on-chain Plinth code.</p>
+
+  <div class="rules-grid">
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">Missing Signature Verification</div>
+        <div class="rule-desc">Cryptographic signature functions without on-chain hash verification and replay prevention.</div>
+      </div>
+      <span class="rule-severity sev-security">Security</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">Partial Credential Comparison</div>
+        <div class="rule-desc">Comparing only credentials instead of full addresses can allow staking value theft.</div>
+      </div>
+      <span class="rule-severity sev-security">Security</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">Unsafe valueOf Usage</div>
+        <div class="rule-desc">Using valueOf with adaSymbol/adaToken in comparisons when the token set is unbounded.</div>
+      </div>
+      <span class="rule-severity sev-security">Security</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">Unvalidated Deserialization</div>
+        <div class="rule-desc">Comparing values from unsafeFromBuiltinData without validating ledger invariants.</div>
+      </div>
+      <span class="rule-severity sev-security">Security</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">Higher-Order List Functions</div>
+        <div class="rule-desc">Functions like filter, any, all, find are inefficient on-chain — prefer hand-rolled recursion.</div>
+      </div>
+      <span class="rule-severity sev-performance">Performance</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">Nested List Operations</div>
+        <div class="rule-desc">Chaining map over filter causes redundant iterations and inflated execution costs.</div>
+      </div>
+      <span class="rule-severity sev-performance">Performance</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">Non-Strict Bindings</div>
+        <div class="rule-desc">Lazy bindings used multiple times cause repeated evaluation — use bang patterns.</div>
+      </div>
+      <span class="rule-severity sev-performance">Performance</span>
+    </div>
+  </div>
+</section>
+
+<!-- IDE Integration -->
+<section id="ide">
+  <div class="section-label">IDE Integration</div>
+  <h2>Warnings as you type</h2>
+  <p class="section-desc">Plu-Stan integrates with your editor via a custom HLS fork. Get real-time feedback on security and performance issues.</p>
+
+  <div class="ide-block">
+    <div class="ide-tabs">
+      <button class="ide-tab active" onclick="showTab('vscode')">VS Code</button>
+      <button class="ide-tab" onclick="showTab('neovim')">Neovim</button>
+      <button class="ide-tab" onclick="showTab('setup')">Setup</button>
+    </div>
+    <div class="ide-content" id="tab-content">
+      <pre id="code-display"><span style="color:#4a5568">// .vscode/settings.json</span>
+{
+  <span style="color:#a78bfa">"haskell.serverExecutablePath"</span>: <span style="color:#fbbf24">"/path/to/haskell-language-server-wrapper"</span>,
+  <span style="color:#a78bfa">"haskell.plugin.stan.globalOn"</span>: <span style="color:#00d4aa">true</span>
+}</pre>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <h2>Help make Plinth safer</h2>
+  <p>Plu-Stan is an open-source proof of concept. Contribute new rules, report issues, or help shape the future of static analysis for Cardano smart contracts.</p>
+  <div class="cta-actions">
+    <a href="https://github.com/input-output-hk/plu-stan" class="btn btn-primary" target="_blank">Star on GitHub</a>
+    <a href="https://github.com/input-output-hk/plu-stan/issues" class="btn btn-secondary" target="_blank">Report an Issue</a>
+  </div>
+</section>
+
+<!-- Built With Love -->
+<section class="built-by">
+  <p class="built-by-label">Built with ❤️ by</p>
+  <div class="built-by-logos">
+    <a href="https://iog.io" target="_blank" class="org-card">
+      <div class="org-icon org-icon--iog"><img src="assets/iog-logo.svg" alt="IOG" /></div>
+      <span>Input Output Global</span>
+    </a>
+    <a href="https://txpipe.io" target="_blank" class="org-card">
+      <div class="org-icon org-icon--txpipe"><img src="assets/txpipe.png" alt="TxPipe" /></div>
+      <span>TxPipe</span>
+    </a>
+    <a href="https://www.anastasialabs.com" target="_blank" class="org-card">
+      <div class="org-icon org-icon--al"><img src="assets/al-icon-red.png" alt="Anastasia Labs" /></div>
+      <span>Anastasia Labs</span>
+    </a>
+  </div>
+</section>
+
+<footer>
+  Licensed under MPL-2.0. <a href="https://github.com/input-output-hk/plu-stan" target="_blank">View source on GitHub</a>.
+</footer>
+
+</div>
+
+<script>
+const tabs = {
+  vscode: `<span style="color:#4a5568">// .vscode/settings.json</span>
+{
+  <span style="color:#a78bfa">"haskell.serverExecutablePath"</span>: <span style="color:#fbbf24">"/path/to/haskell-language-server-wrapper"</span>,
+  <span style="color:#a78bfa">"haskell.plugin.stan.globalOn"</span>: <span style="color:#00d4aa">true</span>
+}`,
+  neovim: `<span style="color:#4a5568">-- init.lua / lspconfig setup</span>
+{
+  <span style="color:#a78bfa">cmd</span> = { <span style="color:#fbbf24">"/path/to/haskell-language-server-wrapper"</span>, <span style="color:#fbbf24">"--lsp"</span> },
+  <span style="color:#a78bfa">settings</span> = {
+    <span style="color:#a78bfa">haskell</span> = {
+      <span style="color:#a78bfa">plugin</span> = {
+        <span style="color:#a78bfa">stan</span> = { <span style="color:#a78bfa">globalOn</span> = <span style="color:#00d4aa">true</span> },
+      },
+    },
+  },
+}`,
+  setup: `<span style="color:#4a5468">$ </span><span style="color:#00d4aa">git clone</span> https://github.com/input-output-hk/haskell-language-server.git
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cd</span> haskell-language-server
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">git checkout</span> feat/plu-stan
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cabal update</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cabal build</span>
+<span style="color:#4a5468">$ </span><span style="color:#00d4aa">cabal list-bin</span> exe:haskell-language-server
+<span style="color:#4a5568"># Copy the binary path to your IDE settings</span>`
+};
+
+function showTab(id) {
+  document.querySelectorAll('.ide-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('code-display').innerHTML = tabs[id];
+}
+</script>
+
+</body>
+</html>
