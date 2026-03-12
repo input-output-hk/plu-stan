@@ -2085,3 +2085,47 @@ plutStan20HelperWildcardParamAlignmentShouldTrigger ctx =
         minted =
           Value.valueOf minted Value.adaSymbol token > 0
   in helper unrelatedValue Value.adaToken mintedValue
+
+plutStan20LambdaHelperMintOnlyShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): lambda helper mint-only checks over txInfoMint should be tracked.
+plutStan20LambdaHelperMintOnlyShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      isMintOnly = \amount ->
+        amount > 0
+  in isMintOnly mintedAmount
+
+plutStan20NegatedOperandMintBurnShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): `negate mintedAmount > 0` is equivalent to `mintedAmount < 0` when paired with `mintedAmount > 0`.
+plutStan20NegatedOperandMintBurnShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in mintedAmount > 0 || negate mintedAmount > 0
+
+plutStan20LambdaHelperAfterDirectBinderShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): direct helper binders before an RHS lambda must keep later propagated argument slots aligned.
+plutStan20LambdaHelperAfterDirectBinderShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      helper helperCtx = \amount ->
+        amount > 0
+  in helper ctx mintedAmount
+
+plutStan20LambdaHelperWildcardDirectBinderShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): unresolved direct binders before an RHS lambda must not shift later propagated argument slots.
+plutStan20LambdaHelperWildcardDirectBinderShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      helper _ = \amount ->
+        amount > 0
+  in helper ctx mintedAmount
+
+plutStan20NestedLambdaHelperMintOnlyShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): nested curried lambda helpers should propagate later mint operands through every binder list.
+plutStan20NestedLambdaHelperMintOnlyShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      helper = \helperCtx -> \amount ->
+        amount > 0
+  in helper ctx mintedAmount
+
+plutStan20NegatedOperandDollarMintBurnShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): `(negate $ mintedAmount) > 0` is equivalent to `mintedAmount < 0` when paired with `mintedAmount > 0`.
+plutStan20NegatedOperandDollarMintBurnShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in mintedAmount > 0 || (negate $ mintedAmount) > 0

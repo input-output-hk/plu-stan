@@ -3948,26 +3948,53 @@ analyseMissingBurningLogic insId hie = go
                 ]
             lhsLiteral = operandIntegerLiteral lhs
             rhsLiteral = operandIntegerLiteral rhsNode
-            eqSide keys = \case
-                Just n | n > 0 -> map (\key -> (key, BurningPositive, cmpSpan)) keys
-                Just n | n < 0 -> map (\key -> (key, BurningNegative, cmpSpan)) keys
+            lhsSignAdjust = adjustOperandSign lhs
+            rhsSignAdjust = adjustOperandSign rhsNode
+            eqSide adjustSign keys = \case
+                Just n | n > 0 -> map (\key -> (key, adjustSign BurningPositive, cmpSpan)) keys
+                Just n | n < 0 -> map (\key -> (key, adjustSign BurningNegative, cmpSpan)) keys
                 _ -> []
             lhsIneq keys predicate sign =
-                [ (key, sign, cmpSpan)
+                [ (key, lhsSignAdjust sign, cmpSpan)
                 | key <- keys
                 , Just n <- [rhsLiteral]
                 , predicate n
                 ]
             rhsIneq keys predicate sign =
-                [ (key, sign, cmpSpan)
+                [ (key, rhsSignAdjust sign, cmpSpan)
                 | key <- keys
                 , Just n <- [lhsLiteral]
                 , predicate n
                 ]
+            adjustOperandSign operand sign =
+                if operandIsNegated operand
+                    then flipBurningSign sign
+                    else sign
+            flipBurningSign = \case
+                BurningPositive -> BurningNegative
+                BurningNegative -> BurningPositive
+            operandIsNegated = odd . operandNegationDepth
+            operandNegationDepth operand
+                | nodeHasAnnotation hsParAnnotation operand =
+                    maybe 0 operandNegationDepth (listToMaybe $ nodeChildren operand)
+                | nodeHasAnnotation negAppAnnotation operand =
+                    1 + maybe 0 operandNegationDepth (listToMaybe $ nodeChildren operand)
+                | otherwise = case appSpine operand of
+                    (headNode, [arg])
+                        | isNegateHead headNode ->
+                            1 + operandNegationDepth arg
+                    _ -> 0
+            isNegateHead headNode =
+                "negate" `elem` nodeOccNames headNode
+                    || subtreeHasOccName "negate" headNode
+            hsParAnnotation :: NodeAnnotation
+            hsParAnnotation = mkNodeAnnotation "HsPar" "HsExpr"
+            negAppAnnotation :: NodeAnnotation
+            negAppAnnotation = mkNodeAnnotation "NegApp" "HsExpr"
         in case op of
             "==" ->
-                eqSide lhsKeys rhsLiteral
-                    <> eqSide rhsKeys lhsLiteral
+                eqSide lhsSignAdjust lhsKeys rhsLiteral
+                    <> eqSide rhsSignAdjust rhsKeys lhsLiteral
             ">" ->
                 lhsIneq lhsKeys (>= (-1)) BurningPositive
                     <> rhsIneq rhsKeys (<= 1) BurningNegative
@@ -5276,25 +5303,81 @@ analyseMissingBurningLogic insId hie = go
         bindingParameterNamesForBinding (bindingName, bindSpan) = do
             bindingOcc:paramOccs <- bindingHeaderWords bindSpan
             guard (bindingOcc == BS8.pack (occNameString $ nameOccName bindingName))
-            let paramNames = map (resolveBindingParameterName bindSpan) paramOccs
-            guard (any isJust paramNames)
-            pure (bindingName, paramNames)
+            let directParamNames = map (resolveBindingParameterName bindSpan) paramOccs
+                lambdaParamNames =
+                    map (resolveBindingParameterName bindSpan) $
+                        fromMaybe [] (bindingLambdaParamWords bindSpan)
+                combinedParamNames = directParamNames <> lambdaParamNames
+            guard (any isJust combinedParamNames)
+            pure (bindingName, combinedParamNames)
 
         bindingHeaderWords :: RealSrcSpan -> Maybe [ByteString]
         bindingHeaderWords bindSpan = do
-            let startLine = srcSpanStartLine bindSpan
-                candidateLines =
-                    [ line
-                    | (lineNo, line) <- sourceLinesInFunction
-                    , lineNo >= startLine
-                    ]
-            headerSource <- bindingHeaderSource candidateLines
+            headerSource <- bindingHeaderSourceForSpan bindSpan
             let (beforeEq, _afterEq) = BS8.break (== '=') headerSource
                 wordsInOrder =
                     filter (not . isBindingKeyword) (collectWordsInOrder beforeEq)
             guard (not $ null wordsInOrder)
             pure wordsInOrder
 
+        bindingLambdaParamWords :: RealSrcSpan -> Maybe [ByteString]
+        bindingLambdaParamWords bindSpan = do
+            headerSource <- bindingHeaderSourceForSpan bindSpan
+            let (_beforeEq, eqAndAfter) = BS8.break (== '=') headerSource
+            guard (not $ BS8.null eqAndAfter)
+            paramsChunks <- lambdaParameterChunks (trimLeft $ BS8.drop 1 eqAndAfter)
+            let paramWords =
+                    filter isPotentialLambdaBinder $
+                        concatMap collectWordsInOrder paramsChunks
+            guard (not $ null paramWords)
+            pure paramWords
+
+        bindingHeaderSourceForSpan :: RealSrcSpan -> Maybe ByteString
+        bindingHeaderSourceForSpan bindSpan =
+            bindingHeaderSource candidateLines
+          where
+            startLine = srcSpanStartLine bindSpan
+            candidateLines =
+                [ line
+                | (lineNo, line) <- sourceLinesInFunction
+                , lineNo >= startLine
+                ]
+
+        lambdaParameterChunks :: ByteString -> Maybe [ByteString]
+        lambdaParameterChunks rhsSource = do
+            (firstChunk, rhsRest) <- leadingLambdaParameterChunk rhsSource
+            pure $ firstChunk : continueLambdaParameterChunks rhsRest
+
+        continueLambdaParameterChunks :: ByteString -> [ByteString]
+        continueLambdaParameterChunks rhsSource =
+            case leadingLambdaParameterChunk rhsSource of
+                Just (paramChunk, rhsRest) ->
+                    paramChunk : continueLambdaParameterChunks rhsRest
+                Nothing -> []
+
+        leadingLambdaParameterChunk :: ByteString -> Maybe (ByteString, ByteString)
+        leadingLambdaParameterChunk rhsSource = do
+            let trimmedSource = trimLeft rhsSource
+                (beforeLambda, lambdaAndRest) = BS8.break (== '\\') trimmedSource
+            guard (not $ BS8.null lambdaAndRest)
+            guard (BS8.all (\c -> isSpace c || c == '(') beforeLambda)
+            let afterLambda = BS8.drop 1 lambdaAndRest
+                afterLambdaTrim = trimLeft afterLambda
+            guard (not $ startsWithWord "case" afterLambdaTrim)
+            let (paramChunk, arrowAndRest) = BS8.breakSubstring "->" afterLambda
+            guard (not $ BS8.null arrowAndRest)
+            pure (paramChunk, BS8.drop 2 arrowAndRest)
+
+        isPotentialLambdaBinder :: ByteString -> Bool
+        isPotentialLambdaBinder occ = case BS8.uncons occ of
+            Just ('_', _) -> True
+            Just (firstChar, _) -> isLower firstChar
+            Nothing -> False
+
+        startsWithWord :: ByteString -> ByteString -> Bool
+        startsWithWord word src =
+            word `BS8.isPrefixOf` src
+                && maybe True (not . isIdentifierChar) (BS8.indexMaybe src $ BS8.length word)
         bindingHeaderSource :: [ByteString] -> Maybe ByteString
         bindingHeaderSource [] = Nothing
         bindingHeaderSource (line:rest) =
