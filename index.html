@@ -197,15 +197,24 @@
 
   /* ── Rules section ── */
   .rules-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .rules-group-label {
+    font-size: 0.8rem; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 8px 0 4px; margin-top: 16px;
+  }
+  .rules-group-label:first-child { margin-top: 0; }
+  .rules-group-label.label-warning { color: var(--amber); }
+  .rules-group-label.label-performance { color: var(--blue); }
   .rule-item {
-    display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: center;
+    display: flex; align-items: center; gap: 16px;
     padding: 18px 24px; background: var(--bg2); border: 1px solid var(--border);
     border-radius: 12px; transition: all 0.2s;
   }
   .rule-item:hover { border-color: rgba(0,212,170,0.15); }
+  .rule-item > div { flex: 1; min-width: 0; }
   .rule-severity {
     font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 700;
     padding: 4px 10px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.05em;
+    white-space: nowrap; flex-shrink: 0;
   }
   .sev-security { background: rgba(248,113,113,0.12); color: var(--red); }
   .sev-warning { background: rgba(251,191,36,0.12); color: var(--amber); }
@@ -389,19 +398,13 @@ mkValidator datum redeemer ctx =
   <p class="section-desc">13 automated detection rules covering security vulnerabilities and performance anti-patterns specific to on-chain Plinth code — on top of all inherited <a href="https://github.com/kowainik/stan" style="color:var(--accent);text-decoration:none;">Stan</a> rules.</p>
 
   <div class="rules-grid">
+    <div class="rules-group-label label-warning">Security &amp; Correctness Warnings</div>
     <div class="rule-item">
       <div>
         <div class="rule-name">PLU-STAN-01 · Signature Verification Builtin Invariants</div>
         <div class="rule-desc">Using <code>verifyEd25519Signature</code>, <code>verifyEcdsaSecp256k1Signature</code>, or <code>verifySchnorrSecp256k1Signature</code> requires direct on-chain verification of message hash correspondence and replay prevention.</div>
       </div>
       <span class="rule-severity sev-warning">Warning</span>
-    </div>
-    <div class="rule-item">
-      <div>
-        <div class="rule-name">PLU-STAN-02 · Usage of <code>unsafeFromBuiltinData</code></div>
-        <div class="rule-desc">Using <code>unsafeFromBuiltinData</code> without integrity checks can lead to unbounded datum spam attacks.</div>
-      </div>
-      <span class="rule-severity sev-performance">Performance</span>
     </div>
     <div class="rule-item">
       <div>
@@ -416,34 +419,6 @@ mkValidator datum redeemer ctx =
         <div class="rule-desc">Comparing only credentials instead of full <code>Address</code> can lead to staking value theft.</div>
       </div>
       <span class="rule-severity sev-warning">Warning</span>
-    </div>
-    <div class="rule-item">
-      <div>
-        <div class="rule-name">PLU-STAN-05 · Higher-Order List Helpers</div>
-        <div class="rule-desc">Functions like <code>filter</code>, <code>any</code>, <code>all</code>, <code>find</code> are inefficient in on-chain code; prefer specialized recursive functions.</div>
-      </div>
-      <span class="rule-severity sev-performance">Performance</span>
-    </div>
-    <div class="rule-item">
-      <div>
-        <div class="rule-name">PLU-STAN-06 · Multiple List Traversals</div>
-        <div class="rule-desc">Nested list operations (e.g., <code>map</code> over <code>filter</code>) cause redundant iterations and increase execution costs.</div>
-      </div>
-      <span class="rule-severity sev-performance">Performance</span>
-    </div>
-    <div class="rule-item">
-      <div>
-        <div class="rule-name">PLU-STAN-07 · Guard Syntax in On-Chain Code</div>
-        <div class="rule-desc">Guard syntax produces inefficient UPLC; prefer <code>if-then-else</code> or lower-level conditionals.</div>
-      </div>
-      <span class="rule-severity sev-performance">Performance</span>
-    </div>
-    <div class="rule-item">
-      <div>
-        <div class="rule-name">PLU-STAN-08 · Non-Strict Let Binding Used Multiple Times</div>
-        <div class="rule-desc">Non-strict bindings used multiple times cause repeated evaluation; make bindings strict with bang patterns.</div>
-      </div>
-      <span class="rule-severity sev-performance">Performance</span>
     </div>
     <div class="rule-item">
       <div>
@@ -479,6 +454,43 @@ mkValidator datum redeemer ctx =
         <div class="rule-desc">Division before multiplication in integer arithmetic causes precision loss due to rounding; multiply first, then divide.</div>
       </div>
       <span class="rule-severity sev-warning">Warning</span>
+    </div>
+
+    <div class="rules-group-label label-performance">Performance</div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">PLU-STAN-02 · Usage of <code>unsafeFromBuiltinData</code></div>
+        <div class="rule-desc">Using <code>unsafeFromBuiltinData</code> without integrity checks can lead to unbounded datum spam attacks.</div>
+      </div>
+      <span class="rule-severity sev-performance">Performance</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">PLU-STAN-05 · Higher-Order List Helpers</div>
+        <div class="rule-desc">Functions like <code>filter</code>, <code>any</code>, <code>all</code>, <code>find</code> are inefficient in on-chain code; prefer specialized recursive functions.</div>
+      </div>
+      <span class="rule-severity sev-performance">Performance</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">PLU-STAN-06 · Multiple List Traversals</div>
+        <div class="rule-desc">Nested list operations (e.g., <code>map</code> over <code>filter</code>) cause redundant iterations and increase execution costs.</div>
+      </div>
+      <span class="rule-severity sev-performance">Performance</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">PLU-STAN-07 · Guard Syntax in On-Chain Code</div>
+        <div class="rule-desc">Guard syntax produces inefficient UPLC; prefer <code>if-then-else</code> or lower-level conditionals.</div>
+      </div>
+      <span class="rule-severity sev-performance">Performance</span>
+    </div>
+    <div class="rule-item">
+      <div>
+        <div class="rule-name">PLU-STAN-08 · Non-Strict Let Binding Used Multiple Times</div>
+        <div class="rule-desc">Non-strict bindings used multiple times cause repeated evaluation; make bindings strict with bang patterns.</div>
+      </div>
+      <span class="rule-severity sev-performance">Performance</span>
     </div>
   </div>
 </section>
