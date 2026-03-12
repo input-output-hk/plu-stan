@@ -36,6 +36,9 @@
   }
 
   /* ── Animated background ── */
+  #three-bg {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  }
   .bg-grid {
     position: fixed; inset: 0; z-index: 0; pointer-events: none;
     background-image:
@@ -306,6 +309,7 @@
 </head>
 <body>
 
+<canvas id="three-bg"></canvas>
 <div class="bg-grid"></div>
 <div class="bg-glow g1"></div>
 <div class="bg-glow g2"></div>
@@ -603,6 +607,117 @@ function showTab(id) {
   event.target.classList.add('active');
   document.getElementById('code-display').innerHTML = tabs[id];
 }
+</script>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const canvas = document.getElementById('three-bg');
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.z = 6;
+
+// Main wireframe icosahedron
+const icoGeo = new THREE.IcosahedronGeometry(1.8, 1);
+const wireframe = new THREE.WireframeGeometry(icoGeo);
+const lineMat = new THREE.LineBasicMaterial({ color: 0x00d4aa, transparent: true, opacity: 0.12 });
+const ico = new THREE.LineSegments(wireframe, lineMat);
+scene.add(ico);
+
+// Inner solid icosahedron with subtle glow
+const innerMat = new THREE.MeshBasicMaterial({ color: 0x00d4aa, transparent: true, opacity: 0.015 });
+const inner = new THREE.Mesh(icoGeo, innerMat);
+scene.add(inner);
+
+// Orbiting particles
+const particleCount = 120;
+const particleGeo = new THREE.BufferGeometry();
+const positions = new Float32Array(particleCount * 3);
+const velocities = [];
+for (let i = 0; i < particleCount; i++) {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  const r = 2.2 + Math.random() * 1.5;
+  positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+  positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+  positions[i * 3 + 2] = r * Math.cos(phi);
+  velocities.push({
+    speed: 0.001 + Math.random() * 0.003,
+    axis: new THREE.Vector3(
+      Math.random() - 0.5,
+      Math.random() - 0.5,
+      Math.random() - 0.5
+    ).normalize()
+  });
+}
+particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+const particleMat = new THREE.PointsMaterial({ color: 0xa78bfa, size: 0.02, transparent: true, opacity: 0.5 });
+const particles = new THREE.Points(particleGeo, particleMat);
+scene.add(particles);
+
+// Second wireframe — outer shell, purple tint
+const outerGeo = new THREE.IcosahedronGeometry(2.8, 0);
+const outerWire = new THREE.WireframeGeometry(outerGeo);
+const outerMat = new THREE.LineBasicMaterial({ color: 0xa78bfa, transparent: true, opacity: 0.06 });
+const outerIco = new THREE.LineSegments(outerWire, outerMat);
+scene.add(outerIco);
+
+// Scroll-based parallax
+let scrollY = 0;
+window.addEventListener('scroll', () => { scrollY = window.scrollY; }, { passive: true });
+
+// Mouse influence
+let mouseX = 0, mouseY = 0;
+window.addEventListener('mousemove', (e) => {
+  mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
+  mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+}, { passive: true });
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+function animate(time) {
+  requestAnimationFrame(animate);
+  const t = time * 0.001;
+
+  // Slow rotation + mouse tilt
+  ico.rotation.x = t * 0.08 + mouseY * 0.15;
+  ico.rotation.y = t * 0.12 + mouseX * 0.15;
+  inner.rotation.copy(ico.rotation);
+
+  outerIco.rotation.x = -t * 0.05 + mouseY * 0.08;
+  outerIco.rotation.y = -t * 0.07 + mouseX * 0.08;
+
+  // Scroll parallax — push object up and fade as user scrolls
+  const scrollFade = Math.max(0, 1 - scrollY / (window.innerHeight * 0.8));
+  scene.position.y = scrollY * 0.001;
+  lineMat.opacity = 0.12 * scrollFade;
+  innerMat.opacity = 0.015 * scrollFade;
+  outerMat.opacity = 0.06 * scrollFade;
+  particleMat.opacity = 0.5 * scrollFade;
+
+  // Rotate particles
+  const pos = particleGeo.attributes.position.array;
+  for (let i = 0; i < particleCount; i++) {
+    const v = new THREE.Vector3(pos[i*3], pos[i*3+1], pos[i*3+2]);
+    v.applyAxisAngle(velocities[i].axis, velocities[i].speed);
+    pos[i*3] = v.x; pos[i*3+1] = v.y; pos[i*3+2] = v.z;
+  }
+  particleGeo.attributes.position.needsUpdate = true;
+
+  renderer.render(scene, camera);
+}
+animate(0);
 </script>
 
 </body>
