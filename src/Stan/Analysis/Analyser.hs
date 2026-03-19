@@ -3733,7 +3733,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
 data BurningCheckKey
     = BurningKeyDirectValueOf !RealSrcSpan !ValueOfTokenKey
     | BurningKeyValueBinding !RealSrcSpan !Name !(Maybe (Set ValueOfArgKey))
-    | BurningKeyFlattenAmount !RealSrcSpan !Name
+    | BurningKeyFlattenAmount !RealSrcSpan !Name !(Maybe FlattenAssetGuardKey)
     deriving stock (Eq, Ord)
 
 data ValueOfArgKey
@@ -3744,10 +3744,13 @@ data ValueOfArgKey
 data ValueOfTokenKey = ValueOfTokenKey !(Set ValueOfArgKey) !(Set ValueOfArgKey)
     deriving stock (Eq, Ord)
 
+data FlattenAssetGuardKey = FlattenAssetGuardKey !(Maybe ByteString) !(Maybe ByteString)
+    deriving stock (Eq, Ord)
+
 data BurningOperandKey
     = BurningOperandDirectValueOf !ValueOfTokenKey
     | BurningOperandValueBinding !Name !(Maybe (Set ValueOfArgKey))
-    | BurningOperandFlattenAmount !Name
+    | BurningOperandFlattenAmount !Name !(Maybe FlattenAssetGuardKey)
     deriving stock (Eq, Ord)
 
 data BurningSign
@@ -3755,9 +3758,28 @@ data BurningSign
     | BurningNegative
     deriving stock (Eq)
 
+type TruthRequirements = Set (Name, Bool)
+
 data BindingRef = BindingRef
     { bindingRefOcc :: !ByteString
     , bindingRefLine :: !Int
+    }
+
+data FlattenBindingInfo = FlattenBindingInfo
+    { flattenCurrencyName :: !(Maybe Name)
+    , flattenTokenName :: !(Maybe Name)
+    }
+
+data FlattenBindingRef = FlattenBindingRef
+    { flattenAmountRef :: !BindingRef
+    , flattenCurrencyRef :: !(Maybe BindingRef)
+    , flattenTokenRef :: !(Maybe BindingRef)
+    }
+
+data HelperCallSite = HelperCallSite
+    { helperSiteOperandKeys :: !(Map Name (Set BurningOperandKey))
+    , helperSiteValueArgKeys :: !(Map Name (Set ValueOfArgKey))
+    , helperSiteTruths :: !TruthRequirements
     }
 
 analyseMissingBurningLogic
@@ -3798,29 +3820,35 @@ analyseMissingBurningLogic insId hie = go
             else
                 let span' = nodeSpan funNode
                     bindingNameSpans = collectBindingNameSpans funNode
-                    bindingBooleanContexts = collectBindingBooleanContexts funNode
+                    localBindingNameSpans = localBindingNameSpansInFunction span' bindingNameSpans
+                    inactiveBindingNames = inactiveLocalBindingNames localBindingNameSpans funNode
+                    bindingBooleanContexts = collectBindingBooleanContexts localBindingNameSpans inactiveBindingNames funNode
                     (mintCarrierRefs, mintedValueRefs) = collectMintBindingRefs funNode bindingNameSpans span'
                     mintCarrierNames = resolveBindingRefs bindingNameSpans mintCarrierRefs
                     mintedBindingNames = resolveBindingRefs bindingNameSpans mintedValueRefs
-                    flattenAmountNames = collectFlattenAmountBindingNames bindingNameSpans funNode span' mintCarrierNames
+                    flattenBindings = collectFlattenBindingInfo bindingNameSpans funNode span' mintCarrierNames
                     tokenArgAliasSources = collectTokenArgAliasSources bindingNameSpans span'
-                    helperParamKeys =
-                        collectHelperParamOperandKeys
+                    integerAliasValues = collectIntegerAliasValues bindingNameSpans span'
+                    helperCallSites =
+                        collectHelperCallSites
                             bindingNameSpans
                             mintCarrierNames
                             mintedBindingNames
-                            flattenAmountNames
+                            flattenBindings
                             tokenArgAliasSources
                             funNode
                     checks = concatMap
                         (comparisonSignedKeys
+                            span'
                             bindingNameSpans
+                            inactiveBindingNames
                             bindingBooleanContexts
                             mintCarrierNames
                             mintedBindingNames
-                            flattenAmountNames
-                            helperParamKeys
+                            flattenBindings
+                            helperCallSites
                             tokenArgAliasSources
+                            integerAliasValues
                         )
                         (collectComparisonNodes funNode)
                     groupedChecks = foldl' insertCheck Map.empty checks
@@ -3847,276 +3875,421 @@ analyseMissingBurningLogic insId hie = go
 
     collectComparisonNodes
         :: HieAST TypeIndex
-        -> [(Maybe RealSrcSpan, RealSrcSpan, ByteString, HieAST TypeIndex, HieAST TypeIndex)]
-    collectComparisonNodes = go Nothing
+        -> [(Maybe RealSrcSpan, TruthRequirements, Bool, [HieAST TypeIndex], RealSrcSpan, ByteString, HieAST TypeIndex, HieAST TypeIndex)]
+    collectComparisonNodes = go Nothing Set.empty False []
       where
-        go boolContext n@Node{nodeChildren = children} =
-            let here = case comparisonNode n of
-                    Just (op, lhs, rhsNode) -> [(boolContext, nodeSpan n, op, lhs, rhsNode)]
-                    Nothing -> []
-                childContext
-                    | isConditionalBranchNode n = boolContext <|> Just (nodeSpan n)
-                    | otherwise = boolContext <|> booleanContextSpan n
-            in here <> concatMap (go childContext) children
-
-        booleanContextSpan :: HieAST TypeIndex -> Maybe RealSrcSpan
-        booleanContextSpan n = nodeSpan n <$ booleanContextOperator n
-
-        booleanContextOperator :: HieAST TypeIndex -> Maybe ByteString
-        booleanContextOperator n =
-            opBooleanOperator n <|> appBooleanOperator n
-          where
-            opBooleanOperator node = do
-                guard $ nodeHasAnnotation opAppAnnotation node
-                _lhs:opNode:_rhs:_ <- Just $ nodeChildren node
-                find (`elem` supportedBooleanOperators) (nodeOccNames opNode)
-
-            appBooleanOperator node = do
-                guard $ nodeHasAnnotation hsAppAnnotation node
-                let (headNode, args) = appSpine node
-                guard (length args >= 2)
-                find (`elem` supportedBooleanOperators) (nodeOccNames headNode)
-
-            supportedBooleanOperators :: [ByteString]
-            supportedBooleanOperators = ["||", "&&"]
-
-        isConditionalBranchNode :: HieAST TypeIndex -> Bool
-        isConditionalBranchNode n =
-            nodeHasAnnotation hsIfAnnotation n
-                || nodeHasAnnotation hsCaseAnnotation n
-                || isIfThenElseCall n
-
-        isIfThenElseCall :: HieAST TypeIndex -> Bool
-        isIfThenElseCall n
-            | not (nodeHasAnnotation hsAppAnnotation n) = False
+        go boolContext truthRequirements boolNegated conjunctGuards n@Node{nodeChildren = children}
+            | truthRequirementsConflict truthRequirements = []
+            | Just arg <- booleanNotArg n =
+                go boolContext truthRequirements (not boolNegated) conjunctGuards arg
+            | Just (op, lhs, rhsNode) <- booleanContextOperands n =
+                case op of
+                    "&&" ->
+                        let lhsRequirements = truthRequirements <> truthRequirementsFor True rhsNode
+                            rhsRequirements = truthRequirements <> truthRequirementsFor True lhs
+                            lhsConjunctGuards = if boolNegated then conjunctGuards else rhsNode : conjunctGuards
+                            rhsConjunctGuards = if boolNegated then conjunctGuards else lhs : conjunctGuards
+                        in go boolContext lhsRequirements boolNegated lhsConjunctGuards lhs
+                            <> go boolContext rhsRequirements boolNegated rhsConjunctGuards rhsNode
+                    "||" ->
+                        let childContext = boolContext <|> Just (nodeSpan n)
+                        in go childContext truthRequirements boolNegated conjunctGuards lhs
+                            <> go childContext truthRequirements boolNegated conjunctGuards rhsNode
+                    _ ->
+                        descendChildren boolContext truthRequirements boolNegated conjunctGuards children
+            | Just (conditionNode, thenNode, elseNode) <- conditionalBranchNodes n =
+                let childContext = boolContext <|> Just (nodeSpan n)
+                in go childContext truthRequirements boolNegated conjunctGuards conditionNode
+                    <> go childContext (truthRequirements <> truthRequirementsFor True conditionNode) boolNegated conjunctGuards thenNode
+                    <> go childContext (truthRequirements <> truthRequirementsFor False conditionNode) boolNegated conjunctGuards elseNode
+            | nodeHasAnnotation hsCaseAnnotation n =
+                let childContext = boolContext <|> Just (nodeSpan n)
+                in descendChildren childContext truthRequirements boolNegated conjunctGuards children
             | otherwise =
-                let (headNode, args) = appSpine n
-                in length args >= 3
-                    && ("ifThenElse" `elem` nodeOccNames headNode
-                        || subtreeHasOccName "ifThenElse" headNode)
+                let here = case comparisonNode n of
+                        Just (op, lhs, rhsNode) ->
+                            [(boolContext, truthRequirements, boolNegated, conjunctGuards, nodeSpan n, op, lhs, rhsNode)]
+                        Nothing -> []
+                in here <> descendChildren boolContext truthRequirements boolNegated conjunctGuards children
 
-        hsIfAnnotation :: NodeAnnotation
-        hsIfAnnotation = mkNodeAnnotation "HsIf" "HsExpr"
+        descendChildren boolContext truthRequirements boolNegated conjunctGuards =
+            concatMap (go boolContext truthRequirements boolNegated conjunctGuards)
 
-        hsCaseAnnotation :: NodeAnnotation
-        hsCaseAnnotation = mkNodeAnnotation "HsCase" "HsExpr"
+    truthRequirementsFor :: Bool -> HieAST TypeIndex -> TruthRequirements
+    truthRequirementsFor desiredTruth n
+        | Just arg <- parenthesizedChild n =
+            truthRequirementsFor desiredTruth arg
+        | Just arg <- booleanNotArg n =
+            truthRequirementsFor (not desiredTruth) arg
+        | Just (op, lhs, rhsNode) <- booleanContextOperands n =
+            case (op, desiredTruth) of
+                ("&&", True) ->
+                    truthRequirementsFor True lhs <> truthRequirementsFor True rhsNode
+                ("||", False) ->
+                    truthRequirementsFor False lhs <> truthRequirementsFor False rhsNode
+                _ -> Set.empty
+        | Just name <- simpleTruthName n =
+            Set.singleton (name, desiredTruth)
+        | otherwise =
+            Set.empty
+
+    truthRequirementsConflict :: TruthRequirements -> Bool
+    truthRequirementsConflict requirements =
+        any hasConflictingTruthAssignment (Set.toList names)
+      where
+        names = Set.fromList [name | (name, _value) <- Set.toList requirements]
+        hasConflictingTruthAssignment name =
+            Set.member (name, True) requirements && Set.member (name, False) requirements
+
+    positiveOperandUsedNamesExcludingConditionals :: HieAST TypeIndex -> Set Name
+    positiveOperandUsedNamesExcludingConditionals = goUsed True Set.empty
+      where
+        goUsed :: Bool -> Set Name -> HieAST TypeIndex -> Set Name
+        goUsed includeHere acc n@Node{nodeChildren = children}
+            | isConditionalBranchNode n = acc
+            | Just arg <- booleanNotArg n =
+                goUsed (not includeHere) acc arg
+            | otherwise =
+                let occsHere =
+                        if includeHere
+                            then nodeUsedNames n
+                            else Set.empty
+                in foldl' (goUsed includeHere) (acc <> occsHere) children
+
+    positiveConditionTruthNames :: HieAST TypeIndex -> Set Name
+    positiveConditionTruthNames n =
+        Set.fromList [name | (name, True) <- Set.toList (truthRequirementsFor True n)]
+
+    simpleTruthName :: HieAST TypeIndex -> Maybe Name
+    simpleTruthName n
+        | Just _ <- comparisonNode n = Nothing
+        | Just _ <- booleanContextOperands n = Nothing
+        | Just _ <- booleanNotArg n = Nothing
+        | isConditionalBranchNode n = Nothing
+        | otherwise = case Set.toList (nodeUsedNames n) of
+            [name] -> Just name
+            _ -> Nothing
+
+    nodeUsedNames :: HieAST TypeIndex -> Set Name
+    nodeUsedNames n =
+        Set.fromList
+            [ name
+            | (Right name, IdentifierDetails{identInfo = identInfo'}) <- Map.assocs $ nodeIdentifiers $ nodeInfo n
+            , Set.member Use identInfo'
+            ]
+
+    booleanContextOperands :: HieAST TypeIndex -> Maybe (ByteString, HieAST TypeIndex, HieAST TypeIndex)
+    booleanContextOperands n =
+        opBooleanOperands n <|> appBooleanOperands n
+      where
+        opBooleanOperands node = do
+            guard $ nodeHasAnnotation opAppAnnotation node
+            lhs:opNode:rhsNode:_ <- Just $ nodeChildren node
+            op <- find (`elem` ["||", "&&"]) (nodeOccNames opNode)
+            pure (op, lhs, rhsNode)
+
+        appBooleanOperands node = do
+            guard $ nodeHasAnnotation hsAppAnnotation node
+            let (headNode, args) = appSpine node
+            guard (length args >= 2)
+            op <- find (`elem` ["||", "&&"]) (nodeOccNames headNode)
+            lhs <- args !!? 0
+            rhsNode <- args !!? 1
+            pure (op, lhs, rhsNode)
+
+    disjunctionContextOperator :: HieAST TypeIndex -> Maybe ByteString
+    disjunctionContextOperator n = do
+        (op, _lhs, _rhsNode) <- booleanContextOperands n
+        guard (op == "||")
+        pure op
+
+    booleanNotArg :: HieAST TypeIndex -> Maybe (HieAST TypeIndex)
+    booleanNotArg n = do
+        guard $ nodeHasAnnotation hsAppAnnotation n
+        let (headNode, args) = appSpine n
+        guard (length args == 1)
+        guard ("not" `elem` nodeOccNames headNode || subtreeHasOccName "not" headNode)
+        args !!? 0
+
+    parenthesizedChild :: HieAST TypeIndex -> Maybe (HieAST TypeIndex)
+    parenthesizedChild n
+        | nodeHasAnnotation hsParAnnotation n = listToMaybe (nodeChildren n)
+        | otherwise = Nothing
+
+    conditionalBranchNodes :: HieAST TypeIndex -> Maybe (HieAST TypeIndex, HieAST TypeIndex, HieAST TypeIndex)
+    conditionalBranchNodes n@Node{nodeChildren = children}
+        | nodeHasAnnotation hsIfAnnotation n = do
+            conditionNode <- children !!? 0
+            thenNode <- children !!? 1
+            elseNode <- children !!? 2
+            pure (conditionNode, thenNode, elseNode)
+        | isIfThenElseCall n = do
+            let (_headNode, args) = appSpine n
+            conditionNode <- args !!? 0
+            thenNode <- args !!? 1
+            elseNode <- args !!? 2
+            pure (conditionNode, thenNode, elseNode)
+        | otherwise = Nothing
+
+    isConditionalBranchNode :: HieAST TypeIndex -> Bool
+    isConditionalBranchNode n =
+        nodeHasAnnotation hsIfAnnotation n
+            || nodeHasAnnotation hsCaseAnnotation n
+            || isIfThenElseCall n
+
+    isIfThenElseCall :: HieAST TypeIndex -> Bool
+    isIfThenElseCall n
+        | not (nodeHasAnnotation hsAppAnnotation n) = False
+        | otherwise =
+            let (headNode, args) = appSpine n
+            in length args >= 3
+                && ("ifThenElse" `elem` nodeOccNames headNode
+                    || subtreeHasOccName "ifThenElse" headNode)
+
+    hsIfAnnotation :: NodeAnnotation
+    hsIfAnnotation = mkNodeAnnotation "HsIf" "HsExpr"
+
+    hsCaseAnnotation :: NodeAnnotation
+    hsCaseAnnotation = mkNodeAnnotation "HsCase" "HsExpr"
+
+    hsLetAnnotation :: NodeAnnotation
+    hsLetAnnotation = mkNodeAnnotation "HsLet" "HsExpr"
+
+    hsParAnnotation :: NodeAnnotation
+    hsParAnnotation = mkNodeAnnotation "HsPar" "HsExpr"
+
+    negAppAnnotation :: NodeAnnotation
+    negAppAnnotation = mkNodeAnnotation "NegApp" "HsExpr"
 
     comparisonSignedKeys
-        :: [(Name, RealSrcSpan)]
+        :: RealSrcSpan
+        -> [(Name, RealSrcSpan)]
+        -> Set Name
         -> Map Name (Set RealSrcSpan)
         -> Set Name
         -> Set Name
-        -> Set Name
-        -> Map Name (Set BurningOperandKey)
+        -> Map Name FlattenBindingInfo
+        -> Map Name [HelperCallSite]
         -> Map Name ByteString
-        -> (Maybe RealSrcSpan, RealSrcSpan, ByteString, HieAST TypeIndex, HieAST TypeIndex)
+        -> Map Name Integer
+        -> (Maybe RealSrcSpan, TruthRequirements, Bool, [HieAST TypeIndex], RealSrcSpan, ByteString, HieAST TypeIndex, HieAST TypeIndex)
         -> [(BurningCheckKey, BurningSign, RealSrcSpan)]
     comparisonSignedKeys
+        functionSpan
         bindingNameSpans
+        inactiveBindingNames
         bindingBooleanContexts
         mintCarrierNames
         mintedBindingNames
-        flattenAmountNames
-        helperParamKeys
+        flattenBindings
+        helperCallSites
         tokenArgAliasSources
-        (boolContext, cmpSpan, op, lhs, rhsNode) =
-        let bindingContexts = fromMaybe Set.empty $ do
-                bindingName <- comparisonBindingName bindingNameSpans cmpSpan
-                contexts <- Map.lookup bindingName bindingBooleanContexts
-                guard (not $ Set.null contexts)
-                pure contexts
-            guardedDispatchContext = guardDispatchContext bindingNameSpans cmpSpan
-            boolContexts = maybe Set.empty Set.singleton boolContext
-            inheritedContexts =
-                bindingContexts
-                    <> maybe Set.empty Set.singleton guardedDispatchContext
-            contextCandidates =
-                if Set.null bindingContexts
-                    then boolContexts <> inheritedContexts
-                    else inheritedContexts
-            directContexts =
-                if Set.null contextCandidates
-                    then Set.singleton cmpSpan
-                    else contextCandidates
-            lhsKeys = Set.toList $ Set.unions
-                [ Set.fromList $ operandKeys mintCarrierNames mintedBindingNames flattenAmountNames helperParamKeys tokenArgAliasSources directContext lhs
-                | directContext <- Set.toList directContexts
-                ]
-            rhsKeys = Set.toList $ Set.unions
-                [ Set.fromList $ operandKeys mintCarrierNames mintedBindingNames flattenAmountNames helperParamKeys tokenArgAliasSources directContext rhsNode
-                | directContext <- Set.toList directContexts
-                ]
-            lhsLiteral = operandIntegerLiteral lhs
-            rhsLiteral = operandIntegerLiteral rhsNode
-            lhsSignAdjust = adjustOperandSign lhs
-            rhsSignAdjust = adjustOperandSign rhsNode
-            eqSide adjustSign keys = \case
-                Just n | n > 0 -> map (\key -> (key, adjustSign BurningPositive, cmpSpan)) keys
-                Just n | n < 0 -> map (\key -> (key, adjustSign BurningNegative, cmpSpan)) keys
-                _ -> []
-            lhsIneq keys predicate sign =
-                [ (key, lhsSignAdjust sign, cmpSpan)
-                | key <- keys
-                , Just n <- [rhsLiteral]
-                , predicate n
-                ]
-            rhsIneq keys predicate sign =
-                [ (key, rhsSignAdjust sign, cmpSpan)
-                | key <- keys
-                , Just n <- [lhsLiteral]
-                , predicate n
-                ]
-            adjustOperandSign operand sign =
-                if operandIsNegated operand
-                    then flipBurningSign sign
-                    else sign
-            flipBurningSign = \case
-                BurningPositive -> BurningNegative
-                BurningNegative -> BurningPositive
-            operandIsNegated = odd . operandNegationDepth
-            operandNegationDepth operand
-                | nodeHasAnnotation hsParAnnotation operand =
-                    maybe 0 operandNegationDepth (listToMaybe $ nodeChildren operand)
-                | nodeHasAnnotation negAppAnnotation operand =
-                    1 + maybe 0 operandNegationDepth (listToMaybe $ nodeChildren operand)
-                | otherwise = case appSpine operand of
-                    (headNode, [arg])
-                        | isNegateHead headNode ->
-                            1 + operandNegationDepth arg
-                    _ -> 0
-            isNegateHead headNode =
-                "negate" `elem` nodeOccNames headNode
-                    || subtreeHasOccName "negate" headNode
-            hsParAnnotation :: NodeAnnotation
-            hsParAnnotation = mkNodeAnnotation "HsPar" "HsExpr"
-            negAppAnnotation :: NodeAnnotation
-            negAppAnnotation = mkNodeAnnotation "NegApp" "HsExpr"
-        in case op of
-            "==" ->
-                eqSide lhsSignAdjust lhsKeys rhsLiteral
-                    <> eqSide rhsSignAdjust rhsKeys lhsLiteral
-            ">" ->
-                lhsIneq lhsKeys (>= (-1)) BurningPositive
-                    <> rhsIneq rhsKeys (<= 1) BurningNegative
-            ">=" ->
-                lhsIneq lhsKeys (>= 0) BurningPositive
-                    <> rhsIneq rhsKeys (<= 0) BurningNegative
-            "<" ->
-                lhsIneq lhsKeys (<= 1) BurningNegative
-                    <> rhsIneq rhsKeys (>= (-1)) BurningPositive
-            "<=" ->
-                lhsIneq lhsKeys (<= 0) BurningNegative
-                    <> rhsIneq rhsKeys (>= 0) BurningPositive
-            _ -> []
-
-    collectBindingBooleanContexts :: HieAST TypeIndex -> Map Name (Set RealSrcSpan)
-    collectBindingBooleanContexts = go Map.empty
+        integerAliasValues
+        (boolContext, truthRequirements, boolNegated, conjunctGuards, cmpSpan, op, lhs, rhsNode) =
+        concatMap keysForHelperSite helperSites
       where
-        go :: Map Name (Set RealSrcSpan) -> HieAST TypeIndex -> Map Name (Set RealSrcSpan)
-        go acc n@Node{nodeChildren = children}
-            | nodeHasAnnotation hsLetAnnotation n = case children of
-                binds:body:_ ->
-                    let letBindingNameSpans = collectBindingNameSpans binds
-                        letBindingNames = Set.fromList $ map fst letBindingNameSpans
-                        directActiveBindingNames = operandUsedNames body `Set.intersection` letBindingNames
-                        letBindingDependencies =
-                            collectLetBindingDependencies letBindingNameSpans letBindingNames binds
-                        activeBindingNames =
-                            expandActiveBindingNames letBindingDependencies directActiveBindingNames
-                        acc' = goActiveLetBinds letBindingNameSpans activeBindingNames acc binds
-                    in go acc' body
-                _ ->
-                    foldl' go acc children
-            | otherwise =
-                let acc' =
-                        foldl'
-                            (\m (contextSpan, usedNames) ->
-                                insertBooleanContext contextSpan usedNames m
-                            )
-                            acc
-                            (contextSpanAndUsedNames n)
-                in foldl' go acc' children
+        bindingName = comparisonBindingName bindingNameSpans cmpSpan
+        bindingIsInactive = maybe False (`Set.member` inactiveBindingNames) bindingName
+        bindingContexts = fromMaybe Set.empty $ do
+            currentBindingName <- bindingName
+            contexts <- Map.lookup currentBindingName bindingBooleanContexts
+            guard (not $ Set.null contexts)
+            pure contexts
+        guardedDispatchContext = guardDispatchContext bindingNameSpans cmpSpan
+        boolContexts = maybe Set.empty Set.singleton boolContext
+        inheritedContexts =
+            bindingContexts
+                <> maybe Set.empty Set.singleton guardedDispatchContext
+        contextCandidates =
+            if Set.null bindingContexts
+                then boolContexts <> inheritedContexts
+                else inheritedContexts
+        directContexts =
+            if Set.null contextCandidates
+                then Set.singleton cmpSpan
+                else contextCandidates
+        helperSites = case bindingName >>= (`Map.lookup` helperCallSites) of
+            Just sites | not (null sites) -> sites
+            _ -> [HelperCallSite Map.empty Map.empty Set.empty]
 
-        goActiveLetBinds
-            :: [(Name, RealSrcSpan)]
-            -> Set Name
-            -> Map Name (Set RealSrcSpan)
-            -> HieAST TypeIndex
-            -> Map Name (Set RealSrcSpan)
-        goActiveLetBinds letBindingNameSpans activeBindingNames acc n@Node{nodeChildren = children}
-            | nodeHasAnnotation hsLetAnnotation n =
-                go acc n
-            | otherwise =
-                let acc' =
-                        foldl'
-                            (insertActiveContext letBindingNameSpans activeBindingNames)
-                            acc
-                            (contextSpanAndUsedNames n)
-                in foldl'
-                    (goActiveLetBinds letBindingNameSpans activeBindingNames)
-                    acc'
-                    children
-
-        insertActiveContext
-            :: [(Name, RealSrcSpan)]
-            -> Set Name
-            -> Map Name (Set RealSrcSpan)
-            -> (RealSrcSpan, Set Name)
-            -> Map Name (Set RealSrcSpan)
-        insertActiveContext letBindingNameSpans activeBindingNames acc (contextSpan, usedNames) =
-            let contextOwner = fst <$> pickMostSpecificSpan
-                    [ (name, bindSpan)
-                    | (name, bindSpan) <- letBindingNameSpans
-                    , spanContainsSpan bindSpan contextSpan
+        keysForHelperSite helperSite =
+            let helperTruthMap = Map.fromList $ Set.toList (helperSiteTruths helperSite)
+                residualTruthRequirements =
+                    Set.filter (\(name, _truth) -> Map.notMember name helperTruthMap) truthRequirements
+                lhsKeys = Set.toList $ Set.unions
+                    [ Set.fromList $ operandKeys mintCarrierNames mintedBindingNames flattenBindings (Just helperSite) tokenArgAliasSources conjunctGuards directContext lhs
+                    | directContext <- Set.toList directContexts
                     ]
-            in case contextOwner of
-                Just owner | owner `Set.member` activeBindingNames ->
-                    insertBooleanContext contextSpan usedNames acc
-                _ -> acc
+                rhsKeys = Set.toList $ Set.unions
+                    [ Set.fromList $ operandKeys mintCarrierNames mintedBindingNames flattenBindings (Just helperSite) tokenArgAliasSources conjunctGuards directContext rhsNode
+                    | directContext <- Set.toList directContexts
+                    ]
+                lhsLiteral = operandIntegerLiteral functionSpan integerAliasValues lhs
+                rhsLiteral = operandIntegerLiteral functionSpan integerAliasValues rhsNode
+                lhsSignAdjust = adjustOperandSign lhs
+                rhsSignAdjust = adjustOperandSign rhsNode
+                applyComparisonPolarity adjustSign sign = adjustSign sign
+                eqSide adjustSign keys = \case
+                    Just n | n > 0 -> map (\key -> (key, adjustSign BurningPositive, cmpSpan)) keys
+                    Just n | n < 0 -> map (\key -> (key, adjustSign BurningNegative, cmpSpan)) keys
+                    _ -> []
+                lhsIneq keys predicate sign =
+                    [ (key, applyComparisonPolarity lhsSignAdjust sign, cmpSpan)
+                    | key <- keys
+                    , Just n <- [rhsLiteral]
+                    , predicate n
+                    ]
+                rhsIneq keys predicate sign =
+                    [ (key, applyComparisonPolarity rhsSignAdjust sign, cmpSpan)
+                    | key <- keys
+                    , Just n <- [lhsLiteral]
+                    , predicate n
+                    ]
+            in if bindingIsInactive
+                || truthRequirementsConflict residualTruthRequirements
+                || helperTruthConflict helperTruthMap truthRequirements
+                || boolNegated
+                then []
+                else case op of
+                    "==" ->
+                        eqSide lhsSignAdjust lhsKeys rhsLiteral
+                            <> eqSide rhsSignAdjust rhsKeys lhsLiteral
+                    ">" ->
+                        lhsIneq lhsKeys (>= (-1)) BurningPositive
+                            <> rhsIneq rhsKeys (<= 1) BurningNegative
+                    ">=" ->
+                        lhsIneq lhsKeys (>= 0) BurningPositive
+                            <> rhsIneq rhsKeys (<= 0) BurningNegative
+                    "<" ->
+                        lhsIneq lhsKeys (<= 1) BurningNegative
+                            <> rhsIneq rhsKeys (>= (-1)) BurningPositive
+                    "<=" ->
+                        lhsIneq lhsKeys (<= 0) BurningNegative
+                            <> rhsIneq rhsKeys (>= 0) BurningPositive
+                    _ -> []
 
-        collectLetBindingDependencies
-            :: [(Name, RealSrcSpan)]
-            -> Set Name
-            -> HieAST TypeIndex
-            -> Map Name (Set Name)
-        collectLetBindingDependencies letBindingNameSpans letBindingNames =
-            goDependencies (Map.fromSet (const Set.empty) letBindingNames)
+        helperTruthConflict helperTruthMap requirements =
+            any requirementConflicts (Set.toList requirements)
           where
-            goDependencies
-                :: Map Name (Set Name)
-                -> HieAST TypeIndex
-                -> Map Name (Set Name)
-            goDependencies acc n@Node{nodeChildren = children} =
-                let owner = fst <$> pickMostSpecificSpan
-                        [ (name, bindSpan)
-                        | (name, bindSpan) <- letBindingNameSpans
-                        , spanContainsSpan bindSpan (nodeSpan n)
-                        ]
-                    usedLetBindingNames =
-                        nodeUsedNames n `Set.intersection` letBindingNames
-                    acc' = case owner of
-                        Just ownerName ->
-                            Map.insertWith Set.union ownerName usedLetBindingNames acc
-                        Nothing ->
-                            acc
-                in foldl' goDependencies acc' children
+            requirementConflicts (name, desiredTruth) =
+                maybe False (/= desiredTruth) (Map.lookup name helperTruthMap)
 
-        expandActiveBindingNames
-            :: Map Name (Set Name)
-            -> Set Name
-            -> Set Name
-        expandActiveBindingNames letBindingDependencies = goExpand
+        adjustOperandSign operand sign =
+            if operandIsNegated operand
+                then flipBurningSign sign
+                else sign
+
+        flipBurningSign = \case
+            BurningPositive -> BurningNegative
+            BurningNegative -> BurningPositive
+
+        operandIsNegated = odd . operandNegationDepth
+
+        operandNegationDepth operand
+            | nodeHasAnnotation hsParAnnotation operand =
+                maybe 0 operandNegationDepth (listToMaybe $ nodeChildren operand)
+            | nodeHasAnnotation negAppAnnotation operand =
+                1 + maybe 0 operandNegationDepth (listToMaybe $ nodeChildren operand)
+            | otherwise = case appSpine operand of
+                (headNode, [arg])
+                    | isNegateHeadIn functionSpan headNode ->
+                        1 + operandNegationDepth arg
+                _ -> 0
+
+    negateNameMetas =
+        "negate" `baseNameFrom` "GHC.Num" :|
+            [ "negate" `plutusTxNameFrom` "PlutusTx.Prelude"
+            ]
+
+    isNegateHeadIn _span' headNode =
+        any isRealNegateUse (Map.assocs $ nodeIdentifiers $ nodeInfo headNode)
+
+    isRealNegateUse pair@(ident, IdentifierDetails{identInfo = identInfo'}) =
+        Set.member Use identInfo' && case ident of
+            Right name ->
+                any (`hieMatchNameMeta` pair) negateNameMetas
+                    || (isExternalName name && BS8.pack (occNameString $ nameOccName name) == "negate")
+            _ -> False
+
+    localBindingNameSpansInFunction :: RealSrcSpan -> [(Name, RealSrcSpan)] -> [(Name, RealSrcSpan)]
+    localBindingNameSpansInFunction functionSpan bindingNameSpans =
+        case pickMostSpecificSpan
+            [ (name, bindSpan)
+            | (name, bindSpan) <- bindingNameSpans
+            , bindSpan `spanContainsOrEq` functionSpan
+            ] of
+            Just rootBinding -> filter (/= rootBinding) bindingNameSpans
+            Nothing -> bindingNameSpans
+
+    inactiveLocalBindingNames :: [(Name, RealSrcSpan)] -> HieAST TypeIndex -> Set Name
+    inactiveLocalBindingNames localBindingNameSpans funNode =
+        let localBindingNames = Set.fromList $ map fst localBindingNameSpans
+            directActiveBindingNames = bodyUsedLocalBindingNames localBindingNameSpans funNode `Set.intersection` localBindingNames
+            bindingDependencies =
+                Map.fromListWith Set.union
+                    [ (name, Set.delete name $ spanUsedNamesWithin bindSpan funNode `Set.intersection` localBindingNames)
+                    | (name, bindSpan) <- localBindingNameSpans
+                    ]
+            activeBindingNames = expandBindingNames bindingDependencies directActiveBindingNames
+        in localBindingNames `Set.difference` activeBindingNames
+      where
+        bodyUsedLocalBindingNames :: [(Name, RealSrcSpan)] -> HieAST TypeIndex -> Set Name
+        bodyUsedLocalBindingNames bindingSpans = go Set.empty
+          where
+            go acc n@Node{nodeSpan = currentSpan, nodeChildren = children} =
+                case pickMostSpecificSpan
+                    [ (name, bindSpan)
+                    | (name, bindSpan) <- bindingSpans
+                    , bindSpan `spanContainsOrEq` currentSpan
+                    ] of
+                    Just _ -> acc
+                    Nothing ->
+                        let usedHere = nodeUsedNames n
+                        in foldl' go (acc <> usedHere) children
+
+        expandBindingNames :: Map Name (Set Name) -> Set Name -> Set Name
+        expandBindingNames bindingDependencies = goExpand
           where
             goExpand activeNames =
                 let expandedNames =
                         activeNames
                             <> Set.unions
-                                [ Map.findWithDefault Set.empty name letBindingDependencies
+                                [ Map.findWithDefault Set.empty name bindingDependencies
                                 | name <- Set.toList activeNames
                                 ]
                 in if expandedNames == activeNames
                     then activeNames
                     else goExpand expandedNames
+
+
+    collectBindingBooleanContexts :: [(Name, RealSrcSpan)] -> Set Name -> HieAST TypeIndex -> Map Name (Set RealSrcSpan)
+    collectBindingBooleanContexts localBindingNameSpans inactiveBindingNames = go Map.empty
+      where
+        go :: Map Name (Set RealSrcSpan) -> HieAST TypeIndex -> Map Name (Set RealSrcSpan)
+        go acc n@Node{nodeChildren = children} =
+            let acc' =
+                    foldl'
+                        (\m (contextSpan, usedNames) ->
+                            insertOwnedBooleanContext contextSpan usedNames m
+                        )
+                        acc
+                        (contextSpanAndUsedNames n)
+            in foldl' go acc' children
+
+        insertOwnedBooleanContext
+            :: RealSrcSpan
+            -> Set Name
+            -> Map Name (Set RealSrcSpan)
+            -> Map Name (Set RealSrcSpan)
+        insertOwnedBooleanContext contextSpan usedNames acc =
+            let contextOwner = fst <$> pickMostSpecificSpan
+                    [ (name, bindSpan)
+                    | (name, bindSpan) <- localBindingNameSpans
+                    , spanContainsSpan bindSpan contextSpan
+                    ]
+            in case contextOwner of
+                Just owner | owner `Set.member` inactiveBindingNames -> acc
+                _ -> insertBooleanContext contextSpan usedNames acc
 
         insertBooleanContext
             :: RealSrcSpan
@@ -4142,9 +4315,9 @@ analyseMissingBurningLogic insId hie = go
             booleanContextData <> conditionalContextData
           where
             contextSpan = nodeSpan n
-            booleanContextData = case booleanContextOperator n of
+            booleanContextData = case disjunctionContextOperator n of
                 Just _ ->
-                    let usedNames = operandUsedNamesExcludingConditionals n
+                    let usedNames = positiveOperandUsedNamesExcludingConditionals n
                     in [(contextSpan, usedNames) | not (Set.null usedNames)]
                 Nothing -> []
             conditionalContextData
@@ -4156,84 +4329,26 @@ analyseMissingBurningLogic insId hie = go
         conditionalBranchUsedNames :: HieAST TypeIndex -> Set Name
         conditionalBranchUsedNames n@Node{nodeChildren = children}
             | nodeHasAnnotation hsIfAnnotation n =
-                usedNamesFromMaybeNodes [children !!? 1, children !!? 2]
+                positiveConditionNamesFromMaybeNodes [children !!? 0]
+                    <> usedNamesFromMaybeNodes [children !!? 1, children !!? 2]
             | nodeHasAnnotation hsCaseAnnotation n =
-                Set.unions $ map operandUsedNamesExcludingConditionals $ drop 1 children
+                Set.unions $ map positiveOperandUsedNamesExcludingConditionals $ drop 1 children
             | isIfThenElseCall n =
                 let (_headNode, args) = appSpine n
-                in usedNamesFromMaybeNodes [args !!? 1, args !!? 2]
+                in positiveConditionNamesFromMaybeNodes [args !!? 0]
+                    <> usedNamesFromMaybeNodes [args !!? 1, args !!? 2]
             | otherwise = Set.empty
           where
             usedNamesFromMaybeNodes maybeNodes =
                 Set.unions
-                    [ operandUsedNamesExcludingConditionals branchNode
+                    [ positiveOperandUsedNamesExcludingConditionals branchNode
                     | Just branchNode <- maybeNodes
                     ]
-
-        booleanContextOperator :: HieAST TypeIndex -> Maybe ByteString
-        booleanContextOperator n =
-            opBooleanOperator n <|> appBooleanOperator n
-          where
-            opBooleanOperator node = do
-                guard $ nodeHasAnnotation opAppAnnotation node
-                _lhs:opNode:_rhs:_ <- Just $ nodeChildren node
-                find (`elem` supportedBooleanOperators) (nodeOccNames opNode)
-
-            appBooleanOperator node = do
-                guard $ nodeHasAnnotation hsAppAnnotation node
-                let (headNode, args) = appSpine node
-                guard (length args >= 2)
-                find (`elem` supportedBooleanOperators) (nodeOccNames headNode)
-
-            supportedBooleanOperators :: [ByteString]
-            supportedBooleanOperators = ["||", "&&"]
-
-        nodeUsedNames :: HieAST TypeIndex -> Set Name
-        nodeUsedNames n =
-            Set.fromList
-                [ name
-                | (Right name, IdentifierDetails{identInfo = identInfo'}) <- Map.assocs $ nodeIdentifiers $ nodeInfo n
-                , Set.member Use identInfo'
-                ]
-
-        operandUsedNamesExcludingConditionals :: HieAST TypeIndex -> Set Name
-        operandUsedNamesExcludingConditionals = goUsed Set.empty
-          where
-            goUsed :: Set Name -> HieAST TypeIndex -> Set Name
-            goUsed acc n@Node{nodeChildren = children}
-                | isConditionalBranchNode n = acc
-                | otherwise =
-                    let info = nodeInfo n
-                        occsHere = Set.fromList
-                            [ name
-                            | (Right name, IdentifierDetails{identInfo = identInfo'}) <- Map.assocs $ nodeIdentifiers info
-                            , Set.member Use identInfo'
-                            ]
-                    in foldl' goUsed (acc <> occsHere) children
-
-        isConditionalBranchNode :: HieAST TypeIndex -> Bool
-        isConditionalBranchNode n =
-            nodeHasAnnotation hsIfAnnotation n
-                || nodeHasAnnotation hsCaseAnnotation n
-                || isIfThenElseCall n
-
-        isIfThenElseCall :: HieAST TypeIndex -> Bool
-        isIfThenElseCall n
-            | not (nodeHasAnnotation hsAppAnnotation n) = False
-            | otherwise =
-                let (headNode, args) = appSpine n
-                in length args >= 3
-                    && ("ifThenElse" `elem` nodeOccNames headNode
-                        || subtreeHasOccName "ifThenElse" headNode)
-
-        hsIfAnnotation :: NodeAnnotation
-        hsIfAnnotation = mkNodeAnnotation "HsIf" "HsExpr"
-
-        hsCaseAnnotation :: NodeAnnotation
-        hsCaseAnnotation = mkNodeAnnotation "HsCase" "HsExpr"
-
-        hsLetAnnotation :: NodeAnnotation
-        hsLetAnnotation = mkNodeAnnotation "HsLet" "HsExpr"
+            positiveConditionNamesFromMaybeNodes maybeNodes =
+                Set.unions
+                    [ positiveConditionTruthNames conditionNode
+                    | Just conditionNode <- maybeNodes
+                    ]
 
     comparisonBindingName :: [(Name, RealSrcSpan)] -> RealSrcSpan -> Maybe Name
     comparisonBindingName bindingNameSpans cmpSpan =
@@ -4295,27 +4410,59 @@ analyseMissingBurningLogic insId hie = go
         let allLines = BS8.lines $ hie_hs_src hie
             bindingStartLine = srcSpanStartLine bindSpan
             startLine = srcSpanStartLine span'
+            startCol = srcSpanStartCol span'
             startsGuardPredicate lineText =
                 BS8.isPrefixOf "|" lineText
                     && not (BS8.isPrefixOf "||" lineText)
-            normalizedCodeLine lineText =
-                trimLeft $ lineCodePart lineText
-            isStandaloneBlockComment strippedLine =
-                BS8.isPrefixOf "{-" strippedLine
-                    && BS8.isSuffixOf "-}" strippedLine
-            isSkippableLookbackLine strippedLine =
-                BS8.null strippedLine || isStandaloneBlockComment strippedLine
+            stripComments :: Int -> ByteString -> (Int, ByteString)
+            stripComments depth0 lineText =
+                let (depth', visibleChars) = go depth0 [] (BS8.unpack lineText)
+                in (depth', BS8.pack $ reverse visibleChars)
+              where
+                go depth acc [] = (depth, acc)
+                go depth acc ('{':'-':rest) = go (depth + 1) acc rest
+                go depth acc ('-':'}':rest)
+                    | depth > 0 = go (depth - 1) acc rest
+                go depth acc ('-':'-':_)
+                    | depth == 0 = (depth, acc)
+                go depth acc (_:rest)
+                    | depth > 0 = go depth acc rest
+                go depth acc (c:rest) = go depth (c : acc) rest
+            normalizedVisibleLine commentDepth lineText =
+                let (commentDepth', visibleLine) = stripComments commentDepth lineText
+                in (commentDepth', trimLeft visibleLine)
+            containsHeaderGuardSeparator prefix
+                | BS8.null prefix = False
+                | BS8.isPrefixOf "|" prefix =
+                    (not (BS8.isPrefixOf "||" prefix) && BS8.elem '=' prefix)
+                        || containsHeaderGuardSeparator (BS8.drop 1 prefix)
+                | otherwise = containsHeaderGuardSeparator (BS8.drop 1 prefix)
             currentLineIsGuard =
                 case allLines !!? (startLine - 1) of
-                    Just lineText -> startsGuardPredicate (normalizedCodeLine lineText)
+                    Just lineText ->
+                        let (_commentDepth, visibleLine) = normalizedVisibleLine 0 lineText
+                            (_prefixDepth, visiblePrefix) =
+                                normalizedVisibleLine 0 (BS8.take (startCol - 1) lineText)
+                        in startsGuardPredicate visibleLine
+                            || (startLine == bindingStartLine && containsHeaderGuardSeparator visiblePrefix)
                     Nothing -> False
-            lookbackLine = listToMaybe
-                [ strippedLine
-                | lineNo <- reverse [bindingStartLine .. startLine - 1]
-                , Just lineText <- [allLines !!? (lineNo - 1)]
-                , let strippedLine = normalizedCodeLine lineText
-                , not (isSkippableLookbackLine strippedLine)
-                ]
+            lookbackLine =
+                snd $
+                    foldl'
+                        (\(commentDepth, previousLine) lineNo ->
+                            case allLines !!? (lineNo - 1) of
+                                Just lineText ->
+                                    let (commentDepth', visibleLine) =
+                                            normalizedVisibleLine commentDepth lineText
+                                        previousLine' =
+                                            if BS8.null visibleLine
+                                                then previousLine
+                                                else Just visibleLine
+                                    in (commentDepth', previousLine')
+                                Nothing -> (commentDepth, previousLine)
+                        )
+                        (0, Nothing)
+                        [bindingStartLine .. startLine - 1]
         in currentLineIsGuard || maybe False startsGuardPredicate lookbackLine
 
     comparisonNode
@@ -4348,36 +4495,40 @@ analyseMissingBurningLogic insId hie = go
     operandKeys
         :: Set Name
         -> Set Name
-        -> Set Name
-        -> Map Name (Set BurningOperandKey)
+        -> Map Name FlattenBindingInfo
+        -> Maybe HelperCallSite
         -> Map Name ByteString
+        -> [HieAST TypeIndex]
         -> RealSrcSpan
         -> HieAST TypeIndex
         -> [BurningCheckKey]
-    operandKeys mintCarrierNames mintedBindingNames flattenAmountNames helperParamKeys tokenArgAliasSources directContext operand =
+    operandKeys mintCarrierNames mintedBindingNames flattenBindings maybeHelperCallSite tokenArgAliasSources conjunctGuards directContext operand =
         Set.toList $
             Set.map (operandKeyWithContext directContext)
-                (operandBindingKeys mintCarrierNames mintedBindingNames flattenAmountNames tokenArgAliasSources operand
+                (operandBindingKeys mintCarrierNames mintedBindingNames flattenBindings maybeHelperCallSite tokenArgAliasSources conjunctGuards operand
                     <> parameterKeys
                 )
       where
         operandNames = operandUsedNames operand
+        helperOperandKeyMap = maybe Map.empty helperSiteOperandKeys maybeHelperCallSite
 
         parameterKeys :: Set BurningOperandKey
         parameterKeys =
             Set.unions
-                [ Map.findWithDefault Set.empty name helperParamKeys
+                [ Map.findWithDefault Set.empty name helperOperandKeyMap
                 | name <- Set.toList operandNames
                 ]
 
     operandBindingKeys
         :: Set Name
         -> Set Name
-        -> Set Name
+        -> Map Name FlattenBindingInfo
+        -> Maybe HelperCallSite
         -> Map Name ByteString
+        -> [HieAST TypeIndex]
         -> HieAST TypeIndex
         -> Set BurningOperandKey
-    operandBindingKeys mintCarrierNames mintedBindingNames flattenAmountNames tokenArgAliasSources operand =
+    operandBindingKeys mintCarrierNames mintedBindingNames flattenBindings maybeHelperCallSite tokenArgAliasSources conjunctGuards operand =
         directKeys
             <> bindingKeys
             <> flattenKeys
@@ -4386,7 +4537,7 @@ analyseMissingBurningLogic insId hie = go
 
         directKeys :: Set BurningOperandKey
         directKeys =
-            let parsedKeys = operandDirectValueOfMintKeys mintCarrierNames tokenArgAliasSources operand
+            let parsedKeys = operandDirectValueOfMintKeys mintCarrierNames maybeHelperCallSite tokenArgAliasSources operand
                 fallbackKeys =
                     if Set.null parsedKeys
                         then operandFallbackValueOfMintKeys mintCarrierNames operand
@@ -4396,21 +4547,35 @@ analyseMissingBurningLogic insId hie = go
         bindingKeys :: Set BurningOperandKey
         bindingKeys =
             Set.fromList
-                [ BurningOperandValueBinding name (bindingCallTokenArgKey name operand)
+                [ BurningOperandValueBinding name (bindingCallTokenArgKey tokenArgAliasSources name operand)
                 | name <- Set.toList (operandNames `Set.intersection` mintedBindingNames)
                 ]
 
         flattenKeys :: Set BurningOperandKey
         flattenKeys =
-            Set.map BurningOperandFlattenAmount
-                (operandNames `Set.intersection` flattenAmountNames)
+            Set.fromList
+                [ BurningOperandFlattenAmount name (flattenAssetGuardKey flattenBindings tokenArgAliasSources conjunctGuards name)
+                | name <- Set.toList (operandNames `Set.intersection` Map.keysSet flattenBindings)
+                ]
 
     operandFallbackValueOfMintKeys :: Set Name -> HieAST TypeIndex -> Set ValueOfTokenKey
     operandFallbackValueOfMintKeys mintCarrierNames operand
-        | subtreeHasAnyNameMeta valueOfPrimitiveNameMetas operand && mentionsMintCarrier =
+        | operandLooksLikeFunctionStyleValueOf operand && mentionsMintCarrier =
             Set.singleton $ ValueOfTokenKey (Set.singleton sourceKey) (Set.singleton sourceKey)
         | otherwise = Set.empty
       where
+        operandLooksLikeFunctionStyleValueOf currentOperand
+            | Just inner <- parenthesizedChild currentOperand =
+                operandLooksLikeFunctionStyleValueOf inner
+            | otherwise = case slice (nodeSpan currentOperand) (hie_hs_src hie) of
+                Just src -> looksLikeFunctionStyleValueOf (normalizeSource src)
+                Nothing -> False
+
+        looksLikeFunctionStyleValueOf src = case BS8.breakSubstring "valueOf" src of
+            (before, afterValueOf) ->
+                BS8.isPrefixOf "valueOf" afterValueOf
+                    && (BS8.null before || BS8.last before == '.')
+
         mentionsMintCarrier =
             subtreeHasAnyNameMeta txInfoMintPrimitiveNameMetas operand
                 || not (Set.null $ operandUsedNames operand `Set.intersection` mintCarrierNames)
@@ -4439,11 +4604,11 @@ analyseMissingBurningLogic insId hie = go
             BurningKeyDirectValueOf directContext tokenKey
         BurningOperandValueBinding name tokenArgKey ->
             BurningKeyValueBinding directContext name tokenArgKey
-        BurningOperandFlattenAmount name ->
-            BurningKeyFlattenAmount directContext name
+        BurningOperandFlattenAmount name assetGuardKey ->
+            BurningKeyFlattenAmount directContext name assetGuardKey
 
-    bindingCallTokenArgKey :: Name -> HieAST TypeIndex -> Maybe (Set ValueOfArgKey)
-    bindingCallTokenArgKey bindingName = go
+    bindingCallTokenArgKey :: Map Name ByteString -> Name -> HieAST TypeIndex -> Maybe (Set ValueOfArgKey)
+    bindingCallTokenArgKey tokenArgAliasSources bindingName = go
       where
         go n =
             directCallArgs n
@@ -4455,21 +4620,32 @@ analyseMissingBurningLogic insId hie = go
             let (headNode, args) = appSpine n
             guard $ bindingName `Set.member` operandUsedNames headNode
             guard (not $ null args)
-            pure $
-                Set.fromList
-                    [ ValueOfArgSource (bindingCallArgSource idx arg)
-                    | (idx, arg) <- zip [0 :: Int ..] args
-                    ]
+            pure $ Set.unions
+                [ bindingCallArgKeys idx arg
+                | (idx, arg) <- zip [0 :: Int ..] args
+                ]
 
         infixCallArgs n = do
             guard $ nodeHasAnnotation opAppAnnotation n
             _lhs:opNode:rhsNode:_ <- Just $ nodeChildren n
             guard $ bindingName `Set.member` operandUsedNames opNode
-            pure $ Set.singleton $ ValueOfArgSource $ bindingCallArgSource 0 rhsNode
+            pure $ bindingCallArgKeys 0 rhsNode
 
-        bindingCallArgSource :: Int -> HieAST TypeIndex -> ByteString
-        bindingCallArgSource idx argNode =
-            BS8.pack (show idx) <> ":" <> bindingArgSource argNode
+        bindingCallArgKeys :: Int -> HieAST TypeIndex -> Set ValueOfArgKey
+        bindingCallArgKeys idx argNode =
+            let source = bindingArgSource argNode
+                usedNames = Set.filter (nameAppearsInSource source) (operandUsedNames argNode)
+                prefix = BS8.pack (show idx) <> ":"
+                aliasSourceKeys =
+                    Set.fromList
+                        [ ValueOfArgSource (prefix <> aliasSource)
+                        | name <- Set.toList usedNames
+                        , Just aliasSource <- [Map.lookup name tokenArgAliasSources]
+                        ]
+                sourceKey = Set.singleton $ ValueOfArgSource (prefix <> source)
+            in if not (Set.null aliasSourceKeys)
+                then aliasSourceKeys
+                else sourceKey
 
         bindingArgSource argNode =
             let fallback = BS8.intercalate "." (nodeOccNames argNode)
@@ -4491,25 +4667,143 @@ analyseMissingBurningLogic insId hie = go
         isTypeAnnotationChar c =
             isAlphaNum c || c `elem` ("_'.:[]()," :: String)
 
-    operandDirectValueOfMintKeys :: Set Name -> Map Name ByteString -> HieAST TypeIndex -> Set ValueOfTokenKey
-    operandDirectValueOfMintKeys mintCarrierNames tokenArgAliasSources = go Set.empty
-      where
-        go :: Set ValueOfTokenKey -> HieAST TypeIndex -> Set ValueOfTokenKey
-        go acc n@Node{nodeChildren = children} =
-            let acc' = case directValueOfMintTokenKey mintCarrierNames tokenArgAliasSources n of
-                    Just key -> Set.insert key acc
-                    Nothing -> acc
-            in foldl' go acc' children
+        nameAppearsInSource :: ByteString -> Name -> Bool
+        nameAppearsInSource source name =
+            let occ = BS8.pack (occNameString $ nameOccName name)
+            in containsWordBS occ source
 
-    directValueOfMintTokenKey :: Set Name -> Map Name ByteString -> HieAST TypeIndex -> Maybe ValueOfTokenKey
-    directValueOfMintTokenKey mintCarrierNames tokenArgAliasSources node =
-        fullCallKey <|> infixPartialKey
+    flattenAssetGuardKey
+        :: Map Name FlattenBindingInfo
+        -> Map Name ByteString
+        -> [HieAST TypeIndex]
+        -> Name
+        -> Maybe FlattenAssetGuardKey
+    flattenAssetGuardKey flattenBindings tokenArgAliasSources conjunctGuards amountName = do
+        FlattenBindingInfo currencyName tokenName <- Map.lookup amountName flattenBindings
+        let equalityGuards =
+                Map.fromListWith Set.union $
+                    concatMap collectGuardEqualities conjunctGuards
+            uniqueGuardValue binderName = do
+                values <- Map.lookup binderName equalityGuards
+                guard (Set.size values == 1)
+                pure (Set.findMin values)
+            currencyKey = currencyName >>= uniqueGuardValue
+            tokenKey = tokenName >>= uniqueGuardValue
+        guard (isJust currencyKey || isJust tokenKey)
+        pure (FlattenAssetGuardKey currencyKey tokenKey)
+      where
+        collectGuardEqualities n
+            | Just arg <- parenthesizedChild n =
+                collectGuardEqualities arg
+            | Just _ <- booleanNotArg n =
+                []
+            | Just (op, lhs, rhsNode) <- booleanContextOperands n =
+                if op == "&&"
+                    then collectGuardEqualities lhs <> collectGuardEqualities rhsNode
+                    else []
+            | Just ("==", lhs, rhsNode) <- comparisonNode n =
+                maybeToList (guardEquality lhs rhsNode)
+                    <> maybeToList (guardEquality rhsNode lhs)
+            | otherwise =
+                []
+
+        guardEquality binderOperand valueOperand = do
+            binderName <- simpleOperandName binderOperand
+            valueSource <- guardValueSource valueOperand
+            pure (binderName, Set.singleton valueSource)
+
+        simpleOperandName operand =
+            case Set.toList (operandUsedNames operand) of
+                [name] -> Just name
+                _ -> Nothing
+
+        guardValueSource operand =
+            case Set.toList (operandUsedNames operand) of
+                [name] ->
+                    Just $ Map.findWithDefault (normalizedGuardOperandSource operand) name tokenArgAliasSources
+                _ ->
+                    Just $ normalizedGuardOperandSource operand
+
+        normalizedGuardOperandSource operand =
+            case slice (nodeSpan operand) (hie_hs_src hie) of
+                Just src -> normalizeFlattenGuardSource src
+                Nothing -> BS8.intercalate "." (nodeOccNames operand)
+
+        normalizeFlattenGuardSource =
+            stripTypeAnnotations
+                . BS8.filter (\c -> not (isSpace c) && c /= '(' && c /= ')')
+
+        stripTypeAnnotations bs = case BS8.breakSubstring "::" bs of
+            (before, afterType)
+                | BS8.null afterType -> before
+                | otherwise ->
+                    let rest = BS8.dropWhile isTypeAnnotationChar (BS8.drop 2 afterType)
+                    in before <> stripTypeAnnotations rest
+
+        isTypeAnnotationChar c =
+            isAlphaNum c || c `elem` ("_'.:[]()," :: String)
+
+
+    operandDirectValueOfMintKeys :: Set Name -> Maybe HelperCallSite -> Map Name ByteString -> HieAST TypeIndex -> Set ValueOfTokenKey
+    operandDirectValueOfMintKeys mintCarrierNames maybeHelperCallSite tokenArgAliasSources = go
+      where
+        go n =
+            case directValueOfMintTokenKey mintCarrierNames maybeHelperCallSite tokenArgAliasSources n of
+                Just key -> Set.singleton key
+                Nothing -> maybe Set.empty go (transparentDirectValueOfChild n)
+
+        transparentDirectValueOfChild currentNode
+            | Just inner <- parenthesizedChild currentNode =
+                Just inner
+            | nodeHasAnnotation negAppAnnotation currentNode =
+                listToMaybe (nodeChildren currentNode)
+            | otherwise = case appSpine currentNode of
+                (headNode, [arg])
+                    | isNegateHead headNode ->
+                        Just arg
+                _ ->
+                    Nothing
+
+        isNegateHead headNode =
+            "negate" `elem` nodeOccNames headNode
+                || subtreeHasOccName "negate" headNode
+
+    directValueOfMintTokenKey :: Set Name -> Maybe HelperCallSite -> Map Name ByteString -> HieAST TypeIndex -> Maybe ValueOfTokenKey
+    directValueOfMintTokenKey mintCarrierNames maybeHelperCallSite tokenArgAliasSources node =
+        fullCallKey <|> sourceDollarFullCallKey <|> infixPartialKey
       where
         fullCallKey :: Maybe ValueOfTokenKey
         fullCallKey = do
             (mintArg, csArg, tnArg) <- valueOfArgs node
             guard (mintArgMentionsMint mintArg)
             pure (ValueOfTokenKey (valueOfArgKey tokenArgAliasSources csArg) (valueOfArgKey tokenArgAliasSources tnArg))
+
+        sourceDollarFullCallKey :: Maybe ValueOfTokenKey
+        sourceDollarFullCallKey = do
+            source <- slice (nodeSpan node) (hie_hs_src hie)
+            guard ("$" `BS8.isInfixOf` source)
+            (partialNode, mintArg, csArg) <- partialValueOfNodeInSubtree node
+            guard (mintArgMentionsMint mintArg)
+            (partialSource, tnSource) <- dollarSeparatedSources source
+            guard (normalizeSourceKey partialSource == nodeSourceKey partialNode)
+            pure (ValueOfTokenKey (valueOfArgKey tokenArgAliasSources csArg) (valueOfArgKeyFromSource tokenArgAliasSources tnSource))
+
+        partialValueOfNodeInSubtree :: HieAST TypeIndex -> Maybe (HieAST TypeIndex, HieAST TypeIndex, HieAST TypeIndex)
+        partialValueOfNodeInSubtree n =
+            partialValueOfNode n <|> listToMaybe (mapMaybe partialValueOfNodeInSubtree (nodeChildren n))
+
+        partialValueOfNode :: HieAST TypeIndex -> Maybe (HieAST TypeIndex, HieAST TypeIndex, HieAST TypeIndex)
+        partialValueOfNode partialNode = do
+            (mintArg, csArg) <- partialValueOfArgs partialNode
+            pure (partialNode, mintArg, csArg)
+
+        dollarSeparatedSources :: ByteString -> Maybe (ByteString, ByteString)
+        dollarSeparatedSources source = do
+            let (revTail, revRest) = BS8.break (== '$') (BS8.reverse source)
+            guard (not $ BS8.null revRest)
+            let tnSource = BS8.reverse revTail
+                partialSource = BS8.reverse $ BS8.drop 1 revRest
+            pure (partialSource, tnSource)
 
         infixPartialKey :: Maybe ValueOfTokenKey
         infixPartialKey = do
@@ -4525,13 +4819,60 @@ analyseMissingBurningLogic insId hie = go
             let mintArgNames = operandUsedNames mintArg
                 hasTxInfoMintAlias =
                     not (Set.null $ mintArgNames `Set.intersection` mintCarrierNames)
-            in subtreeHasAnyNameMeta txInfoMintPrimitiveNameMetas mintArg || hasTxInfoMintAlias
+                hasHelperMintOperand =
+                    any helperOperandMentionsMint $ Set.toList $ helperOperandKeysFor mintArg
+            in subtreeHasAnyNameMeta txInfoMintPrimitiveNameMetas mintArg || hasTxInfoMintAlias || hasHelperMintOperand
+
+        helperOperandMentionsMint :: BurningOperandKey -> Bool
+        helperOperandMentionsMint = \case
+            BurningOperandDirectValueOf _ -> True
+            BurningOperandValueBinding _ _ -> True
+            BurningOperandFlattenAmount _ _ -> True
+
+        helperOperandKeysFor :: HieAST TypeIndex -> Set BurningOperandKey
+        helperOperandKeysFor currentNode = fromMaybe Set.empty $ do
+            helperCallSite <- maybeHelperCallSite
+            name <- simpleHelperParamName currentNode
+            pure $ Map.findWithDefault Set.empty name (helperSiteOperandKeys helperCallSite)
+
+        simpleHelperParamName :: HieAST TypeIndex -> Maybe Name
+        simpleHelperParamName currentNode
+            | Just inner <- parenthesizedChild currentNode =
+                simpleHelperParamName inner
+            | otherwise = case Set.toList (operandUsedNames currentNode) of
+                [name] -> Just name
+                _ -> Nothing
 
         valueOfArgs :: HieAST TypeIndex -> Maybe (HieAST TypeIndex, HieAST TypeIndex, HieAST TypeIndex)
-        valueOfArgs n = do
-            guard $ nodeHasAnnotation hsAppAnnotation n
-            let (headNode, args) = appSpine n
-            directCall headNode args <|> backtickCall headNode args
+        valueOfArgs n =
+            hsAppCall n <|> dollarCall n
+          where
+            hsAppCall node' = do
+                guard $ nodeHasAnnotation hsAppAnnotation node'
+                let (headNode, args) = appSpine node'
+                directCall headNode args
+                    <|> saturatedPartialCall headNode args
+                    <|> dollarFunctionCall headNode args
+
+            dollarCall node' = do
+                guard $ nodeHasAnnotation opAppAnnotation node'
+                lhs:opNode:rhsNode:_ <- Just $ nodeChildren node'
+                guard (isDollarLikeNode node' opNode)
+                (mintArg, csArg) <- partialValueOfArgs lhs
+                pure (mintArg, csArg, rhsNode)
+
+            dollarFunctionCall headNode args = do
+                guard (isDollarLikeNode headNode headNode)
+                lhs <- args !!? 0
+                rhsNode <- args !!? 1
+                (mintArg, csArg) <- partialValueOfArgs lhs
+                pure (mintArg, csArg, rhsNode)
+
+            isDollarLikeNode node' operatorNode =
+                "$" `elem` nodeOccNames operatorNode
+                    || subtreeHasOccName "$" operatorNode
+                    || nodeSourceKey operatorNode == "$"
+                    || maybe False ("$" `BS8.isInfixOf`) (slice (nodeSpan node') (hie_hs_src hie))
 
         directCall
             :: HieAST TypeIndex
@@ -4544,44 +4885,87 @@ analyseMissingBurningLogic insId hie = go
             tnArg <- args !!? 2
             pure (mintArg, csArg, tnArg)
 
-        backtickCall
+        saturatedPartialCall
             :: HieAST TypeIndex
             -> [HieAST TypeIndex]
             -> Maybe (HieAST TypeIndex, HieAST TypeIndex, HieAST TypeIndex)
-        backtickCall headNode args = do
+        saturatedPartialCall headNode args = do
+            guard (length args == 1)
             tnArg <- args !!? 0
-            guard $ nodeHasAnnotation opAppAnnotation headNode
-            mintArg:opNode:csArg:_ <- Just $ nodeChildren headNode
-            guard $ subtreeHasAnyNameMeta valueOfPrimitiveNameMetas opNode
+            (mintArg, csArg) <- partialValueOfArgs headNode
             pure (mintArg, csArg, tnArg)
+
+        partialValueOfArgs :: HieAST TypeIndex -> Maybe (HieAST TypeIndex, HieAST TypeIndex)
+        partialValueOfArgs partialNode
+            | Just inner <- parenthesizedChild partialNode =
+                partialValueOfArgs inner
+            | otherwise =
+                directPartialCall partialNode <|> backtickPartialCall partialNode
+          where
+            directPartialCall node' = do
+                guard $ nodeHasAnnotation hsAppAnnotation node'
+                let (headNode, args) = appSpine node'
+                guard $ subtreeHasAnyNameMeta valueOfPrimitiveNameMetas headNode
+                guard (length args == 2)
+                mintArg <- args !!? 0
+                csArg <- args !!? 1
+                pure (mintArg, csArg)
+
+            backtickPartialCall node' = do
+                guard $ nodeHasAnnotation opAppAnnotation node'
+                mintArg:opNode:csArg:_ <- Just $ nodeChildren node'
+                guard $ subtreeHasAnyNameMeta valueOfPrimitiveNameMetas opNode
+                pure (mintArg, csArg)
 
         valueOfArgKey :: Map Name ByteString -> HieAST TypeIndex -> Set ValueOfArgKey
         valueOfArgKey aliasSourceMap n =
-            let source = nodeSourceKey n
-                usedNames = Set.filter (nameAppearsInSource source) (operandUsedNames n)
-                aliasSourceKeys =
-                    Set.fromList
-                        [ ValueOfArgSource aliasSource
-                        | name <- Set.toList usedNames
-                        , Just aliasSource <- [Map.lookup name aliasSourceMap]
-                        ]
-                sourceKey = Set.singleton $ ValueOfArgSource source
-                nameKeys = Set.map ValueOfArgName usedNames
-            in if not (Set.null aliasSourceKeys)
-                then aliasSourceKeys
-                else if isQualifiedSource source
-                    then sourceKey
-                    else if Set.null nameKeys
-                        then sourceKey
-                        else nameKeys
+            fromMaybe (defaultValueOfArgKey aliasSourceMap n) (helperValueArgKeysFor n)
           where
-            nameAppearsInSource :: ByteString -> Name -> Bool
-            nameAppearsInSource source name =
-                let occ = BS8.pack (occNameString $ nameOccName name)
-                in containsWordBS occ source
+            helperValueArgKeysFor currentNode = do
+                helperCallSite <- maybeHelperCallSite
+                name <- simpleHelperParamName currentNode
+                keys <- Map.lookup name (helperSiteValueArgKeys helperCallSite)
+                guard (not $ Set.null keys)
+                pure keys
 
-            isQualifiedSource :: ByteString -> Bool
-            isQualifiedSource src = "." `BS8.isInfixOf` src
+            defaultValueOfArgKey currentAliasSourceMap currentNode =
+                let source = nodeSourceKey currentNode
+                    usedNames = Set.filter (nameAppearsInSource source) (operandUsedNames currentNode)
+                    aliasSourceKeys =
+                        Set.fromList
+                            [ ValueOfArgSource aliasSource
+                            | name <- Set.toList usedNames
+                            , Just aliasSource <- [Map.lookup name currentAliasSourceMap]
+                            ]
+                    sourceKey = Set.singleton $ ValueOfArgSource source
+                    nameKeys = Set.map ValueOfArgName usedNames
+                in if not (Set.null aliasSourceKeys)
+                    then aliasSourceKeys
+                    else if isQualifiedSource source
+                        then sourceKey
+                        else if Set.null nameKeys
+                            then sourceKey
+                            else nameKeys
+
+        nameAppearsInSource :: ByteString -> Name -> Bool
+        nameAppearsInSource source name =
+            let occ = BS8.pack (occNameString $ nameOccName name)
+            in containsWordBS occ source
+
+        isQualifiedSource :: ByteString -> Bool
+        isQualifiedSource src = "." `BS8.isInfixOf` src
+
+        valueOfArgKeyFromSource :: Map Name ByteString -> ByteString -> Set ValueOfArgKey
+        valueOfArgKeyFromSource aliasSourceMap rawSource =
+            let source = normalizeSourceKey rawSource
+                resolvedSource =
+                    fromMaybe source $ listToMaybe
+                        [ aliasSource
+                        | (name, aliasSource) <- Map.toList aliasSourceMap
+                        , BS8.pack (occNameString $ nameOccName name) == source
+                        ]
+            in Set.singleton $ ValueOfArgSource resolvedSource
+
 
         nodeSourceKey :: HieAST TypeIndex -> ByteString
         nodeSourceKey n =
@@ -4695,10 +5079,26 @@ analyseMissingBurningLogic insId hie = go
                     ]
             in foldl' go (acc <> occsHere) children
 
-    operandIntegerLiteral :: HieAST TypeIndex -> Maybe Integer
-    operandIntegerLiteral operand = do
-        src <- slice (nodeSpan operand) (hie_hs_src hie)
-        parseIntegerLiteral src
+    operandIntegerLiteral :: RealSrcSpan -> Map Name Integer -> HieAST TypeIndex -> Maybe Integer
+    operandIntegerLiteral functionSpan integerAliasValues operand
+        | Just inner <- parenthesizedChild operand =
+            operandIntegerLiteral functionSpan integerAliasValues inner
+        | nodeHasAnnotation negAppAnnotation operand =
+            negate <$> (listToMaybe (nodeChildren operand) >>= operandIntegerLiteral functionSpan integerAliasValues)
+        | otherwise = case appSpine operand of
+            (headNode, [arg])
+                | isNegateHeadIn functionSpan headNode ->
+                    negate <$> operandIntegerLiteral functionSpan integerAliasValues arg
+            _ ->
+                operandAliasValue <|> do
+                    src <- slice (nodeSpan operand) (hie_hs_src hie)
+                    parseIntegerLiteral src
+      where
+        operandAliasValue = do
+            name <- case Set.toList (operandUsedNames operand) of
+                [resolvedName] -> Just resolvedName
+                _ -> Nothing
+            Map.lookup name integerAliasValues
 
     parseIntegerLiteral :: ByteString -> Maybe Integer
     parseIntegerLiteral src = do
@@ -4757,35 +5157,33 @@ analyseMissingBurningLogic insId hie = go
         isTypeAnnotationChar c =
             isAlphaNum c || c `elem` ("_'.:[]()," :: String)
 
-    collectMintBindingRefs
-        :: HieAST TypeIndex
-        -> [(Name, RealSrcSpan)]
-        -> RealSrcSpan
-        -> ([BindingRef], [BindingRef])
     collectMintBindingRefs funNode bindingNameSpans span' =
-        let bindings = collectLocalBindings span'
-            mintCarrierOccs = closeMintCarrierOccs bindings
+        let bindings = mapMaybe resolveLocalBindingInfo (collectLocalBindings span')
+            mintCarrierNames = closeMintCarrierNames bindings
             mintCarrierRefs =
-                [ BindingRef{bindingRefOcc = lhsOcc, bindingRefLine = lhsLine}
-                | (lhsOcc, lhsLine, _rhsWords) <- bindings
-                , lhsOcc `Set.member` mintCarrierOccs
+                [ bindingRef
+                | (bindingRef, name, _lhsSeedsMint, _rhsWords, _usedNames, _hasPrimitiveValueOf, _hasPrimitiveTxInfoMint) <- bindings
+                , name `Set.member` mintCarrierNames
                 ]
             mintedValueRefs =
-                [ BindingRef{bindingRefOcc = lhsOcc, bindingRefLine = lhsLine}
-                | (lhsOcc, lhsLine, rhsWords) <- bindings
-                , rhsMentionsMintValueOf mintCarrierOccs lhsOcc lhsLine rhsWords
+                [ bindingRef
+                | (bindingRef, _name, lhsSeedsMint, _rhsWords, usedNames, hasPrimitiveValueOf, hasPrimitiveTxInfoMint) <- bindings
+                , hasPrimitiveValueOf
+                , lhsSeedsMint
+                    || hasPrimitiveTxInfoMint
+                    || not (Set.null $ usedNames `Set.intersection` mintCarrierNames)
                 ]
         in (mintCarrierRefs, mintedValueRefs)
       where
-        collectLocalBindings :: RealSrcSpan -> [(ByteString, Int, Set ByteString)]
+        collectLocalBindings :: RealSrcSpan -> [(BindingRef, Bool, Set ByteString)]
         collectLocalBindings localSpan =
             go [] Nothing (srcNumberedLinesInSpan localSpan)
 
         go
-            :: [(ByteString, Int, Set ByteString)]
-            -> Maybe (ByteString, Int, Int, [ByteString])
+            :: [(BindingRef, Bool, Set ByteString)]
+            -> Maybe (BindingRef, Bool, Int, [ByteString])
             -> [(Int, ByteString)]
-            -> [(ByteString, Int, Set ByteString)]
+            -> [(BindingRef, Bool, Set ByteString)]
         go acc activeBinding [] = flushActiveBinding acc activeBinding
         go acc activeBinding ((lineNo, line):rest) =
             let code = lineCodePart line
@@ -4796,66 +5194,60 @@ analyseMissingBurningLogic insId hie = go
                 Just lhsOcc ->
                     let acc' = flushActiveBinding acc activeBinding
                         rhsStart = bindingRhsPart code
-                    in go acc' (Just (lhsOcc, lineNo, indent, [rhsStart])) rest
+                        bindingRef = BindingRef{bindingRefOcc = lhsOcc, bindingRefLine = lineNo}
+                        lhsSeedsMint = lhsContainsTxInfoMintField code
+                    in go acc' (Just (bindingRef, lhsSeedsMint, indent, [rhsStart])) rest
                 Nothing ->
                     case activeBinding of
-                        Just (lhsOcc, lhsLine, bindIndent, rhsLines)
+                        Just (bindingRef, lhsSeedsMint, bindIndent, rhsLines)
                             | isBlank || indent > bindIndent ->
-                                go acc (Just (lhsOcc, lhsLine, bindIndent, code : rhsLines)) rest
+                                go acc (Just (bindingRef, lhsSeedsMint, bindIndent, code : rhsLines)) rest
                             | otherwise ->
                                 go (flushActiveBinding acc activeBinding) Nothing rest
                         Nothing ->
                             go acc Nothing rest
 
         flushActiveBinding
-            :: [(ByteString, Int, Set ByteString)]
-            -> Maybe (ByteString, Int, Int, [ByteString])
-            -> [(ByteString, Int, Set ByteString)]
+            :: [(BindingRef, Bool, Set ByteString)]
+            -> Maybe (BindingRef, Bool, Int, [ByteString])
+            -> [(BindingRef, Bool, Set ByteString)]
         flushActiveBinding acc = \case
             Nothing -> acc
-            Just (lhsOcc, lhsLine, _bindIndent, rhsLines) ->
+            Just (bindingRef, lhsSeedsMint, _bindIndent, rhsLines) ->
                 let rhsWords = identifierWords $ BS8.intercalate " " rhsLines
-                in (lhsOcc, lhsLine, rhsWords) : acc
+                in (bindingRef, lhsSeedsMint, rhsWords) : acc
 
-        rhsMentionsMintValueOf
-            :: Set ByteString
-            -> ByteString
-            -> Int
-            -> Set ByteString
-            -> Bool
-        rhsMentionsMintValueOf mintCarrierOccs lhsOcc lhsLine rhsWords =
-            bindingHasPrimitiveValueOf
-                && (Set.member "txInfoMint" rhsWords
-                    || not (Set.null $ rhsWords `Set.intersection` mintCarrierOccs))
+        resolveLocalBindingInfo :: (BindingRef, Bool, Set ByteString) -> Maybe (BindingRef, Name, Bool, Set ByteString, Set Name, Bool, Bool)
+        resolveLocalBindingInfo (bindingRef@BindingRef{bindingRefOcc = lhsOcc, bindingRefLine = lhsLine}, lhsSeedsMint, rhsWords) = do
+            name <- resolveBindingRef bindingNameSpans bindingRef
+            bindSpan <- bindingSpanForOccLine bindingNameSpans lhsOcc lhsLine
+            let usedNames = spanUsedNamesWithin bindSpan funNode
+                hasPrimitiveValueOf = spanHasAnyNameMetaWithin bindSpan valueOfPrimitiveNameMetas funNode
+                hasPrimitiveTxInfoMint = spanHasAnyNameMetaWithin bindSpan txInfoMintPrimitiveNameMetas funNode
+            pure (bindingRef, name, lhsSeedsMint, rhsWords, usedNames, hasPrimitiveValueOf, hasPrimitiveTxInfoMint)
+
+        closeMintCarrierNames :: [(BindingRef, Name, Bool, Set ByteString, Set Name, Bool, Bool)] -> Set Name
+        closeMintCarrierNames bindings = expandNames seedNames
           where
-            bindingHasPrimitiveValueOf = maybe False bindingSpanHasPrimitiveValueOf $
-                bindingSpanForOccLine bindingNameSpans lhsOcc lhsLine
-
-            bindingSpanHasPrimitiveValueOf bindSpan =
-                spanHasAnyNameMetaWithin bindSpan valueOfPrimitiveNameMetas funNode
-
-        closeMintCarrierOccs :: [(ByteString, Int, Set ByteString)] -> Set ByteString
-        closeMintCarrierOccs bindings = expandOccs seedOccs
-          where
-            seedOccs =
+            seedNames =
                 Set.fromList
-                    [ lhsOcc
-                    | (lhsOcc, _lhsLine, rhsWords) <- bindings
-                    , Set.member "txInfoMint" rhsWords
+                    [ name
+                    | (_bindingRef, name, lhsSeedsMint, _rhsWords, _usedNames, _hasPrimitiveValueOf, hasPrimitiveTxInfoMint) <- bindings
+                    , lhsSeedsMint || hasPrimitiveTxInfoMint
                     ]
 
-            expandOccs knownOccs =
-                let knownOccs' = foldl'
-                        (\acc (lhsOcc, _lhsLine, rhsWords) ->
-                            if Set.null (rhsWords `Set.intersection` acc)
+            expandNames knownNames =
+                let knownNames' = foldl'
+                        (\acc (_bindingRef, name, _lhsSeedsMint, _rhsWords, usedNames, _hasPrimitiveValueOf, _hasPrimitiveTxInfoMint) ->
+                            if Set.null (usedNames `Set.intersection` acc)
                                 then acc
-                                else Set.insert lhsOcc acc
+                                else Set.insert name acc
                         )
-                        knownOccs
+                        knownNames
                         bindings
-                in if knownOccs' == knownOccs
-                    then knownOccs
-                    else expandOccs knownOccs'
+                in if knownNames' == knownNames
+                    then knownNames
+                    else expandNames knownNames'
 
         identifierWords :: ByteString -> Set ByteString
         identifierWords = Set.fromList . collectWords
@@ -4872,60 +5264,211 @@ analyseMissingBurningLogic insId hie = go
 
         bindingRhsPart :: ByteString -> ByteString
         bindingRhsPart line =
-            let (_lhsRaw, eqAndRhs) = BS8.break (== '=') line
-            in if BS8.null eqAndRhs
-                then ""
-                else BS8.drop 1 eqAndRhs
+            maybe "" snd (splitBindingEq line)
 
-    collectFlattenAmountBindingNames
+        lhsContainsTxInfoMintField :: ByteString -> Bool
+        lhsContainsTxInfoMintField line =
+            case splitBindingEq line of
+                Just (lhsRaw, _rhsRaw) ->
+                    case BS8.breakSubstring "txInfoMint" lhsRaw of
+                        (_beforeField, fieldAndAfter) | BS8.null fieldAndAfter -> False
+                        (_beforeField, fieldAndAfter) ->
+                            let (_fieldName, afterField) = BS8.splitAt (BS8.length "txInfoMint") fieldAndAfter
+                            in isJust (splitBindingEq afterField)
+                Nothing -> False
+
+    collectFlattenBindingInfo
         :: [(Name, RealSrcSpan)]
         -> HieAST TypeIndex
         -> RealSrcSpan
         -> Set Name
-        -> Set Name
-    collectFlattenAmountBindingNames bindingNameSpans funNode span' mintCarrierNames =
-        resolveBindingRefs bindingNameSpans $ collectFlattenAmountBindingRefs funNode span' mintCarrierNames
+        -> Map Name FlattenBindingInfo
+    collectFlattenBindingInfo bindingNameSpans funNode span' mintCarrierNames =
+        Map.fromList $
+            mapMaybe (resolveFlattenBindingInfo bindingNameSpans) $
+                collectFlattenBindingRefs funNode span' mintCarrierNames
 
-    collectFlattenAmountBindingRefs :: HieAST TypeIndex -> RealSrcSpan -> Set Name -> [BindingRef]
-    collectFlattenAmountBindingRefs funNode span' mintCarrierNames =
+    collectFlattenBindingRefs :: HieAST TypeIndex -> RealSrcSpan -> Set Name -> [FlattenBindingRef]
+    collectFlattenBindingRefs funNode span' mintCarrierNames =
         let numberedLines = srcNumberedLinesInSpan span'
             lineMap = Map.fromList numberedLines
             mintCaseStartLines = collectMintFlattenCaseStartLines funNode mintCarrierNames
             mintCaseBranchLines = collectMintCaseBranchLines mintCaseStartLines numberedLines
-        in [ BindingRef{bindingRefOcc = amountOcc, bindingRefLine = amountLine}
-           | (lineNo, line) <- mintCaseBranchLines
-           , let candidate = flattenCandidate lineMap lineNo line
-           , Just amountOcc <- [parseFlattenAmountOcc candidate <|> parseFlattenAmountOcc line]
-           , let amountLine = findAmountLine lineMap lineNo amountOcc
-           ]
+            mintCarrierOccs =
+                Set.map (BS8.pack . occNameString . nameOccName) mintCarrierNames
+            casePatternRefs =
+                [ ref
+                | (lineNo, line) <- mintCaseBranchLines
+                , let candidate = branchPatternCandidate lineMap lineNo line
+                , Just ref <- [flattenBindingRefFromPattern lineMap lineNo candidate]
+                ]
+            letPatternRefs =
+                [ ref
+                | (lineNo, line) <- numberedLines
+                , let code = lineCodePart line
+                , let lhsPattern = trimRight $ fst $ BS8.break (== '=') code
+                , let rhsSource = bindingRhsPart code
+                , not (BS8.null rhsSource)
+                , rhsMentionsMintFlattenValue mintCarrierOccs rhsSource
+                , Just ref <- [flattenBindingRefFromPattern lineMap lineNo lhsPattern]
+                ]
+        in casePatternRefs <> letPatternRefs
       where
-        findAmountLine :: Map Int ByteString -> Int -> ByteString -> Int
-        findAmountLine lineMap lineNo amountOcc =
-            fromMaybe lineNo $
-                find
-                    (\ln -> amountOccursInPattern amountOcc (Map.findWithDefault "" ln lineMap))
-                    (reverse [max 1 (lineNo - 6) .. lineNo])
-          where
-            amountOccursInPattern :: ByteString -> ByteString -> Bool
-            amountOccursInPattern occ lineText =
-                let code = lineCodePart lineText
-                    (beforeArrow, afterArrow) = BS8.breakSubstring "->" code
-                    patternPart =
-                        if BS8.null afterArrow
-                            then code
-                            else beforeArrow
-                in containsWordBS occ patternPart
+        rhsMentionsMintFlattenValue :: Set ByteString -> ByteString -> Bool
+        rhsMentionsMintFlattenValue mintCarrierOccs rhsSource =
+            let rhsWords = Set.fromList $ collectFlattenWordsInOrder rhsSource
+            in containsWordBS "flattenValue" rhsSource
+                && (Set.member "txInfoMint" rhsWords
+                    || not (Set.null $ rhsWords `Set.intersection` mintCarrierOccs))
 
-        flattenCandidate :: Map Int ByteString -> Int -> ByteString -> ByteString
-        flattenCandidate lineMap lineNo line
-            | "[" `BS8.isInfixOf` line = line
+        bindingRhsPart :: ByteString -> ByteString
+        bindingRhsPart line =
+            let (_lhsRaw, eqAndRhs) = BS8.break (== '=') line
+            in if BS8.null eqAndRhs
+                then ""
+                else trimLeft $ BS8.drop 1 eqAndRhs
+
+        collectFlattenWordsInOrder :: ByteString -> [ByteString]
+        collectFlattenWordsInOrder input
+            | BS8.null input = []
             | otherwise =
-                let fromLine = max 1 (lineNo - 6)
-                    lookback =
-                        [ Map.findWithDefault "" ln lineMap
-                        | ln <- [fromLine .. lineNo]
-                        ]
-                in BS8.intercalate " " lookback
+                let trimmed = BS8.dropWhile (not . isIdentifierChar) input
+                in if BS8.null trimmed
+                    then []
+                    else
+                        let (word, rest) = BS8.span isIdentifierChar trimmed
+                        in word : collectFlattenWordsInOrder rest
+
+
+        flattenBindingRefFromPattern
+            :: Map Int ByteString
+            -> Int
+            -> ByteString
+            -> Maybe FlattenBindingRef
+        flattenBindingRefFromPattern _lineMap lineNo patternSource = do
+            (currencyOcc, tokenOcc, amountOcc) <- parseFlattenPatternOccs patternSource
+            let mkRef occ = BindingRef
+                    { bindingRefOcc = occ
+                    , bindingRefLine = lineNo
+                    }
+            pure FlattenBindingRef
+                { flattenAmountRef = mkRef amountOcc
+                , flattenCurrencyRef = mkRef <$> currencyOcc
+                , flattenTokenRef = mkRef <$> tokenOcc
+                }
+
+        branchPatternCandidate :: Map Int ByteString -> Int -> ByteString -> ByteString
+        branchPatternCandidate lineMap lineNo line
+            | "->" `BS8.isInfixOf` line =
+                BS8.intercalate " " $ go [lineCodePart line] (lineNo - 1)
+            | otherwise =
+                line
+          where
+            go acc currentLine
+                | currentLine < max 1 (lineNo - 6) =
+                    acc
+                | otherwise =
+                    let code = lineCodePart $ Map.findWithDefault "" currentLine lineMap
+                        strippedCode = trimLeft code
+                        acc' = code : acc
+                    in if "->" `BS8.isInfixOf` code || containsWordBS "case" strippedCode
+                        then acc
+                        else if "[" `BS8.isInfixOf` code || "(" `BS8.isInfixOf` code
+                            then acc'
+                            else go acc' (currentLine - 1)
+
+        parseFlattenPatternOccs :: ByteString -> Maybe (Maybe ByteString, Maybe ByteString, ByteString)
+        parseFlattenPatternOccs patternSource = do
+            (currencyPart, tokenPart, amountPart) <- firstThreeTupleParts patternSource
+            amountOcc <- patternBinderOcc amountPart
+            pure (patternBinderOcc currencyPart, patternBinderOcc tokenPart, amountOcc)
+
+        firstThreeTupleParts :: ByteString -> Maybe (ByteString, ByteString, ByteString)
+        firstThreeTupleParts source = do
+            tupleInside <- firstTupleGroup source
+            case splitTopLevelCommas tupleInside of
+                currencyPart : tokenPart : amountPart : _rest ->
+                    Just (currencyPart, tokenPart, amountPart)
+                _ ->
+                    Nothing
+
+        firstTupleGroup :: ByteString -> Maybe ByteString
+        firstTupleGroup source =
+            go (BS8.unpack patternPrefix)
+          where
+            patternPrefix = case BS8.breakSubstring "->" source of
+                (beforeArrow, afterArrow)
+                    | BS8.null afterArrow -> fst $ BS8.break (== '=') source
+                    | otherwise -> beforeArrow
+
+            go [] = Nothing
+            go ('(' : rest) =
+                case takeBalanced 1 [] rest of
+                    Just (inside, remaining)
+                        | hasAtLeastTwoTopLevelCommas inside ->
+                            Just $ BS8.pack $ reverse inside
+                        | otherwise ->
+                            go remaining
+                    Nothing ->
+                        Nothing
+            go (_ : rest) =
+                go rest
+
+            takeBalanced _depth _acc [] = Nothing
+            takeBalanced depth acc (')' : rest)
+                | depth == 1 = Just (acc, rest)
+            takeBalanced depth acc ('(' : rest) =
+                takeBalanced (depth + 1) ('(' : acc) rest
+            takeBalanced depth acc (')' : rest) =
+                takeBalanced (depth - 1) (')' : acc) rest
+            takeBalanced depth acc (c : rest) =
+                takeBalanced depth (c : acc) rest
+
+        hasAtLeastTwoTopLevelCommas :: String -> Bool
+        hasAtLeastTwoTopLevelCommas = go 0 0 0 0
+          where
+            go _parenDepth _bracketDepth _braceDepth commaCount [] =
+                commaCount >= 2
+            go parenDepth bracketDepth braceDepth commaCount (c : rest) =
+                case c of
+                    '(' -> go (parenDepth + 1) bracketDepth braceDepth commaCount rest
+                    ')' -> go (parenDepth - 1) bracketDepth braceDepth commaCount rest
+                    '[' -> go parenDepth (bracketDepth + 1) braceDepth commaCount rest
+                    ']' -> go parenDepth (bracketDepth - 1) braceDepth commaCount rest
+                    '{' -> go parenDepth bracketDepth (braceDepth + 1) commaCount rest
+                    '}' -> go parenDepth bracketDepth (braceDepth - 1) commaCount rest
+                    ',' | parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 ->
+                        go parenDepth bracketDepth braceDepth (commaCount + 1) rest
+                    _ -> go parenDepth bracketDepth braceDepth commaCount rest
+
+        splitTopLevelCommas :: ByteString -> [ByteString]
+        splitTopLevelCommas source =
+            map (trimLeft . trimRight . BS8.pack) $ reverse $ go 0 0 0 [] [] (BS8.unpack source)
+          where
+            go _parenDepth _bracketDepth _braceDepth acc parts [] =
+                reverse acc : parts
+            go parenDepth bracketDepth braceDepth acc parts (c : rest) =
+                case c of
+                    '(' -> go (parenDepth + 1) bracketDepth braceDepth (c : acc) parts rest
+                    ')' -> go (parenDepth - 1) bracketDepth braceDepth (c : acc) parts rest
+                    '[' -> go parenDepth (bracketDepth + 1) braceDepth (c : acc) parts rest
+                    ']' -> go parenDepth (bracketDepth - 1) braceDepth (c : acc) parts rest
+                    '{' -> go parenDepth bracketDepth (braceDepth + 1) (c : acc) parts rest
+                    '}' -> go parenDepth bracketDepth (braceDepth - 1) (c : acc) parts rest
+                    ',' | parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 ->
+                        go parenDepth bracketDepth braceDepth [] (reverse acc : parts) rest
+                    _ -> go parenDepth bracketDepth braceDepth (c : acc) parts rest
+
+        patternBinderOcc :: ByteString -> Maybe ByteString
+        patternBinderOcc patternPart =
+            listToMaybe $ reverse
+                [ word
+                | word <- collectFlattenWordsInOrder patternPart
+                , word /= "_"
+                , case BS8.uncons word of
+                    Just (firstChar, _) -> isLower firstChar || firstChar == '_'
+                    Nothing -> False
+                ]
 
         collectMintFlattenCaseStartLines :: HieAST TypeIndex -> Set Name -> Set Int
         collectMintFlattenCaseStartLines = go Set.empty
@@ -4999,6 +5542,13 @@ analyseMissingBurningLogic insId hie = go
             isCaseStart strippedCode =
                 containsWordBS "case" strippedCode
 
+            isContinuedBranchArrow :: ByteString -> Bool
+            isContinuedBranchArrow strippedCode =
+                case BS8.uncons strippedCode of
+                    Just (firstChar, _) -> firstChar `elem` ("),]" :: String)
+                    Nothing -> False
+
+
             addBranchLine
                 :: Int
                 -> ByteString
@@ -5031,32 +5581,11 @@ analyseMissingBurningLogic insId hie = go
                             Just topBranchIndent
                                 | indent == topBranchIndent ->
                                     goMintCase acc caseIndent branchIndent (addBranchLine lineNo code branchLines) rest
+                                | isContinuedBranchArrow strippedCode ->
+                                    goMintCase acc' caseIndent branchIndent (addBranchLine lineNo code []) rest
                                 | otherwise ->
                                     goMintCase acc caseIndent branchIndent branchLines rest
                         else goMintCase acc caseIndent branchIndent branchLines rest
-
-    parseFlattenAmountOcc :: ByteString -> Maybe ByteString
-    parseFlattenAmountOcc line = do
-        guard ("->" `BS8.isInfixOf` line)
-        inside <- betweenSquareBrackets line
-        let parts = map trimRight $ BS8.split ',' inside
-        thirdRaw <- case parts of
-            _one:_two:three:_rest -> Just three
-            _ -> Nothing
-        let
-            amountOcc = BS8.filter isIdentifierChar thirdRaw
-        guard (not $ BS8.null amountOcc)
-        guard (amountOcc /= "_")
-        pure amountOcc
-
-    betweenSquareBrackets :: ByteString -> Maybe ByteString
-    betweenSquareBrackets line = do
-        let (_beforeOpen, openAndRest) = BS8.break (== '[') line
-        guard (not $ BS8.null openAndRest)
-        let afterOpen = BS8.drop 1 openAndRest
-            (inside, closeAndRest) = BS8.break (== ']') afterOpen
-        guard (not $ BS8.null closeAndRest)
-        pure inside
 
     srcNumberedLinesInSpan :: RealSrcSpan -> [(Int, ByteString)]
     srcNumberedLinesInSpan span' =
@@ -5102,9 +5631,7 @@ analyseMissingBurningLogic insId hie = go
                 ]
 
         resolveAliasForName :: Name -> ByteString -> Maybe ByteString
-        resolveAliasForName name _
-            | name `Set.member` shadowedNames = Nothing
-            | otherwise = Just (resolveAliasSource Set.empty name)
+        resolveAliasForName name _ = Just (resolveAliasSource Set.empty name)
 
         resolveAliasSource :: Set Name -> Name -> ByteString
         resolveAliasSource seen name
@@ -5137,9 +5664,7 @@ analyseMissingBurningLogic insId hie = go
                     , lineNo >= startLine
                     ]
             rhsRaw <- bindingRhsSource lhsOcc candidateLines
-            let normalized = normalizeAliasSource rhsRaw
-            guard (isSimpleAliasExpression normalized)
-            pure normalized
+            simplifyAliasSource rhsRaw
 
         bindingRhsSource :: ByteString -> [ByteString] -> Maybe ByteString
         bindingRhsSource lhsOcc = go
@@ -5149,21 +5674,47 @@ analyseMissingBurningLogic insId hie = go
                 let code = lineCodePart line
                 in case parseBindingLhs code of
                     Just occ | occ == lhsOcc -> do
-                        let (_lhsRaw, eqAndRhs) = BS8.break (== '=') code
-                        guard (not $ BS8.null eqAndRhs)
+                        (_lhsRaw, rhsStart) <- splitBindingEq code
                         let bindIndent = lineIndent code
-                            rhsStart = trimLeft $ BS8.drop 1 eqAndRhs
                             continuationLines = takeWhile (isBindingContinuation bindIndent) rest
                             rhsLines = rhsStart : map (trimLeft . lineCodePart) continuationLines
-                            rhsCombined = BS8.intercalate " " rhsLines
-                        pure rhsCombined
+                        pure (BS8.intercalate " " rhsLines)
                     _ -> go rest
-
         isBindingContinuation :: Int -> ByteString -> Bool
         isBindingContinuation bindIndent line =
             let code = lineCodePart line
                 stripped = trimLeft code
             in BS8.null stripped || lineIndent code > bindIndent
+
+
+        simplifyAliasSource :: ByteString -> Maybe ByteString
+        simplifyAliasSource rhsRaw =
+            let rawTrimmed = stripOuterParens (trimLeft $ trimRight $ stripTypeAnnotations rhsRaw)
+                normalized = normalizeAliasSource rawTrimmed
+            in guard (not $ BS8.any isSpace rawTrimmed)
+                *> guard (isSimpleAliasExpression normalized)
+                *> pure normalized
+
+        stripOuterParens :: ByteString -> ByteString
+        stripOuterParens src =
+            let trimmed = trimLeft $ trimRight src
+            in if parensWrapWhole trimmed
+                then stripOuterParens (BS8.take (BS8.length trimmed - 2) (BS8.drop 1 trimmed))
+                else trimmed
+
+        parensWrapWhole :: ByteString -> Bool
+        parensWrapWhole src = case (BS8.uncons src, BS8.unsnoc src) of
+            (Just ('(', _), Just (inner, ')')) -> wrapsWhole 0 False (BS8.unpack inner)
+            _ -> False
+          where
+            wrapsWhole _depth seenClose [] = not seenClose
+            wrapsWhole depth seenClose (c:cs)
+                | c == '(' = wrapsWhole (depth + 1) seenClose cs
+                | c == ')' =
+                    if depth == 0
+                        then False
+                        else wrapsWhole (depth - 1) (seenClose || depth == 1 && not (null cs)) cs
+                | otherwise = wrapsWhole depth seenClose cs
 
         normalizeAliasSource :: ByteString -> ByteString
         normalizeAliasSource =
@@ -5194,79 +5745,213 @@ analyseMissingBurningLogic insId hie = go
             not (BS8.null src)
                 && BS8.all isIdentifierChar src
 
+    collectIntegerAliasValues
+        :: [(Name, RealSrcSpan)]
+        -> RealSrcSpan
+        -> Map Name Integer
+    collectIntegerAliasValues bindingNameSpans span' =
+        Map.mapMaybeWithKey resolveValue rawAliasSources
+      where
+        namesByOcc :: Map ByteString [Name]
+        namesByOcc =
+            Map.fromListWith (<>)
+                [ (BS8.pack (occNameString $ nameOccName name), [name])
+                | (name, _bindSpan) <- bindingNameSpans
+                ]
 
-    collectHelperParamOperandKeys
+        shadowedNames :: Set Name
+        shadowedNames =
+            Set.fromList
+                [ name
+                | names <- Map.elems namesByOcc
+                , length names > 1
+                , name <- names
+                ]
+
+        sourceLinesInFunction :: [(Int, ByteString)]
+        sourceLinesInFunction = srcNumberedLinesInSpan span'
+
+        rawAliasSources :: Map Name ByteString
+        rawAliasSources =
+            Map.fromList
+                [ (name, rhsRaw)
+                | (name, bindSpan) <- bindingNameSpans
+                , Just rhsRaw <- [bindingIntegerRhsSource name bindSpan]
+                ]
+
+        resolveValue :: Name -> ByteString -> Maybe Integer
+        resolveValue name _ = resolveAliasValue Set.empty name
+
+        resolveAliasValue :: Set Name -> Name -> Maybe Integer
+        resolveAliasValue seen name
+            | name `Set.member` seen =
+                Map.lookup name rawAliasSources >>= parseIntegerLiteral
+            | otherwise =
+                case Map.lookup name rawAliasSources of
+                    Just src ->
+                        parseIntegerLiteral src
+                            <|> (resolveAliasTarget src >>= resolveAliasValue (Set.insert name seen))
+                    Nothing ->
+                        Nothing
+
+        resolveAliasTarget :: ByteString -> Maybe Name
+        resolveAliasTarget src = do
+            let targetOcc = stripTypeAnnotations $ stripOuterParens (trimLeft $ trimRight src)
+            guard (isSimpleIdentifier targetOcc)
+            names <- Map.lookup targetOcc namesByOcc
+            case filter (`Set.notMember` shadowedNames) names of
+                [target] -> Just target
+                _ -> Nothing
+
+        bindingIntegerRhsSource :: Name -> RealSrcSpan -> Maybe ByteString
+        bindingIntegerRhsSource name bindSpan = do
+            let lhsOcc = BS8.pack (occNameString $ nameOccName name)
+                startLine = srcSpanStartLine bindSpan
+                candidateLines =
+                    [ line
+                    | (lineNo, line) <- sourceLinesInFunction
+                    , lineNo >= startLine
+                    ]
+            bindingRhsSource lhsOcc candidateLines
+
+        bindingRhsSource :: ByteString -> [ByteString] -> Maybe ByteString
+        bindingRhsSource lhsOcc = go
+          where
+            go [] = Nothing
+            go (line:rest) =
+                let code = lineCodePart line
+                in case parseBindingLhs code of
+                    Just occ | occ == lhsOcc -> do
+                        (_lhsRaw, rhsStart) <- splitBindingEq code
+                        let bindIndent = lineIndent code
+                            continuationLines = takeWhile (isBindingContinuation bindIndent) rest
+                            rhsLines = rhsStart : map (trimLeft . lineCodePart) continuationLines
+                        pure (BS8.intercalate " " rhsLines)
+                    _ -> go rest
+
+        isBindingContinuation :: Int -> ByteString -> Bool
+        isBindingContinuation bindIndent line =
+            let code = lineCodePart line
+                stripped = trimLeft code
+            in BS8.null stripped || lineIndent code > bindIndent
+
+        stripOuterParens :: ByteString -> ByteString
+        stripOuterParens src =
+            let trimmed = trimLeft $ trimRight src
+            in if parensWrapWhole trimmed
+                then stripOuterParens (BS8.take (BS8.length trimmed - 2) (BS8.drop 1 trimmed))
+                else trimmed
+
+        parensWrapWhole :: ByteString -> Bool
+        parensWrapWhole src = case (BS8.uncons src, BS8.unsnoc src) of
+            (Just ('(', _), Just (inner, ')')) -> wrapsWhole 0 False (BS8.unpack inner)
+            _ -> False
+          where
+            wrapsWhole _depth seenClose [] = not seenClose
+            wrapsWhole depth seenClose (c:cs)
+                | c == '(' = wrapsWhole (depth + 1) seenClose cs
+                | c == ')' =
+                    if depth == 0
+                        then False
+                        else wrapsWhole (depth - 1) (seenClose || depth == 1 && not (null cs)) cs
+                | otherwise = wrapsWhole depth seenClose cs
+
+        stripTypeAnnotations :: ByteString -> ByteString
+        stripTypeAnnotations bs = case BS8.breakSubstring "::" bs of
+            (before, afterType)
+                | BS8.null afterType -> before
+                | otherwise ->
+                    let rest = BS8.dropWhile isTypeAnnotationChar (BS8.drop 2 afterType)
+                    in before <> stripTypeAnnotations rest
+
+        isTypeAnnotationChar :: Char -> Bool
+        isTypeAnnotationChar c =
+            isAlphaNum c || c `elem` ("_'.:[]()," :: String)
+
+        isSimpleIdentifier :: ByteString -> Bool
+        isSimpleIdentifier src =
+            not (BS8.null src)
+                && BS8.all isIdentifierChar src
+
+
+    collectHelperCallSites
         :: [(Name, RealSrcSpan)]
         -> Set Name
         -> Set Name
-        -> Set Name
+        -> Map Name FlattenBindingInfo
         -> Map Name ByteString
         -> HieAST TypeIndex
-        -> Map Name (Set BurningOperandKey)
-    collectHelperParamOperandKeys bindingNameSpans mintCarrierNames mintedBindingNames flattenAmountNames tokenArgAliasSources funNode =
-        Map.fromListWith Set.union
-            [ (paramName, argKeys)
-            | (bindingName, paramNames) <- bindingParameterNames
-            , Just argKeyLists <- [Map.lookup bindingName helperArgKeys]
-            , (paramNameM, argKeys) <- zip paramNames argKeyLists
-            , Just paramName <- [paramNameM]
-            , not (Set.null argKeys)
-            ]
+        -> Map Name [HelperCallSite]
+    collectHelperCallSites bindingNameSpans mintCarrierNames mintedBindingNames flattenBindings tokenArgAliasSources funNode =
+        Map.fromListWith (<> ) (astCallSites <> sourceCallSites)
       where
         bindingParameterNames :: [(Name, [Maybe Name])]
         bindingParameterNames =
             mapMaybe bindingParameterNamesForBinding bindingNameSpans
 
+        bindingNamesByOcc :: Map ByteString [Name]
+        bindingNamesByOcc =
+            Map.fromListWith (<>)
+                [ (BS8.pack (occNameString $ nameOccName name), [name])
+                | (name, _span) <- bindingNameSpans
+                ]
+
+        astCallSites :: [(Name, [HelperCallSite])]
+        astCallSites =
+            [ (bindingName, [callSite])
+            | (bindingName, paramNames) <- bindingParameterNames
+            , (calledBindingName, args) <- helperCalls
+            , bindingName == calledBindingName
+            , let callSite = helperCallSiteForArgs paramNames args
+            , not (helperCallSiteIsEmpty callSite)
+            ]
+
+        sourceCallSites :: [(Name, [HelperCallSite])]
+        sourceCallSites =
+            [ (bindingName, [callSite])
+            | (bindingName, paramNames) <- bindingParameterNames
+            , callSite <- helperSourceDollarCallSites bindingName paramNames
+            , not (helperCallSiteIsEmpty callSite)
+            ]
+
+        bindingParamCounts :: Map Name Int
+        bindingParamCounts =
+            Map.fromList
+                [ (bindingName, length paramNames)
+                | (bindingName, paramNames) <- bindingParameterNames
+                ]
+
+        helperBindingNames :: Set Name
+        helperBindingNames = Set.fromList $ map fst bindingParameterNames
+
         sourceLinesInFunction :: [(Int, ByteString)]
         sourceLinesInFunction = srcNumberedLinesInSpan $ nodeSpan funNode
 
-        helperArgKeys :: Map Name [Set BurningOperandKey]
-        helperArgKeys =
-            Map.unionWith mergeArgKeyLists helperCallArgKeys helperSourceArgKeys
+        helperCalls :: [(Name, [HieAST TypeIndex])]
+        helperCalls = collectHelperCalls helperBindingNames funNode
 
-        helperCallArgKeys :: Map Name [Set BurningOperandKey]
-        helperCallArgKeys =
-            collectHelperCallArgKeys (Set.fromList $ map fst bindingParameterNames) funNode
-
-        helperSourceArgKeys :: Map Name [Set BurningOperandKey]
-        helperSourceArgKeys =
-            Map.fromListWith mergeArgKeyLists
-                [ (bindingName, firstParamArgKeyList paramNames argSource)
-                | (bindingName, paramNames) <- bindingParameterNames
-                , argSource <- helperDollarArgSources bindingName
-                ]
-
-        firstParamArgKeyList :: [Maybe Name] -> ByteString -> [Set BurningOperandKey]
-        firstParamArgKeyList paramNames argSource = case paramNames of
-            [] -> []
-            _ : remainingParams ->
-                Set.singleton (BurningOperandDirectValueOf $ fallbackValueOfTokenKey argSource)
-                    : replicate (length remainingParams) Set.empty
-
-        helperDollarArgSources :: Name -> [ByteString]
-        helperDollarArgSources bindingName =
-            mapMaybe sourceFromLine sourceLinesInFunction
+        helperSourceDollarCallSites :: Name -> [Maybe Name] -> [HelperCallSite]
+        helperSourceDollarCallSites bindingName paramNames =
+            mapMaybe callSiteFromLine sourceLinesInFunction
           where
+            expectedParams = Map.findWithDefault 0 bindingName bindingParamCounts
             helperOcc = BS8.pack (occNameString $ nameOccName bindingName)
-            mintCarrierOccs =
-                Set.map (BS8.pack . occNameString . nameOccName) mintCarrierNames
 
-            sourceFromLine (_lineNo, line) = do
+            callSiteFromLine (_lineNo, line) = do
                 let code = lineCodePart line
                 helperAndRest <- findWordOccurrenceSuffix helperOcc code
                 let afterHelper = BS8.drop (BS8.length helperOcc) helperAndRest
-                    afterHelperTrim = trimLeft afterHelper
-                guard (not $ BS8.null afterHelperTrim)
-                guard ("$" `BS8.isPrefixOf` afterHelperTrim)
-                let argSource = trimLeft $ BS8.drop 1 afterHelperTrim
-                guard (not $ BS8.null argSource)
-                guard $ containsWordBS "valueOf" argSource
-                guard $
-                    containsWordBS "txInfoMint" argSource
-                        || any (`containsWordBS` argSource) (Set.toList mintCarrierOccs)
-                pure argSource
+                (lhsWords, rhsWords) <- dollarArgumentWords afterHelper
+                let argWords = take expectedParams (lhsWords <> rhsWords)
+                guard (length argWords >= expectedParams)
+                pure (helperCallSiteForArgWords paramNames argWords)
 
-            findWordOccurrenceSuffix :: ByteString -> ByteString -> Maybe ByteString
+            dollarArgumentWords rest = do
+                let (lhsSource, dollarAndRhs) = BS8.break (== '$') rest
+                guard (not $ BS8.null dollarAndRhs)
+                let rhsSource = BS8.drop 1 dollarAndRhs
+                pure (collectWordsInOrder lhsSource, collectWordsInOrder rhsSource)
+
             findWordOccurrenceSuffix needle
                 | BS8.null needle = const Nothing
                 | otherwise = go
@@ -5281,13 +5966,160 @@ analyseMissingBurningLogic insId hie = go
                             then Just afterNeedle
                             else go (BS8.tail afterNeedle)
 
-        fallbackValueOfTokenKey :: ByteString -> ValueOfTokenKey
-        fallbackValueOfTokenKey argSource =
-            let normalized =
-                    stripTypeAnnotations
-                        (BS8.filter (\c -> not (isSpace c) && c /= '(' && c /= ')') argSource)
-                sourceKey = ValueOfArgSource normalized
-            in ValueOfTokenKey (Set.singleton sourceKey) (Set.singleton sourceKey)
+        helperCallSiteForArgWords :: [Maybe Name] -> [ByteString] -> HelperCallSite
+        helperCallSiteForArgWords paramNames argWords =
+            HelperCallSite
+                { helperSiteOperandKeys = Map.fromList
+                    [ (paramName, argKeys)
+                    | (paramNameM, argWord) <- zip paramNames argWords
+                    , Just paramName <- [paramNameM]
+                    , let argKeys = helperCallArgKeysForWord argWord
+                    , not (Set.null argKeys)
+                    ]
+                , helperSiteValueArgKeys = Map.fromList
+                    [ (paramName, argKeys)
+                    | (paramNameM, argWord) <- zip paramNames argWords
+                    , Just paramName <- [paramNameM]
+                    , let argKeys = helperCallValueArgKeysForWord argWord
+                    , not (Set.null argKeys)
+                    ]
+                , helperSiteTruths = Set.fromList
+                    [ (paramName, truthValue)
+                    | (paramNameM, argWord) <- zip paramNames argWords
+                    , Just paramName <- [paramNameM]
+                    , Just truthValue <- [helperCallTruthValueFromWord argWord]
+                    ]
+                }
+
+        helperCallArgKeysForWord :: ByteString -> Set BurningOperandKey
+        helperCallArgKeysForWord argWord = case resolveLocalName argWord of
+            Just name | name `Set.member` mintCarrierNames ->
+                Set.singleton (BurningOperandValueBinding name Nothing)
+            Just name | name `Set.member` mintedBindingNames ->
+                Set.singleton (BurningOperandValueBinding name Nothing)
+            _ -> Set.empty
+
+        helperCallValueArgKeysForWord :: ByteString -> Set ValueOfArgKey
+        helperCallValueArgKeysForWord argWord = case resolveLocalName argWord of
+            Just name ->
+                maybe (Set.singleton $ ValueOfArgName name) (Set.singleton . ValueOfArgSource) (Map.lookup name tokenArgAliasSources)
+            Nothing ->
+                Set.singleton $ ValueOfArgSource (normalizeHelperArgSource argWord)
+
+        helperCallTruthValueFromWord :: ByteString -> Maybe Bool
+        helperCallTruthValueFromWord argWord = case normalizeHelperArgSource argWord of
+            "True" -> Just True
+            "False" -> Just False
+            _ -> Nothing
+
+        resolveLocalName occ = case Map.findWithDefault [] occ bindingNamesByOcc of
+            [name] -> Just name
+            _ -> Nothing
+
+        helperCallSiteForArgs :: [Maybe Name] -> [HieAST TypeIndex] -> HelperCallSite
+        helperCallSiteForArgs paramNames args =
+            HelperCallSite
+                { helperSiteOperandKeys = Map.fromList
+                    [ (paramName, argKeys)
+                    | (paramNameM, arg) <- zip paramNames args
+                    , Just paramName <- [paramNameM]
+                    , let argKeys = helperCallArgKeysForOperand arg
+                    , not (Set.null argKeys)
+                    ]
+                , helperSiteValueArgKeys = Map.fromList
+                    [ (paramName, argKeys)
+                    | (paramNameM, arg) <- zip paramNames args
+                    , Just paramName <- [paramNameM]
+                    , let argKeys = helperCallValueArgKeys arg
+                    , not (Set.null argKeys)
+                    ]
+                , helperSiteTruths = Set.fromList
+                    [ (paramName, truthValue)
+                    | (paramNameM, arg) <- zip paramNames args
+                    , Just paramName <- [paramNameM]
+                    , Just truthValue <- [helperCallTruthValue arg]
+                    ]
+                }
+
+        helperCallSiteIsEmpty :: HelperCallSite -> Bool
+        helperCallSiteIsEmpty helperCallSite =
+            Map.null (helperSiteOperandKeys helperCallSite)
+                && Map.null (helperSiteValueArgKeys helperCallSite)
+                && Set.null (helperSiteTruths helperCallSite)
+
+        helperCallArgKeysForOperand :: HieAST TypeIndex -> Set BurningOperandKey
+        helperCallArgKeysForOperand arg =
+            if helperArgSupportsOperandPropagation arg
+                then
+                    let baseKeys =
+                            operandBindingKeys mintCarrierNames mintedBindingNames flattenBindings Nothing tokenArgAliasSources [] arg
+                        mintCarrierKeys = case simpleHelperArgName arg of
+                            Just name | name `Set.member` mintCarrierNames ->
+                                Set.singleton (BurningOperandValueBinding name Nothing)
+                            _ -> Set.empty
+                    in baseKeys <> mintCarrierKeys
+                else Set.empty
+
+        helperArgSupportsOperandPropagation :: HieAST TypeIndex -> Bool
+        helperArgSupportsOperandPropagation arg
+            | Just inner <- parenthesizedChild arg =
+                helperArgSupportsOperandPropagation inner
+            | otherwise =
+                isJust (simpleHelperArgName arg)
+                    || not (Set.null $ operandDirectValueOfMintKeys mintCarrierNames Nothing tokenArgAliasSources arg)
+                    || not (Set.null $ operandFallbackValueOfMintKeys mintCarrierNames arg)
+
+        helperCallValueArgKeys :: HieAST TypeIndex -> Set ValueOfArgKey
+        helperCallValueArgKeys arg = case simpleHelperArgName arg of
+            Just name ->
+                let source = helperArgSource arg
+                    aliasKeys =
+                        maybe Set.empty (Set.singleton . ValueOfArgSource) (Map.lookup name tokenArgAliasSources)
+                    sourceKey = Set.singleton $ ValueOfArgSource source
+                    nameKeys = Set.singleton $ ValueOfArgName name
+                in if not (Set.null aliasKeys)
+                    then aliasKeys
+                    else if isQualifiedArgSource source
+                        then sourceKey
+                        else nameKeys
+            Nothing -> Set.singleton $ ValueOfArgSource (helperArgSource arg)
+
+        helperCallTruthValue :: HieAST TypeIndex -> Maybe Bool
+        helperCallTruthValue arg = case helperArgSource arg of
+            "True" -> Just True
+            "False" -> Just False
+            _ -> Nothing
+
+        simpleHelperArgName :: HieAST TypeIndex -> Maybe Name
+        simpleHelperArgName arg
+            | Just inner <- parenthesizedChild arg =
+                simpleHelperArgName inner
+            | otherwise = case Set.toList (operandUsedNames arg) of
+                [name] -> Just name
+                _ -> case appSpine arg of
+                    (headNode, [inner])
+                        | constructorLikeHead headNode ->
+                            simpleHelperArgName inner
+                    _ -> Nothing
+          where
+            constructorLikeHead headNode =
+                any isConstructorLikeOcc (nodeOccNames headNode)
+
+            isConstructorLikeOcc occ = case BS8.uncons occ of
+                Just (firstChar, _rest) ->
+                    not (isLower firstChar) || "." `BS8.isInfixOf` occ
+                Nothing -> False
+
+        helperArgSource :: HieAST TypeIndex -> ByteString
+        helperArgSource argNode =
+            let fallback = BS8.intercalate "." (nodeOccNames argNode)
+            in case slice (nodeSpan argNode) (hie_hs_src hie) of
+                Just src -> normalizeHelperArgSource src
+                Nothing -> fallback
+
+        normalizeHelperArgSource =
+            stripTypeAnnotations
+                . BS8.filter (\c -> not (isSpace c) && c /= '(' && c /= ')')
 
         stripTypeAnnotations bs = case BS8.breakSubstring "::" bs of
             (before, afterType)
@@ -5298,6 +6130,114 @@ analyseMissingBurningLogic insId hie = go
 
         isTypeAnnotationChar c =
             isAlphaNum c || c `elem` ("_'.:[]()," :: String)
+
+        isQualifiedArgSource src = "." `BS8.isInfixOf` src
+
+        collectHelperCalls
+            :: Set Name
+            -> HieAST TypeIndex
+            -> [(Name, [HieAST TypeIndex])]
+        collectHelperCalls helperBindingNames = go []
+          where
+            go acc n@Node{nodeChildren = children} =
+                let acc' = maybe acc (: acc) (helperCall n)
+                in foldl' go acc' children
+
+            helperCall :: HieAST TypeIndex -> Maybe (Name, [HieAST TypeIndex])
+            helperCall n =
+                directHelperCall n <|> dollarHelperCall n <|> infixHelperCall n
+
+            directHelperCall n = do
+                guard $ nodeHasAnnotation hsAppAnnotation n
+                let (headNode, args) = appSpine n
+                helperDirectCall headNode args <|> helperDollarCall headNode args
+              where
+                helperDirectCall headNode args = do
+                    bindingName <- helperHeadBindingName headNode
+                    expectedParams <- Map.lookup bindingName bindingParamCounts
+                    guard (length args >= expectedParams)
+                    pure (bindingName, take expectedParams args)
+
+                helperDollarCall headNode args = do
+                    guard (isDollarLikeNode headNode headNode)
+                    fnNode <- args !!? 0
+                    argNode <- args !!? 1
+                    (bindingName, lhsArgs) <- helperAppliedCall fnNode
+                    expectedParams <- Map.lookup bindingName bindingParamCounts
+                    let combinedArgs = lhsArgs <> [argNode]
+                    guard (length combinedArgs >= expectedParams)
+                    pure (bindingName, take expectedParams combinedArgs)
+
+            dollarHelperCall n = do
+                guard $ nodeHasAnnotation opAppAnnotation n
+                lhs:opNode:rhsNode:_ <- Just $ nodeChildren n
+                guard (isDollarLikeNode n opNode)
+                (bindingName, lhsArgs) <- helperAppliedCall lhs
+                expectedParams <- Map.lookup bindingName bindingParamCounts
+                let combinedArgs = lhsArgs <> [rhsNode]
+                guard (length combinedArgs >= expectedParams)
+                pure (bindingName, take expectedParams combinedArgs)
+
+            isDollarLikeNode node' operatorNode =
+                "$" `elem` nodeOccNames operatorNode
+                    || subtreeHasOccName "$" operatorNode
+                    || maybe False ("$" `BS8.isInfixOf`) (slice (nodeSpan node') (hie_hs_src hie))
+
+            infixHelperCall n = do
+                guard $ nodeHasAnnotation opAppAnnotation n
+                lhs:opNode:rhsNode:_ <- Just $ nodeChildren n
+                guard (not ("$" `elem` nodeOccNames opNode))
+                bindingName <- helperHeadBindingName opNode
+                expectedParams <- Map.lookup bindingName bindingParamCounts
+                let combinedArgs = [lhs, rhsNode]
+                guard (length combinedArgs >= expectedParams)
+                pure (bindingName, take expectedParams combinedArgs)
+
+            helperAppliedCall currentNode
+                | Just inner <- parenthesizedChild currentNode =
+                    helperAppliedCall inner
+                | otherwise =
+                    bareHelperCall currentNode <|> appliedHelperCall currentNode
+              where
+                bareHelperCall helperNode = do
+                    bindingName <- helperHeadBindingName helperNode
+                    pure (bindingName, [])
+
+                appliedHelperCall helperNode = do
+                    guard $ nodeHasAnnotation hsAppAnnotation helperNode
+                    let (headNode, args) = appSpine helperNode
+                    bindingName <- helperHeadBindingName headNode
+                    guard (not $ null args)
+                    pure (bindingName, args)
+
+            helperHeadBindingName headNode =
+                case Set.toList (operandUsedNames headNode `Set.intersection` helperBindingNames) of
+                    [bindingName] -> Just bindingName
+                    _
+                        | helperHeadLooksQualified headNode -> Nothing
+                        | otherwise ->
+                            case Set.toList occCandidates of
+                                [bindingName] -> Just bindingName
+                                _ -> Nothing
+              where
+                occCandidates =
+                    Set.fromList
+                        [ name
+                        | occ <- nodeOccNames headNode
+                        , name <- Map.findWithDefault [] occ helperBindingNamesByOcc
+                        ]
+
+            helperHeadLooksQualified headNode =
+                fromMaybe False $ do
+                    source <- slice (nodeSpan headNode) (hie_hs_src hie)
+                    pure $ "." `BS8.isInfixOf` normalizeHelperArgSource source
+
+            helperBindingNamesByOcc :: Map ByteString [Name]
+            helperBindingNamesByOcc =
+                Map.fromListWith (<>)
+                    [ (BS8.pack (occNameString $ nameOccName name), [name])
+                    | name <- Set.toList helperBindingNames
+                    ]
 
         bindingParameterNamesForBinding :: (Name, RealSrcSpan) -> Maybe (Name, [Maybe Name])
         bindingParameterNamesForBinding (bindingName, bindSpan) = do
@@ -5314,11 +6254,12 @@ analyseMissingBurningLogic insId hie = go
         bindingHeaderWords :: RealSrcSpan -> Maybe [ByteString]
         bindingHeaderWords bindSpan = do
             headerSource <- bindingHeaderSourceForSpan bindSpan
-            let (beforeEq, _afterEq) = BS8.break (== '=') headerSource
-                wordsInOrder =
-                    filter (not . isBindingKeyword) (collectWordsInOrder beforeEq)
-            guard (not $ null wordsInOrder)
-            pure wordsInOrder
+            (beforeEq, _afterEq) <- splitBindingEq headerSource
+            chunks <- nonEmpty (topLevelHeaderChunks beforeEq)
+            bindingChunk:paramChunks <- Just chunks
+            bindingOcc <- lhsBindingOcc bindingChunk
+            let paramOccs = mapMaybe patternBinderOcc paramChunks
+            pure (bindingOcc : paramOccs)
 
         bindingLambdaParamWords :: RealSrcSpan -> Maybe [ByteString]
         bindingLambdaParamWords bindSpan = do
@@ -5337,11 +6278,40 @@ analyseMissingBurningLogic insId hie = go
             bindingHeaderSource candidateLines
           where
             startLine = srcSpanStartLine bindSpan
+            startCol = srcSpanStartCol bindSpan
             candidateLines =
-                [ line
+                [ if lineNo == startLine
+                    then BS8.drop (max 0 (startCol - 1)) line
+                    else line
                 | (lineNo, line) <- sourceLinesInFunction
                 , lineNo >= startLine
                 ]
+
+        topLevelHeaderChunks :: ByteString -> [ByteString]
+        topLevelHeaderChunks = reverse . map trimLeft . go [] [] 0 . BS8.unpack
+          where
+            go acc current _depth [] =
+                let chunk = BS8.pack (reverse current)
+                in if BS8.null (trimLeft chunk) then acc else chunk : acc
+            go acc current depth (c:cs)
+                | isSpace c && depth == 0 =
+                    let chunk = BS8.pack (reverse current)
+                    in if BS8.null (trimLeft chunk)
+                        then go acc [] depth cs
+                        else go (chunk : acc) [] depth cs
+                | c `elem` ['(', '{', '['] = go acc (c : current) (depth + 1) cs
+                | c `elem` [')', '}', ']'] = go acc (c : current) (max 0 (depth - 1)) cs
+                | otherwise = go acc (c : current) depth cs
+
+        patternBinderOcc :: ByteString -> Maybe ByteString
+        patternBinderOcc patternChunk =
+            case reverse [word | word <- collectWordsInOrder patternChunk, isPotentialLambdaBinder word, word /= "_"] of
+                binder:_ -> Just binder
+                [] -> if any (== "_") (collectWordsInOrder patternChunk) then Just "_" else Nothing
+
+        nonEmpty :: [a] -> Maybe [a]
+        nonEmpty [] = Nothing
+        nonEmpty xs = Just xs
 
         lambdaParameterChunks :: ByteString -> Maybe [ByteString]
         lambdaParameterChunks rhsSource = do
@@ -5378,6 +6348,7 @@ analyseMissingBurningLogic insId hie = go
         startsWithWord word src =
             word `BS8.isPrefixOf` src
                 && maybe True (not . isIdentifierChar) (BS8.indexMaybe src $ BS8.length word)
+
         bindingHeaderSource :: [ByteString] -> Maybe ByteString
         bindingHeaderSource [] = Nothing
         bindingHeaderSource (line:rest) =
@@ -5389,14 +6360,14 @@ analyseMissingBurningLogic insId hie = go
                     let bindIndent = lineIndent code
                         headerLines = code : headerContinuation bindIndent rest
                         headerCombined = BS8.intercalate " " headerLines
-                    in guard ("=" `BS8.isInfixOf` headerCombined) *> pure headerCombined
+                    in guard (isJust $ splitBindingEq headerCombined) *> pure headerCombined
 
         headerContinuation :: Int -> [ByteString] -> [ByteString]
         headerContinuation _ [] = []
         headerContinuation bindIndent (line:rest) =
             let code = lineCodePart line
                 stripped = trimLeft code
-                hasEq = "=" `BS8.isInfixOf` code
+                hasEq = isJust (splitBindingEq code)
                 isContinuation = BS8.null stripped || lineIndent code > bindIndent
             in if hasEq
                 then [code]
@@ -5422,101 +6393,6 @@ analyseMissingBurningLogic insId hie = go
 
             occMatches name =
                 BS8.pack (occNameString $ nameOccName name) == occ
-
-        collectHelperCallArgKeys
-            :: Set Name
-            -> HieAST TypeIndex
-            -> Map Name [Set BurningOperandKey]
-        collectHelperCallArgKeys helperBindingNames = go Map.empty
-          where
-            go acc n@Node{nodeChildren = children} =
-                let acc' = case helperCall n of
-                        Just (bindingName, args) ->
-                            let argKeyLists =
-                                    map helperCallArgKeysForOperand args
-                            in if all Set.null argKeyLists
-                                then acc
-                                else Map.insertWith mergeArgKeyLists bindingName argKeyLists acc
-                        Nothing -> acc
-                in foldl' go acc' children
-
-            helperBindingNamesByOcc :: Map ByteString [Name]
-            helperBindingNamesByOcc =
-                Map.fromListWith (<>)
-                    [ (BS8.pack (occNameString $ nameOccName name), [name])
-                    | name <- Set.toList helperBindingNames
-                    ]
-
-            helperCallArgKeysForOperand :: HieAST TypeIndex -> Set BurningOperandKey
-            helperCallArgKeysForOperand arg =
-                let baseKeys =
-                        operandBindingKeys mintCarrierNames mintedBindingNames flattenAmountNames tokenArgAliasSources arg
-                    mintCarrierKeys =
-                        Set.fromList
-                            [ BurningOperandValueBinding name Nothing
-                            | name <- Set.toList (operandUsedNames arg `Set.intersection` mintCarrierNames)
-                            ]
-                in baseKeys <> mintCarrierKeys
-
-            helperCall :: HieAST TypeIndex -> Maybe (Name, [HieAST TypeIndex])
-            helperCall n =
-                directHelperCall n <|> dollarHelperCall n <|> infixHelperCall n
-
-            directHelperCall n = do
-                guard $ nodeHasAnnotation hsAppAnnotation n
-                let (headNode, args) = appSpine n
-                helperDirectCall headNode args <|> helperDollarCall headNode args
-              where
-                helperDirectCall headNode args = do
-                    bindingName <- helperHeadBindingName headNode
-                    guard (not $ null args)
-                    pure (bindingName, args)
-
-                helperDollarCall headNode args = do
-                    guard ("$" `elem` nodeOccNames headNode || subtreeHasOccName "$" headNode)
-                    fnNode <- args !!? 0
-                    argNode <- args !!? 1
-                    bindingName <- helperHeadBindingName fnNode
-                    pure (bindingName, [argNode])
-
-            dollarHelperCall n = do
-                guard $ nodeHasAnnotation opAppAnnotation n
-                lhs:opNode:rhsNode:_ <- Just $ nodeChildren n
-                guard ("$" `elem` nodeOccNames opNode)
-                bindingName <- helperHeadBindingName lhs
-                pure (bindingName, [rhsNode])
-
-
-            infixHelperCall n = do
-                guard $ nodeHasAnnotation opAppAnnotation n
-                lhs:opNode:rhsNode:_ <- Just $ nodeChildren n
-                guard (not ("$" `elem` nodeOccNames opNode))
-                bindingName <- helperHeadBindingName opNode
-                pure (bindingName, [lhs, rhsNode])
-            helperHeadBindingName headNode =
-                case Set.toList (operandUsedNames headNode `Set.intersection` helperBindingNames) of
-                    [bindingName] -> Just bindingName
-                    _ ->
-                        case Set.toList occCandidates of
-                            [bindingName] -> Just bindingName
-                            _ -> Nothing
-              where
-                occCandidates =
-                    Set.fromList
-                        [ name
-                        | occ <- nodeOccNames headNode
-                        , name <- Map.findWithDefault [] occ helperBindingNamesByOcc
-                        ]
-
-        mergeArgKeyLists :: [Set BurningOperandKey] -> [Set BurningOperandKey] -> [Set BurningOperandKey]
-        mergeArgKeyLists xs ys =
-            let maxLen = max (length xs) (length ys)
-            in if maxLen == 0
-                then []
-                else
-                    [ fromMaybe Set.empty (xs !!? idx) <> fromMaybe Set.empty (ys !!? idx)
-                    | idx <- [0 .. maxLen - 1]
-                    ]
 
         isBindingKeyword :: ByteString -> Bool
         isBindingKeyword word =
@@ -5590,6 +6466,36 @@ analyseMissingBurningLogic insId hie = go
             , lineWithinSpan lineNo bindSpan
             ]
 
+    resolveFlattenBindingInfo :: [(Name, RealSrcSpan)] -> FlattenBindingRef -> Maybe (Name, FlattenBindingInfo)
+    resolveFlattenBindingInfo bindingNameSpans FlattenBindingRef{flattenAmountRef = amountRef, flattenCurrencyRef = currencyRef, flattenTokenRef = tokenRef} = do
+        amountName <- resolveFlattenPatternRef bindingNameSpans amountRef
+        let currencyName = currencyRef >>= resolveFlattenPatternRef bindingNameSpans
+            tokenName = tokenRef >>= resolveFlattenPatternRef bindingNameSpans
+        pure (amountName, FlattenBindingInfo currencyName tokenName)
+
+    resolveFlattenPatternRef :: [(Name, RealSrcSpan)] -> BindingRef -> Maybe Name
+    resolveFlattenPatternRef bindingNameSpans BindingRef{bindingRefOcc = occ, bindingRefLine = lineNo} =
+        fst <$> (directMatch <|> positionalFallback)
+      where
+        directMatch = pickMostSpecificSpan
+            [ (name, bindSpan)
+            | (name, bindSpan) <- bindingNameSpans
+            , BS8.pack (occNameString $ nameOccName name) == occ
+            , lineWithinSpan lineNo bindSpan
+            ]
+        positionalFallback = pickMostSpecificSpan
+            [ (name, bindSpan)
+            | (name, bindSpan) <- bindingNameSpans
+            , BS8.pack (occNameString $ nameOccName name) == occ
+            , bindingStartsBeforeLine lineNo bindSpan
+            ]
+
+    bindingStartsBeforeLine :: Int -> RealSrcSpan -> Bool
+    bindingStartsBeforeLine lineNo bindSpan =
+        let bindStartLine = srcSpanStartLine bindSpan
+        in bindStartLine <= lineNo
+
+
     pickMostSpecificSpan :: [(Name, RealSrcSpan)] -> Maybe (Name, RealSrcSpan)
     pickMostSpecificSpan = foldl' pick Nothing
       where
@@ -5626,6 +6532,21 @@ analyseMissingBurningLogic insId hie = go
             | targetSpan `spanContainsOrEq` currentSpan && nodeHasAnyNameMeta metas n = True
             | otherwise = any go children
 
+    spanUsedNamesWithin :: RealSrcSpan -> HieAST TypeIndex -> Set Name
+    spanUsedNamesWithin targetSpan = go Set.empty
+      where
+        go acc n@Node{nodeSpan = currentSpan, nodeChildren = children}
+            | not $ spanOverlaps targetSpan currentSpan = acc
+            | targetSpan `spanContainsOrEq` currentSpan =
+                let usedHere =
+                        Set.fromList
+                            [ name
+                            | (Right name, IdentifierDetails{identInfo = identInfo'}) <- Map.assocs $ nodeIdentifiers $ nodeInfo n
+                            , Set.member Use identInfo'
+                            ]
+                in foldl' go (acc <> usedHere) children
+            | otherwise = foldl' go acc children
+
     spanContainsOrEq :: RealSrcSpan -> RealSrcSpan -> Bool
     spanContainsOrEq outer inner =
         let startsAfter =
@@ -5655,21 +6576,17 @@ analyseMissingBurningLogic insId hie = go
 
     parseBindingLhs :: ByteString -> Maybe ByteString
     parseBindingLhs line = do
-        let (lhsRaw, eqAndRhs) = BS8.break (== '=') line
-            lhsTrimmed = trimRight lhsRaw
-            beforeEq = if BS8.null lhsTrimmed then Nothing else Just (BS8.last lhsTrimmed)
-        guard (not $ BS8.null eqAndRhs)
-        guard (not $ BS8.isPrefixOf "==" eqAndRhs)
-        guard $ case beforeEq of
-            Just c -> c `notElem` ['<', '>', '!', '/', ':']
-            Nothing -> False
+        (lhsRaw, _rhsRaw) <- splitBindingEq line
         lhsBindingOcc lhsRaw
 
     lhsBindingOcc :: ByteString -> Maybe ByteString
     lhsBindingOcc lhsRaw =
-        listToMaybe $
-            filter (not . isBindingKeyword) (identifierWordsInOrder lhsRaw)
+        recordFieldAliasOcc lhsRaw <|> normalBindingOcc lhsRaw
       where
+        normalBindingOcc raw =
+            listToMaybe $
+                filter (not . isBindingKeyword) (identifierWordsInOrder raw)
+
         isBindingKeyword :: ByteString -> Bool
         isBindingKeyword word =
             word == "let" || word == "where"
@@ -5686,6 +6603,53 @@ analyseMissingBurningLogic insId hie = go
                         else
                             let (word, rest) = BS8.span isIdentifierChar trimmed
                             in word : collectWords rest
+
+    recordFieldAliasOcc :: ByteString -> Maybe ByteString
+    recordFieldAliasOcc raw = do
+        (_beforeField, fieldAndAfter) <- nonEmptyBreakSubstring "txInfoMint" raw
+        let (_fieldName, afterField) = BS8.splitAt (BS8.length "txInfoMint") fieldAndAfter
+        (_beforeEq, afterEq) <- splitBindingEq afterField
+        listToMaybe (identifierWordsInOrder afterEq)
+      where
+        nonEmptyBreakSubstring needle haystack =
+            let (before, after) = BS8.breakSubstring needle haystack
+            in if BS8.null after then Nothing else Just (before, after)
+
+        identifierWordsInOrder :: ByteString -> [ByteString]
+        identifierWordsInOrder = collectWords
+          where
+            collectWords input
+                | BS8.null input = []
+                | otherwise =
+                    let trimmed = BS8.dropWhile (not . isIdentifierChar) input
+                    in if BS8.null trimmed
+                        then []
+                        else
+                            let (word, rest) = BS8.span isIdentifierChar trimmed
+                            in word : collectWords rest
+
+    splitBindingEq :: ByteString -> Maybe (ByteString, ByteString)
+    splitBindingEq line =
+        fmap splitAtEq (findBindingEq 0 0 (BS8.unpack line))
+      where
+        splitAtEq idx =
+            let (lhsRaw, eqAndRhs) = BS8.splitAt idx line
+            in (lhsRaw, BS8.drop 1 eqAndRhs)
+
+        findBindingEq _idx _depth [] = Nothing
+        findBindingEq idx depth (c:cs)
+            | c `elem` ['(', '{', '['] = findBindingEq (idx + 1) (depth + 1) cs
+            | c `elem` [')', '}', ']'] = findBindingEq (idx + 1) (max 0 (depth - 1)) cs
+            | c == '=' && depth == 0 =
+                let beforeChar = if idx == 0 then Nothing else BS8.indexMaybe line (idx - 1)
+                    afterChar = listToMaybe cs
+                    isComparisonEq =
+                        maybe False (`elem` ['<', '>', '!', '/', ':', '=']) beforeChar
+                            || maybe False (== '=') afterChar
+                in if isComparisonEq
+                    then findBindingEq (idx + 1) depth cs
+                    else Just idx
+            | otherwise = findBindingEq (idx + 1) depth cs
 
     trimRight :: ByteString -> ByteString
     trimRight = BS8.reverse . BS8.dropWhile isSpace . BS8.reverse

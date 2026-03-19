@@ -2129,3 +2129,388 @@ plutStan20NegatedOperandDollarMintBurnShouldPass :: ScriptContext -> Bool
 plutStan20NegatedOperandDollarMintBurnShouldPass ctx =
   let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
   in mintedAmount > 0 || (negate $ mintedAmount) > 0
+
+
+plutStan20BooleanNotWrappedBurnShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): boolean negation around a burn comparison must not satisfy burn-side validation.
+plutStan20BooleanNotWrappedBurnShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in mintedAmount > 0
+      && not (mintedAmount < 0)
+
+plutStan20ContradictoryConjunctionShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): contradictory conjunctions are not alternative mint/burn validation paths.
+plutStan20ContradictoryConjunctionShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in mintedAmount > 0
+      && mintedAmount < 0
+
+plutStan20NegatedBurnPredicateShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): `not validBurn` must not count as a live burn predicate.
+plutStan20NegatedBurnPredicateShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      validMint = mintedAmount > 0
+      validBurn = mintedAmount < 0
+  in validMint && not validBurn
+
+plutStan20OuterGateConditionalBranchChecksShouldPass :: Bool -> Bool -> ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): nested conditional mint/burn branches under one outer gate still cover both signs.
+plutStan20OuterGateConditionalBranchChecksShouldPass gate chooseMint ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in gate
+      && (if chooseMint
+            then mintedAmount > 0
+            else mintedAmount < 0)
+
+plutStan20ConditionUsesBurnPredicateShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): a burn predicate used in the `if` condition still represents an accepted burn path.
+plutStan20ConditionUsesBurnPredicateShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      validMint = mintedAmount > 0
+      validBurn = mintedAmount < 0
+  in if validBurn
+       then True
+       else validMint
+
+plutStan20ConditionalBurnBranchMaskedByOuterGateShouldTrigger :: Bool -> ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): a negative branch hidden behind an outer `&& chooseMint` gate does not provide a reachable burn path.
+plutStan20ConditionalBurnBranchMaskedByOuterGateShouldTrigger chooseMint ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in (if chooseMint
+        then mintedAmount > 0
+        else mintedAmount < 0)
+      && chooseMint
+
+plutStan20HeaderLineFirstGuardShouldPass :: Bool -> ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): a first guard written on the function header line must still participate in mint/burn sign dispatch.
+plutStan20HeaderLineFirstGuardShouldPass chooseMint ctx | chooseMint = mintedAmount > 0
+                                                    | otherwise = mintedAmount < 0
+  where
+    mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+
+plutStan20GuardDispatchWithMultilineBlockCommentShouldPass :: Bool -> ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): multiline block comments between a guard and comparison must preserve guard context.
+plutStan20GuardDispatchWithMultilineBlockCommentShouldPass chooseMint ctx
+  | chooseMint =
+      {- guard branch
+         comment
+      -}
+      mintedAmount > 0
+  | otherwise =
+      {- guard branch
+         comment
+      -}
+      mintedAmount < 0
+  where
+    mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+
+plutStan20FlattenConsPatternMintOnlyShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): non-bracket singleton-list patterns over flattenValue still need burn-side validation.
+plutStan20FlattenConsPatternMintOnlyShouldTrigger ctx =
+  case Value.flattenValue (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) of
+    (_, _, amount) : [] -> amount > 0
+    _ -> False
+
+plutStan20FlattenLetPatternMintOnlyShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): let-pattern flattenValue bindings still need burn-side validation.
+plutStan20FlattenLetPatternMintOnlyShouldTrigger ctx =
+  let [(_, _, !amount)] = Value.flattenValue (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx)
+  in amount > 0
+
+plutStan20FlattenLaterBranchPatternShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): a later multiline flattenValue branch must not inherit an earlier branch's burn-side binder/sign evidence.
+plutStan20FlattenLaterBranchPatternShouldTrigger ctx =
+  case Value.flattenValue (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) of
+    [(_, _, otherAmount), _] ->
+      otherAmount < 0
+    [ ( _, _, amount
+      ) ] ->
+      amount > 0
+    _ -> False
+
+plutStan20FlattenDifferentAssetGuardsShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): flattenValue sign checks guarded by different assets must not pair.
+plutStan20FlattenDifferentAssetGuardsShouldTrigger ctx =
+  let otherToken = Value.TokenName (BI.stringToBuiltinByteStringHex "c0ffee")
+  in case Value.flattenValue (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) of
+      [(currency, token, amount)] ->
+        (currency == Value.adaSymbol && token == Value.adaToken && amount > 0)
+          || (currency == Value.adaSymbol && token == otherToken && amount < 0)
+      _ -> False
+
+plutStan20BacktickMintDollarBurnSameAssetShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): same-asset mint/burn checks should pair across backtick and `$`-applied valueOf syntax.
+plutStan20BacktickMintDollarBurnSameAssetShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+  in (mintedValue `Value.valueOf` Value.adaSymbol) Value.adaToken > 0
+      || (Value.valueOf mintedValue Value.adaSymbol $ Value.adaToken) < 0
+
+plutStan20PartiallyAppliedValueOfTokenAliasShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): partially-applied valueOf helpers should pair canonical and aliased tokens that resolve to the same asset.
+plutStan20PartiallyAppliedValueOfTokenAliasShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      amountFor = Value.valueOf mintedValue Value.adaSymbol
+      canonicalToken = Value.adaToken
+      aliasToken = canonicalToken
+  in amountFor canonicalToken > 0
+      || amountFor aliasToken < 0
+
+plutStan20BacktickAndDirectValueOfSameAssetShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): same-asset mint/burn checks should pair across backtick and direct valueOf syntax.
+plutStan20BacktickAndDirectValueOfSameAssetShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+  in (mintedValue `Value.valueOf` Value.adaSymbol) Value.adaToken > 0
+      || Value.valueOf mintedValue Value.adaSymbol Value.adaToken < 0
+
+plutStan20FlattenNegatedConjunctionAssetGuardShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): negated conjunctions must not fabricate guarded burn evidence for flattenValue amount checks.
+plutStan20FlattenNegatedConjunctionAssetGuardShouldTrigger ctx =
+  case Value.flattenValue (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) of
+    [(currency, token, amount)] ->
+      (currency == Value.adaSymbol && token == Value.adaToken && amount > 0)
+        || not
+          (currency == Value.adaSymbol && token == Value.adaToken && amount > 0)
+    _ -> False
+
+plutStan20WrappedDollarValueOfBurnShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): wrappers around `$`-applied valueOf calls must not count as direct burn paths.
+plutStan20WrappedDollarValueOfBurnShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+  in Value.valueOf mintedValue Value.adaSymbol Value.adaToken > 0
+      || (P.abs $ Value.valueOf mintedValue Value.adaSymbol $ Value.adaToken) < 0
+
+plutStan20NegatedBooleanCompoundShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): negated boolean compounds must not fabricate opposite-sign evidence.
+plutStan20NegatedBooleanCompoundShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in mintedAmount > 0
+      || not (mintedAmount > 0 || mintedAmount <= 0)
+
+plutStan20DoubleNegatedBurnPredicateShouldPass :: Bool -> ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): double-negated burn predicates still represent a burn-side path.
+plutStan20DoubleNegatedBurnPredicateShouldPass chooseMint ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      validMint = mintedAmount > 0
+      validBurn = mintedAmount < 0
+  in if chooseMint
+       then validMint
+       else not (not validBurn)
+
+plutStan20WrappedDirectValueOfNegatedBurnShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): wrapped direct valueOf operands must preserve same-asset mint/burn pairing.
+plutStan20WrappedDirectValueOfNegatedBurnShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+  in Value.valueOf mintedValue Value.adaSymbol Value.adaToken > 0
+      || P.negate (Value.valueOf mintedValue Value.adaSymbol Value.adaToken) > 0
+
+plutStan20HelperDollarSameTokenShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): helper calls split across lhs-applied minted values and `$`-applied same-token arguments must still pair mint and burn checks.
+plutStan20HelperDollarSameTokenShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      validMint minted token = Value.valueOf minted Value.adaSymbol token > 0
+      validBurn minted token = Value.valueOf minted Value.adaSymbol token < 0
+      token = Value.adaToken
+  in ((validMint mintedValue) $ token)
+      || ((validBurn mintedValue) $ token)
+
+plutStan20HelperDollarDifferentTokenShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): helper calls split across lhs-applied minted values and `$`-applied different-token arguments must not pair.
+plutStan20HelperDollarDifferentTokenShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      validMint minted token = Value.valueOf minted Value.adaSymbol token > 0
+      validBurn minted token = Value.valueOf minted Value.adaSymbol token < 0
+      tokenA = Value.adaToken
+      tokenB = Value.TokenName (BI.stringToBuiltinByteStringHex "a11ce")
+  in ((validMint mintedValue) $ tokenA)
+      || ((validBurn mintedValue) $ tokenB)
+
+plutStan20HelperDerivedOperandReuseShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): helper reuse across a real minted operand and a derived expression must not merge call-site evidence.
+plutStan20HelperDerivedOperandReuseShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      helper chooseMint amount =
+        if chooseMint
+          then amount > 0
+          else amount < 0
+  in helper True mintedAmount
+      || helper False (mintedAmount + 1)
+
+plutStan20QualifiedHelperNameCollisionShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): qualified library calls must not resolve to unrelated local helpers with the same occurrence name.
+plutStan20QualifiedHelperNameCollisionShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      find _ amount = amount > 0
+      validMint = mintedAmount > 0
+      validBurn = mintedAmount < 0
+      picked = TxList.find (\amount -> amount > 0) [mintedAmount]
+  in case picked of
+      Just _ -> validMint || validBurn
+      Nothing -> validMint || validBurn
+
+plutStan20HelperCompositeTokenArgShouldTrigger :: Bool -> ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): helper token arguments that are composite expressions must not collapse onto a bare alias key.
+plutStan20HelperCompositeTokenArgShouldTrigger useCanonical ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      validMint minted token = Value.valueOf minted Value.adaSymbol token > 0
+      validBurn minted token = Value.valueOf minted Value.adaSymbol token < 0
+      canonicalToken = Value.adaToken
+      otherToken = Value.TokenName (BI.stringToBuiltinByteStringHex "b0b")
+  in validMint mintedValue canonicalToken
+      || validBurn mintedValue (if useCanonical then canonicalToken else otherToken)
+
+plutStan20HelperSingleParamSameTokenShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): single-parameter helper token checks should pair when both sides receive the same token.
+plutStan20HelperSingleParamSameTokenShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      validMint token = Value.valueOf mintedValue Value.adaSymbol token > 0
+      validBurn token = Value.valueOf mintedValue Value.adaSymbol token < 0
+      token = Value.adaToken
+  in validMint token
+      || validBurn token
+
+plutStan20HelperDollarReversedOrderSameTokenShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): `$` helper calls must preserve lhs-applied token arguments when the minted value arrives on the right.
+plutStan20HelperDollarReversedOrderSameTokenShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      validMint token minted = Value.valueOf minted Value.adaSymbol token > 0
+      validBurn token minted = Value.valueOf minted Value.adaSymbol token < 0
+      token = Value.adaToken
+  in ((validMint token) $ mintedValue)
+      || ((validBurn token) $ mintedValue)
+
+plutStan20SameLineSemicolonHelperShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): a later same-line helper binding must not inherit an earlier semicolon-separated binding header.
+plutStan20SameLineSemicolonHelperShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in let { keep = True; helperB amount =
+               amount > 0
+         } in helperB mintedAmount
+
+plutStan20ConstructorPatternHelperParamShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): helper parameter propagation must survive constructor-pattern binders.
+plutStan20ConstructorPatternHelperParamShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      helperB (Maybe.Just amount) =
+        amount > 0
+  in helperB (Maybe.Just mintedAmount)
+
+plutStan20GuardedLocalHelperBindingGroupShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): guard equations inside a local helper binding group must not suppress an unrelated mint-only check.
+plutStan20GuardedLocalHelperBindingGroupShouldTrigger ctx =
+  let helper chooseMint amount
+        | chooseMint = amount > 0
+        | otherwise = amount < 0
+      mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in mintedAmount > 0
+
+plutStan20TxInfoPatternMintAliasShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): record-pattern aliases of txInfoMint must still be recognized as mint carriers.
+plutStan20TxInfoPatternMintAliasShouldTrigger ctx =
+  let TxInfo{txInfoMint = mintVal} = scriptContextTxInfo ctx
+      mintedValue = Value.Value $ MintValue.mintValueToMap mintVal
+  in Value.valueOf mintedValue Value.adaSymbol Value.adaToken > 0
+
+plutStan20CollapsedAliasNormalizationShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): distinct token aliases must not collapse when spaces and parentheses are stripped from RHS expressions.
+plutStan20CollapsedAliasNormalizationShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      fx = Value.adaToken
+      x = Value.adaToken
+      f _ = Value.TokenName (BI.stringToBuiltinByteStringHex "face")
+      tokenA = fx
+      tokenB = (f x)
+  in Value.valueOf mintedValue Value.adaSymbol tokenA > 0
+      || Value.valueOf mintedValue Value.adaSymbol tokenB < 0
+
+plutStan20OuterAliasWithInnerShadowShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): an unrelated inner shadow must not disable resolution of an outer token alias.
+plutStan20OuterAliasWithInnerShadowShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      canonicalToken = Value.adaToken
+      unrelatedShadow =
+        let canonicalToken = Value.TokenName (BI.stringToBuiltinByteStringHex "beef")
+        in canonicalToken == canonicalToken
+  in unrelatedShadow
+      || Value.valueOf mintedValue Value.adaSymbol canonicalToken > 0
+      || Value.valueOf mintedValue Value.adaSymbol Value.adaToken < 0
+
+plutStan20ShadowedMintCarrierNamesShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): inner shadows of `txInfoMint` and `mintedValue` must not fabricate a burn-side mint carrier.
+plutStan20ShadowedMintCarrierNamesShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      fakeBurn =
+        let txInfoMint = MintValue.emptyMintValue
+            mintedValue = Value.Value $ MintValue.mintValueToMap txInfoMint
+        in Value.valueOf mintedValue Value.adaSymbol Value.adaToken < 0
+  in Value.valueOf mintedValue Value.adaSymbol Value.adaToken > 0
+      || fakeBurn
+
+plutStan20LocalNegateHelperShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): a local helper named `negate` is not numeric negation and must not count as a burn path.
+plutStan20LocalNegateHelperShouldTrigger ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      negate amount = amount
+  in mintedAmount > 0
+      || negate mintedAmount > 0
+
+plutStan20FunctionFormNegativeThresholdShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): function-form negatives like `negate 1` still represent burn-side threshold checks.
+plutStan20FunctionFormNegativeThresholdShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+  in mintedAmount > 0
+      || mintedAmount == negate 1
+
+plutStan20AliasedNegativeThresholdShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): local aliases like `negOne = -1` still represent burn-side threshold checks.
+plutStan20AliasedNegativeThresholdShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      negOne = -1
+  in mintedAmount > 0
+      || mintedAmount == negOne
+
+plutStan20DeadUnusedMintComparisonShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): a mint comparison in an unused binding must not be treated as relevant logic.
+plutStan20DeadUnusedMintComparisonShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      unusedMint = mintedAmount > 0
+  in True
+
+plutStan20DeadWhereBooleanFanoutShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): an unused `where` boolean fan-out must not suppress a real mint-only finding.
+plutStan20DeadWhereBooleanFanoutShouldTrigger ctx =
+  validMint
+  where
+    mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+    validMint = mintedAmount > 0
+    validBurn = mintedAmount < 0
+    combined = validMint || validBurn
+
+plutStan20DeadHelperInvocationShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): helper calls that appear only in unused bindings must not count as live burn validation.
+plutStan20DeadHelperInvocationShouldTrigger ctx =
+  validMint
+  where
+    mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+    validMint = mintedAmount > 0
+    helper amount = amount < 0
+    deadHelper = helper mintedAmount
+
+plutStan20PreludeNegateOutsideLocalShadowShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): an unrelated inner `negate` binding must not disable Prelude negate handling outside its scope.
+plutStan20PreludeNegateOutsideLocalShadowShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      unrelatedShadow =
+        let negate x = x
+        in negate True
+  in mintedAmount > 0
+      || negate mintedAmount > 0
+
+plutStan20NegateThresholdOutsideLocalShadowShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): an unrelated inner `negate` binding must not disable function-form negative threshold recognition outside its scope.
+plutStan20NegateThresholdOutsideLocalShadowShouldPass ctx =
+  let mintedAmount = Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken
+      unrelatedShadow =
+        let negate x = x
+        in negate True
+  in mintedAmount > 0
+      || mintedAmount == negate 1
