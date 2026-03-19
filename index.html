@@ -717,10 +717,10 @@ a { color: inherit; text-decoration: none; }
 <hr class="divider">
 <section class="section-wrap" id="editor">
   <div class="section-tag fade-up">editor integration</div>
-  <h3 class="section-title fade-up" style="transition-delay:0.05s">Inline in VS Code</h3>
+  <h3 class="section-title fade-up" style="transition-delay:0.05s">VS Code + Cursor extension</h3>
   <p class="section-sub fade-up" style="transition-delay:0.1s">
-    Plu-Stan plugs into VS Code via <a href="https://github.com/input-output-hk/haskell-language-server" target="_blank" rel="noopener" style="color:var(--ink-hi);text-decoration:underline;text-underline-offset:3px">IOG's HLS fork</a>.
-    Vulnerabilities appear as inline squiggles while you write — no separate build step needed.
+    A dedicated extension wraps the <code style="font-family:var(--fc);font-size:15px;color:var(--str)">plustan</code> CLI.
+    On-chain modules appear in a sidebar tree; findings land in the Problems panel.
   </p>
 
   <div class="fade-up vsc-demo" style="transition-delay:0.15s">
@@ -744,8 +744,13 @@ a { color: inherit; text-decoration: none; }
     </div>
 
     <div class="vsc-install-hint">
-      <span style="color:var(--cm)">-- Enable in settings.json</span>
-      <br><span class="id">"haskell.plugin.pluStan.globalOn"</span><span class="op">:</span> <span class="kw">true</span>
+      <span style="color:var(--cm)"># package and install as VSIX</span>
+      <br><span class="id">cd vscode-plustan</span>
+      <br><span class="id">npm install &amp;&amp; npm run package:vsix</span>
+      <br><span class="cm" style="font-size:11px;font-style:normal"># Extensions: Install from VSIX...</span>
+      <br>
+      <br><span style="color:var(--cm)"># settings.json</span>
+      <br><span class="id">"plustan.binaryPath"</span><span class="op">:</span> <span class="str">"/path/to/plustan"</span>
     </div>
   </div>
 </section>
