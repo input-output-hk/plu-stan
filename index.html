@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Plu-Stan — Plinth Static Analyzer</title>
+<title>Plu-Stan: Plinth Static Analyzer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
@@ -248,8 +248,8 @@ a { color: inherit; text-decoration: none; }
 /* ─── RULES GRID ──────────────────────────────────── */
 .rules-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
 }
 .rc {
   background: var(--bg-ed); border: 1px solid var(--bdr);
@@ -273,11 +273,12 @@ a { color: inherit; text-decoration: none; }
 .rc:hover .rc-expand { color: var(--dim); }
 
 .rc-code {
-  padding: 14px; font-family: var(--fc); font-size: 12.5px;
-  line-height: 1.65; white-space: pre; overflow-x: auto;
+  padding: 20px 18px; font-family: var(--fc); font-size: 12.5px;
+  line-height: 1.8; white-space: pre; overflow-x: auto;
+  min-height: 80px;
 }
 .rc-status {
-  display: flex; align-items: center; gap: 8px; padding: 7px 12px;
+  display: flex; align-items: center; gap: 8px; padding: 9px 14px;
   border-top: 1px solid var(--bdr-lo); background: rgba(0,0,0,0.18);
   font-family: var(--fc); font-size: 11px;
 }
@@ -383,6 +384,64 @@ a { color: inherit; text-decoration: none; }
 }
 .modal-term.show { max-height: 160px; }
 .modal-term-body { padding: 12px 14px; font-family: var(--fc); font-size: 12px; line-height: 1.7; }
+
+/* ─── VS CODE DEMO ────────────────────────────────── */
+.vsc-demo { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+.vsc-chrome {
+  flex: 1; min-width: 340px;
+  background: #1e1e1e; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 7px; overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+}
+.vsc-titlebar {
+  display: flex; align-items: center; gap: 7px; padding: 9px 14px;
+  background: #252526; border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.vsc-title { font-family: var(--fc); font-size: 12px; color: #ccc; margin-left: 6px; }
+.vsc-body { padding: 10px 0; }
+.vsc-ln { display: flex; align-items: baseline; font-family: var(--fc); font-size: 13px; line-height: 1.7; }
+.vsc-num { min-width: 40px; text-align: right; padding-right: 12px; color: #555; font-size: 12px; user-select: none; }
+.vsc-code { padding: 0 16px; flex: 1; white-space: pre; }
+.vsc-squiggle-line .vsc-code { background: rgba(192,57,43,0.06); }
+.vsc-squiggle {
+  text-decoration: underline wavy var(--error); text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+}
+.vsc-hover {
+  margin: 2px 40px 6px; padding: 8px 12px;
+  background: #252526; border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 5px; font-family: var(--fc); font-size: 11.5px;
+  display: flex; align-items: flex-start; gap: 8px; line-height: 1.5;
+}
+.vsc-sev-dot { width:8px;height:8px;border-radius:50%;background:var(--error);flex-shrink:0;margin-top:2px; }
+.vsc-hover-rule { color: var(--ink-hi); font-weight: 700; flex-shrink: 0; }
+.vsc-hover-msg { color: #b0b8c1; }
+.vsc-install-hint {
+  background: var(--bg-ed); border: 1px solid var(--bdr);
+  border-radius: 6px; padding: 16px 20px;
+  font-family: var(--fc); font-size: 13px; line-height: 1.9;
+  align-self: center; min-width: 280px;
+}
+
+/* ─── CREDITS ─────────────────────────────────────── */
+.credits-row {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  margin-top: 8px;
+}
+.credit-card {
+  flex: 1; min-width: 160px;
+  background: var(--bg-ed); border: 1px solid var(--bdr);
+  border-radius: 7px; padding: 20px 22px;
+}
+.cc-name {
+  font-family: var(--fc); font-size: 14px; font-weight: 600;
+  color: var(--ink-hi); margin-bottom: 6px; letter-spacing: 0.02em;
+}
+.cc-role { font-family: var(--fp); font-size: 14px; color: var(--dim); }
+.cc-sep {
+  font-family: var(--fc); font-size: 18px; color: var(--muted);
+  flex-shrink: 0; align-self: center; padding: 0 4px;
+}
 
 /* ─── INSTALL ─────────────────────────────────────── */
 .install-block {
@@ -507,8 +566,8 @@ a { color: inherit; text-decoration: none; }
 
 <!-- ─── TAGLINE ───────────────────────────────────── -->
 <section class="tagline">
-  <h2>Ship Plinth contracts<br>that <em>can't</em> be exploited.</h2>
-  <p>Plu-Stan catches security vulnerabilities and performance anti-patterns in your on-chain Cardano code — before they hit mainnet.</p>
+  <h2>Catch Plinth bugs<br>before <em>mainnet</em> does.</h2>
+  <p>Plu-Stan analyzes Plinth smart contracts for security vulnerabilities and performance anti-patterns, using GHC's own type-annotated AST.</p>
 </section>
 
 <!-- ─── HOW IT WORKS ─────────────────────────────── -->
@@ -516,7 +575,7 @@ a { color: inherit; text-decoration: none; }
   <div class="section-tag fade-up">how it works</div>
   <h3 class="section-title fade-up" style="transition-delay:0.05s">Analysis without touching source</h3>
   <p class="section-sub fade-up" style="transition-delay:0.1s">
-    Plu-Stan reads <code style="font-family:var(--fc);font-size:15px;color:var(--str)">.hie</code> files — GHC's rich AST with full type information.
+    Plu-Stan reads <code style="font-family:var(--fc);font-size:15px;color:var(--str)">.hie</code> files: GHC's rich AST with full type information.
     No source parsing, no false positives from macros or generated code.
   </p>
 
@@ -524,43 +583,33 @@ a { color: inherit; text-decoration: none; }
     <div class="pipe-stage" data-delay="0">
       <div class="pipe-label">Plinth source</div>
       <div class="pipe-box"><span class="prag">{-# ANN module</span>
-  <span class="str">"onchain-contract"</span>
-<span class="prag">#-}</span>
-<span class="kw">module</span> <span class="ty">Validator</span></div>
+  <span class="str">"onchain-contract"</span> <span class="prag">#-}</span></div>
       <div class="pipe-note">annotate on-chain modules</div>
     </div>
     <div class="pipe-conn"><div class="pipe-arrow"></div></div>
     <div class="pipe-stage" data-delay="1">
       <div class="pipe-label">GHC .hie files</div>
-      <div class="pipe-box"><span class="cm">cabal build</span>
-  <span class="cm">--ghc-options</span>
-  <span class="cm">  -fwrite-ide-info</span></div>
+      <div class="pipe-box"><span class="cm">-fwrite-ide-info</span></div>
       <div class="pipe-note">full AST + type info</div>
     </div>
     <div class="pipe-conn"><div class="pipe-arrow"></div></div>
     <div class="pipe-stage" data-delay="2">
       <div class="pipe-label">Plu-Stan</div>
-      <div class="pipe-box"><span class="id">cabal run</span>
-  <span class="id">plustan</span> <span class="op">--</span>
-  <span class="str">--report</span>
-  <span class="str">--browse</span></div>
+      <div class="pipe-box"><span class="id">cabal run plustan</span></div>
       <div class="pipe-note">14+ Plinth-specific rules</div>
     </div>
     <div class="pipe-conn"><div class="pipe-arrow"></div></div>
     <div class="pipe-stage" data-delay="3">
       <div class="pipe-label">On-chain only</div>
-      <div class="pipe-box"><span class="kw">filter</span>
-  <span class="id">onchain</span>
-  <span class="id">observations</span></div>
+      <div class="pipe-box"><span class="kw">filter</span> <span class="id">onchain</span></div>
       <div class="pipe-note">off-chain code ignored</div>
     </div>
     <div class="pipe-conn"><div class="pipe-arrow"></div></div>
     <div class="pipe-stage final" data-delay="4">
       <div class="pipe-label">Report</div>
       <div class="pipe-box">⚠  3 warnings
-🔴 1 critical
-📄 stan.html</div>
-      <div class="pipe-note">with fix suggestions</div>
+🔴 1 critical</div>
+      <div class="pipe-note">HTML + fix suggestions</div>
     </div>
   </div>
 </section>
@@ -579,57 +628,44 @@ a { color: inherit; text-decoration: none; }
 
     <div class="rc" data-ex="0">
       <div class="rc-hdr"><span class="rc-dot"></span> PLU-STAN-04 <span class="rc-expand">click to run →</span></div>
-      <div class="rc-code"><span class="cm">-- Only credential checked, not full address</span>
-<span class="id">pubKeyHashEq</span> <span class="op">=</span>
-  <span class="id">pkh1</span> <span class="op">==</span> <span class="id">pkh2</span>
-  <span class="cm">-- staking component ignored!</span></div>
-      <div class="rc-status"><span class="badge-warn">⚠ Warning</span><span class="rc-sep">·</span><span class="rc-tag">security</span></div>
+      <div class="rc-code"><span class="cm">-- staking component not checked</span>
+<span class="id">pkh1</span> <span class="op">==</span> <span class="id">pkh2</span>  <span class="cm">-- ← fund theft risk</span></div>
+      <div class="rc-status"><span class="badge-warn">⚠ Warning</span><span class="rc-sep">·</span><span class="rc-tag">credential security</span></div>
     </div>
 
     <div class="rc" data-ex="1">
       <div class="rc-hdr"><span class="rc-dot"></span> PLU-STAN-10 <span class="rc-expand">click to run →</span></div>
-      <div class="rc-code"><span class="cm">-- Unvalidated deserialization</span>
-<span class="kw">let</span> <span class="id">repaymentPkh</span> <span class="op">=</span>
-  <span class="ty">Tx</span><span class="op">.</span><span class="id">unsafeFromBuiltinData</span>
-    <span class="id">datum</span>
-<span class="kw">in</span> <span class="id">repaymentPkh</span> <span class="op">==</span> <span class="id">pkh</span></div>
-      <div class="rc-status"><span class="badge-err">🔴 Critical</span><span class="rc-sep">·</span><span class="rc-tag">security</span></div>
+      <div class="rc-code"><span class="cm">-- invalid hash → loan locked forever</span>
+<span class="ty">Tx</span><span class="op">.</span><span class="id">unsafeFromBuiltinData</span> <span class="id">datum</span></div>
+      <div class="rc-status"><span class="badge-err">🔴 Critical</span><span class="rc-sep">·</span><span class="rc-tag">unvalidated hash</span></div>
     </div>
 
     <div class="rc" data-ex="2">
       <div class="rc-hdr"><span class="rc-dot"></span> PLU-STAN-06 <span class="rc-expand">click to run →</span></div>
-      <div class="rc-code"><span class="cm">-- Two passes over the list</span>
-<span class="ty">TxList</span><span class="op">.</span><span class="id">map</span> <span class="op">(+</span><span class="nm">100</span><span class="op">)</span> <span class="op">$</span>
-  <span class="ty">TxList</span><span class="op">.</span><span class="id">filter</span> <span class="op">(></span><span class="nm">0</span><span class="op">)</span> <span class="id">exList</span></div>
-      <div class="rc-status"><span class="badge-perf">◆ Performance</span><span class="rc-sep">·</span><span class="rc-tag">execution cost</span></div>
+      <div class="rc-code"><span class="cm">-- two passes, double the cost</span>
+<span class="id">map</span> <span class="op">(+</span><span class="nm">100</span><span class="op">)</span> <span class="op">$</span> <span class="id">filter</span> <span class="op">(></span><span class="nm">0</span><span class="op">)</span> <span class="id">xs</span></div>
+      <div class="rc-status"><span class="badge-perf">◆ Performance</span><span class="rc-sep">·</span><span class="rc-tag">list traversal</span></div>
     </div>
 
     <div class="rc" data-ex="3">
       <div class="rc-hdr"><span class="rc-dot"></span> PLU-STAN-08 <span class="rc-expand">click to run →</span></div>
-      <div class="rc-code"><span class="cm">-- tup evaluated twice</span>
-<span class="kw">let</span> <span class="id">tup</span> <span class="op">=</span> <span class="id">expensiveComputation</span>
-<span class="kw">in</span>  <span class="id">fst</span> <span class="id">tup</span> <span class="op">+</span> <span class="id">snd</span> <span class="id">tup</span></div>
-      <div class="rc-status"><span class="badge-perf">◆ Performance</span><span class="rc-sep">·</span><span class="rc-tag">UPLC cost</span></div>
+      <div class="rc-code"><span class="cm">-- recomputed on every use</span>
+<span class="kw">let</span> <span class="id">tup</span> <span class="op">=</span> <span class="id">expensiveComputation</span></div>
+      <div class="rc-status"><span class="badge-perf">◆ Performance</span><span class="rc-sep">·</span><span class="rc-tag">non-strict let</span></div>
     </div>
 
     <div class="rc" data-ex="4">
       <div class="rc-hdr"><span class="rc-dot"></span> PLU-STAN-12 <span class="rc-expand">click to run →</span></div>
-      <div class="rc-code"><span class="cm">-- No time bounds on transaction</span>
-<span class="kw">let</span> <span class="id">range</span> <span class="op">=</span>
-  <span class="id">txInfoValidRange</span>
-    <span class="op">(</span><span class="id">scriptContextTxInfo</span> <span class="id">ctx</span><span class="op">)</span>
-<span class="cm">-- always(interval) ← dangerous</span></div>
-      <div class="rc-status"><span class="badge-warn">⚠ Warning</span><span class="rc-sep">·</span><span class="rc-tag">security</span></div>
+      <div class="rc-code"><span class="cm">-- no finite upper bound</span>
+<span class="id">txInfoValidRange</span> <span class="op">(</span><span class="id">scriptContextTxInfo</span> <span class="id">ctx</span><span class="op">)</span></div>
+      <div class="rc-status"><span class="badge-warn">⚠ Warning</span><span class="rc-sep">·</span><span class="rc-tag">time bounds</span></div>
     </div>
 
     <div class="rc" data-ex="5">
       <div class="rc-hdr"><span class="rc-dot"></span> PLU-STAN-02 <span class="rc-expand">click to run →</span></div>
-      <div class="rc-code"><span class="cm">-- Spam attack vector</span>
-<span class="id">unsafeFromBuiltinData</span>
-  <span class="op">(</span><span class="id">toBuiltinData</span>
-    <span class="op">(</span><span class="nm">42</span> <span class="op">::</span> <span class="ty">Integer</span><span class="op">))</span>
-<span class="cm">-- no structural check</span></div>
-      <div class="rc-status"><span class="badge-warn">⚠ Warning</span><span class="rc-sep">·</span><span class="rc-tag">security</span></div>
+      <div class="rc-code"><span class="cm">-- no structural integrity check</span>
+<span class="id">unsafeFromBuiltinData</span> <span class="id">datum</span></div>
+      <div class="rc-status"><span class="badge-warn">⚠ Warning</span><span class="rc-sep">·</span><span class="rc-tag">datum spam</span></div>
     </div>
 
   </div>
@@ -673,6 +709,69 @@ a { color: inherit; text-decoration: none; }
         View on GitHub
       </a>
       <a href="https://github.com/input-output-hk/plu-stan/blob/master/RULES.md" class="btn-link" target="_blank">All Rules</a>
+    </div>
+  </div>
+</section>
+
+<!-- ─── VS CODE ──────────────────────────────────── -->
+<hr class="divider">
+<section class="section-wrap" id="editor">
+  <div class="section-tag fade-up">editor integration</div>
+  <h3 class="section-title fade-up" style="transition-delay:0.05s">Inline in VS Code</h3>
+  <p class="section-sub fade-up" style="transition-delay:0.1s">
+    Plu-Stan plugs into VS Code via <a href="https://github.com/input-output-hk/haskell-language-server" target="_blank" rel="noopener" style="color:var(--ink-hi);text-decoration:underline;text-underline-offset:3px">IOG's HLS fork</a>.
+    Vulnerabilities appear as inline squiggles while you write — no separate build step needed.
+  </p>
+
+  <div class="fade-up vsc-demo" style="transition-delay:0.15s">
+    <div class="vsc-chrome">
+      <div class="vsc-titlebar">
+        <span class="tl tl-r"></span><span class="tl tl-y"></span><span class="tl tl-g"></span>
+        <span class="vsc-title">LendingValidator.hs</span>
+      </div>
+      <div class="vsc-body">
+        <div class="vsc-ln"><span class="vsc-num">1</span><span class="vsc-code"><span class="kw">lendingValidator</span> <span class="op">::</span> <span class="ty">ScriptContext</span> <span class="op">-></span> <span class="ty">Bool</span></span></div>
+        <div class="vsc-ln"><span class="vsc-num">2</span><span class="vsc-code"><span class="kw">lendingValidator</span> <span class="id">ctx</span> <span class="op">=</span></span></div>
+        <div class="vsc-ln"><span class="vsc-num">3</span><span class="vsc-code">  <span class="kw">let</span> <span class="id">ownOutput</span> <span class="op">=</span> <span class="id">head</span> <span class="op">$</span> <span class="id">txInfoOutputs</span> <span class="id">info</span></span></div>
+        <div class="vsc-ln vsc-squiggle-line"><span class="vsc-num">4</span><span class="vsc-code">      <span class="ty">LoanDatum</span> <span class="op">{</span> <span class="id">repaymentPkh</span> <span class="op">}</span> <span class="op">=</span> <span class="id vsc-squiggle">Tx.unsafeFromBuiltinData</span> <span class="op">(</span><span class="id">getDatum</span> <span class="id">ownOutput</span><span class="op">)</span></span></div>
+        <div class="vsc-hover">
+          <span class="vsc-sev-dot"></span>
+          <span class="vsc-hover-rule">PLU-STAN-10</span>
+          <span class="vsc-hover-msg">Unvalidated hash in comparison. Use <code style="font-family:var(--fc);font-size:11px">fromBuiltinData</code> and handle Nothing.</span>
+        </div>
+        <div class="vsc-ln"><span class="vsc-num">5</span><span class="vsc-code">  <span class="kw">in</span>  <span class="id">repaymentPkh</span> <span class="op">==</span> <span class="id">getOutputPkh</span> <span class="op">(</span><span class="id">txOutAddress</span> <span class="id">ownOutput</span><span class="op">)</span></span></div>
+      </div>
+    </div>
+
+    <div class="vsc-install-hint">
+      <span style="color:var(--cm)">-- Enable in settings.json</span>
+      <br><span class="id">"haskell.plugin.pluStan.globalOn"</span><span class="op">:</span> <span class="kw">true</span>
+    </div>
+  </div>
+</section>
+
+<!-- ─── CREDITS ──────────────────────────────────── -->
+<hr class="divider">
+<section class="section-wrap narrow" id="credits">
+  <div class="section-tag fade-up">collaboration</div>
+  <h3 class="section-title fade-up" style="transition-delay:0.05s">Built by three teams</h3>
+  <p class="section-sub fade-up" style="transition-delay:0.1s">
+    Plu-Stan is a joint effort between Cardano ecosystem teams who share a stake in better on-chain security.
+  </p>
+  <div class="credits-row fade-up" style="transition-delay:0.15s">
+    <div class="credit-card">
+      <div class="cc-name">Anastasia Labs</div>
+      <div class="cc-role">Rule design, security expertise</div>
+    </div>
+    <div class="cc-sep">+</div>
+    <div class="credit-card">
+      <div class="cc-name">TxPipe</div>
+      <div class="cc-role">Tooling, infrastructure</div>
+    </div>
+    <div class="cc-sep">+</div>
+    <div class="credit-card">
+      <div class="cc-name">IOG</div>
+      <div class="cc-role">HLS integration, analysis engine</div>
     </div>
   </div>
 </section>
@@ -818,7 +917,7 @@ async function heroAnim() {
   await sleep(1800);
   showDiag(`<div class="dr"><span class="de">●</span><span class="dh">LendingValidator.hs:10:8</span></div>
 <div class="dr"><span class="drule">PLU-STAN-10</span><span class="dd">Unvalidated hash in comparison</span></div>
-<div class="dr" style="padding-left:20px"><span class="dd">repaymentPkh could have invalid length — ledger will reject</span></div>
+<div class="dr" style="padding-left:20px"><span class="dd">repaymentPkh could have invalid length: ledger will reject</span></div>
 <div class="dr" style="padding-left:20px"><span class="dd">any output to that address → loan permanently unrepayable</span></div>`);
   await sleep(4000);
   const cur = twLines.querySelector('.cursor');
@@ -945,7 +1044,7 @@ strictLet =
 timeValidator :: ScriptContext -> Bool
 timeValidator ctx =
   let range = txInfoValidRange (scriptContextTxInfo ctx)
---  ^^^^^ could be always(interval) — no finite upper bound
+--  ^^^^^ could be always(interval), no finite upper bound
   in validateSomething range
 
 -- Fix: enforce a finite upper bound
@@ -1002,7 +1101,7 @@ function openModal(idx) {
   activeRule = RULES[idx];
   modalFname.textContent = activeRule.file;
   modalRuleId.textContent = activeRule.id;
-  modalRuleName.textContent = '— ' + activeRule.name;
+  modalRuleName.textContent = ' · ' + activeRule.name;
   modalRuleSev.textContent = activeRule.sev;
   modalRuleSev.className = 'modal-rule-sev ' + activeRule.sevClass;
   modalCode.innerHTML = activeRule.code.split('\n').map(l => hl(l)).join('\n');
