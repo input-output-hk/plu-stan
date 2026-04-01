@@ -580,6 +580,10 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
   it "flags flattenValue mint-only logic without burn path" $
     checkObservation AntiPattern.plustan20 1425 25 36
 
+  it "flags multiline valueOf mint-only logic without burn path" $
+    checkObservation AntiPattern.plustan20 1443 6 22
+
+
   it "does not flag flattenValue logic with mint and burn checks" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1432
 
@@ -589,6 +593,15 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
 
   it "flags flattenValue mint-only logic when an unrelated shadowed `amount` binding provides the only negative check" $
     checkObservation AntiPattern.plustan20 1465 27 37
+
+
+  it "does not flag direct valueOf checks split across conditional mint/burn branches" $ do
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1473
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1475
+
+  it "does not flag direct valueOf checks when mint and burn comparisons share one expression" $ do
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1480
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1481
 
 
   it "flags valueOf mint-only checks when txInfoMint is passed through local aliases" $
@@ -601,6 +614,15 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1512
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1513
 
+  it "does not flag nested boolean mint/burn disjunction checks" $ do
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1529
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1530
+
+  it "does not flag branch-selected mint/burn checks with unrelated boolean operators" $ do
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1538
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1539
+
+
   it "flags valueOf >= mint-only logic without burn checks" $
     checkObservation AntiPattern.plustan20 1550 6 23
 
@@ -610,8 +632,9 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
   it "flags direct valueOf == positive checks without negative counterpart" $
     checkObservation AntiPattern.plustan20 1561 3 132
 
-  it "does not flag direct valueOf == checks when positive and negative literals are both present" $
+  it "does not flag direct valueOf == checks when positive and negative literals are both present" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1566
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1567
 
   it "flags flattenValue >= mint-only logic without <= burn checks" $
     checkObservation AntiPattern.plustan20 1580 25 36
@@ -623,20 +646,34 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
     checkObservation AntiPattern.plustan20 1688 6 22
 
 
-  it "does not flag guard-based mint/burn sign dispatch" $
+  it "flags direct valueOf checks when token-name shadowing fabricates key equivalence" $
+    checkObservation AntiPattern.plustan20 1611 19 67
+
+  it "flags typed zero-threshold mint-only checks" $
+    checkObservation AntiPattern.plustan20 1621 6 35
+
+  it "does not flag typed negative burn thresholds paired with mint checks" $ do
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1627
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1628
+
+
+  it "does not flag guard-based mint/burn sign dispatch" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1755
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1757
 
   it "flags direct valueOf mint-only logic when opposite-sign direct checks are unused" $
     checkObservation AntiPattern.plustan20 1846 9 137
 
-  it "does not flag inline guard predicate sign dispatch" $
+  it "does not flag inline guard predicate sign dispatch" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1880
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1881
 
   it "flags mint-only logic when burn check is in an unrelated ||-prefixed continuation" $
     checkObservation AntiPattern.plustan20 1892 14 30
 
-  it "does not flag guard dispatch with an intervening comment line" $
+  it "does not flag guard dispatch with an intervening comment line" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1907
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1910
 
   it "flags mint-only logic when guard context would otherwise leak from a previous declaration" $
     checkObservation AntiPattern.plustan20 1922 7 135
@@ -665,8 +702,9 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2000
 
 
-  it "does not flag direct valueOf equality checks when alias RHS is multiline but resolves to the same token key" $
+  it "does not flag direct valueOf equality checks when alias RHS is multiline but resolves to the same token key" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2009
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2010
 
   it "flags mint-only logic when helper checks are invoked via backtick/infix form" $
     checkObservation AntiPattern.plustan20 2016 30 85
@@ -724,8 +762,9 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2162
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2163
 
-  it "does not flag mint-only logic when the burn predicate is used in the if condition" $
+  it "does not flag mint-only logic when the burn predicate is used in the if condition" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2169
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2171
 
   it "flags mint-only logic when a negative branch is masked by an outer chooseMint gate" $
     checkObservation AntiPattern.plustan20 2180 14 30
@@ -750,14 +789,17 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
   it "flags flattenValue mint-only logic when positive and negative checks are guarded by different assets" $
     checkObservation AntiPattern.plustan20 2237 68 78
 
-  it "does not flag same-asset mint/burn checks mixed across backtick and `$`-applied valueOf syntax" $
+  it "does not flag same-asset mint/burn checks mixed across backtick and `$`-applied valueOf syntax" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2245
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2246
 
-  it "does not flag partially-applied valueOf checks when token aliases resolve to the same asset" $
+  it "does not flag partially-applied valueOf checks when token aliases resolve to the same asset" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2255
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2256
 
-  it "does not flag same-asset mint/burn checks mixed across backtick and direct valueOf syntax" $
+  it "does not flag same-asset mint/burn checks mixed across backtick and direct valueOf syntax" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2262
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2263
 
   it "flags flattenValue mint-only logic when a negated conjunction would otherwise fabricate same-asset burn evidence" $
     checkObservation AntiPattern.plustan20 2270 66 76
@@ -768,14 +810,17 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
   it "flags mint-only logic when a negated boolean compound would otherwise fabricate opposite-sign evidence" $
     checkObservation AntiPattern.plustan20 2286 6 22
 
-  it "does not flag mint/burn logic when the burn predicate is only double-negated in the alternate branch" $
+  it "does not flag mint/burn logic when the burn predicate is only double-negated in the alternate branch" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2293
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2297
 
-  it "does not flag same-asset mint/burn checks when a direct valueOf burn operand is wrapped in negate" $
+  it "does not flag same-asset mint/burn checks when a direct valueOf burn operand is wrapped in negate" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2303
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2304
 
-  it "does not flag same-token helper validation split across lhs-applied values and `$`-applied token args" $
+  it "does not flag same-token helper validation split across lhs-applied values and `$`-applied token args" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2310
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2311
 
   it "flags helper validation when `$`-applied token args differ between mint and burn paths" $
     checkObservation AntiPattern.plustan20 2320 32 78
@@ -789,11 +834,13 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
   it "flags helper validation when a composite token argument collapses onto a bare alias" $
     checkObservation AntiPattern.plustan20 2354 32 78
 
-  it "does not flag same-token single-parameter helper validation" $
+  it "does not flag same-token single-parameter helper validation" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2365
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2366
 
-  it "does not flag same-token helper validation when `$` supplies the minted value after a lhs-applied token arg" $
+  it "does not flag same-token helper validation when `$` supplies the minted value after a lhs-applied token arg" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2375
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2376
 
   it "flags mint-only logic when a later same-line helper binding follows an earlier semicolon-separated binding" $
     checkObservation AntiPattern.plustan20 2386 16 26
@@ -810,8 +857,9 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
   it "flags mint-only logic when distinct token aliases collapse after whitespace and paren normalization" $
     checkObservation AntiPattern.plustan20 2422 6 58
 
-  it "does not flag mint/burn logic when an outer token alias is shadowed only in an unrelated inner scope" $
+  it "does not flag mint/burn logic when an outer token alias is shadowed only in an unrelated inner scope" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2434
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2435
 
   it "flags mint-only logic when inner shadows of txInfoMint and mintedValue fabricate a burn path" $
     checkObservation AntiPattern.plustan20 2445 6 66
@@ -843,3 +891,13 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
   it "does not flag mint/burn logic when `negate 1` appears outside an unrelated inner local `negate` binding" $ do
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2515
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2516
+
+  it "does not flag same-asset mint/burn checks when direct valueOf aliases are paired with flattenValue guard checks" $ do
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2526
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 2523
+
+  it "flags mint-only logic when the only negative check flows through a mixed mint alias expression" $
+    checkObservation AntiPattern.plustan20 2536 6 22
+
+  it "flags flattenValue logic when comma-separated guard clauses validate different assets" $
+    checkObservation AntiPattern.plustan20 2545 65 75

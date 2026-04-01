@@ -2041,7 +2041,7 @@ plutStan20DuplicateHelperParamNamesMintOnlyShouldTrigger ctx =
 plutStan20HelperDollarPrefixCollisionShouldPass :: ScriptContext -> Bool
 -- PLU-STAN-20 (should NOT trigger): `$` argument extraction must not match helper names by substring.
 plutStan20HelperDollarPrefixCollisionShouldPass ctx =
-  let helper x = x > 0
+  let helper x = x < 0
       helper2 y = y == y
   in helper 1 || (helper2 $ Value.valueOf (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) Value.adaSymbol Value.adaToken)
 
@@ -2429,7 +2429,7 @@ plutStan20OuterAliasWithInnerShadowShouldPass ctx =
       canonicalToken = Value.adaToken
       unrelatedShadow =
         let canonicalToken = Value.TokenName (BI.stringToBuiltinByteStringHex "beef")
-        in canonicalToken == canonicalToken
+        in canonicalToken /= canonicalToken
   in unrelatedShadow
       || Value.valueOf mintedValue Value.adaSymbol canonicalToken > 0
       || Value.valueOf mintedValue Value.adaSymbol Value.adaToken < 0
@@ -2514,3 +2514,35 @@ plutStan20NegateThresholdOutsideLocalShadowShouldPass ctx =
         in negate True
   in mintedAmount > 0
       || mintedAmount == negate 1
+
+plutStan20DirectAliasAndFlattenSameAssetShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-20 (should NOT trigger): same-asset checks written through direct valueOf aliases and flattenValue guards should pair.
+plutStan20DirectAliasAndFlattenSameAssetShouldPass ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      adaAmount = Value.valueOf mintedValue Value.adaSymbol Value.adaToken
+  in adaAmount > 0
+      || case Value.flattenValue mintedValue of
+          [(currency, token, amount)]
+            | currency == Value.adaSymbol, token == Value.adaToken, amount < 0 -> True
+          _ -> False
+
+plutStan20MixedMintAliasBurnShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): mixed RHS aliases that combine mint amounts with other assets must not count as direct burn validation.
+plutStan20MixedMintAliasBurnShouldTrigger ctx =
+  let mintedValue = Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx
+      mintedAmount = Value.valueOf mintedValue Value.adaSymbol Value.adaToken
+      otherToken = Value.TokenName (BI.stringToBuiltinByteStringHex "decafbad")
+      mixedAmount = mintedAmount + Value.valueOf mintedValue Value.adaSymbol otherToken
+  in mintedAmount > 0
+      || mixedAmount < 0
+
+plutStan20FlattenCommaGuardDifferentAssetsShouldTrigger :: ScriptContext -> Bool
+-- PLU-STAN-20 (should trigger): comma-separated flattenValue guard clauses for different assets must not be paired as one mint/burn path.
+plutStan20FlattenCommaGuardDifferentAssetsShouldTrigger ctx =
+  let otherToken = Value.TokenName (BI.stringToBuiltinByteStringHex "fadedcab")
+  in case Value.flattenValue (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) of
+      [(currency, token, amount)]
+        | currency == Value.adaSymbol, token == Value.adaToken, amount > 0 -> True
+        | currency == Value.adaSymbol, token == otherToken, amount < 0 -> True
+        | otherwise -> False
+      _ -> False
