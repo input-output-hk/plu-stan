@@ -140,6 +140,8 @@ data InspectionAnalysis
     | MissingTxOutValueCheck
     -- | TxOut validation misses datum checks.
     | MissingTxOutDatumCheck
+    -- | Minting logic exists without corresponding burning validation.
+    | MissingBurningLogic
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.
