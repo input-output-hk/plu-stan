@@ -59,6 +59,7 @@ So far, Plu-Stan implements the following automated detection rules:
 | PLU-STAN-12 | Validity interval / POSIX time misuse | Warning     | Using validity interval utilities or accessing `txInfoValidRange` without ensuring finite bounds can lead to unbounded time windows |
 | PLU-STAN-16 | Precision loss: division before multiplication | Warning     | Division before multiplication in integer arithmetic causes precision loss; multiply first, then divide |
 | PLU-STAN-20 | Minting logic without burning logic | Warning     | Flags mint-only checks over `txInfoMint` (`valueOf`/`flattenValue`) when no corresponding burn-path validation is present |
+| PLU-STAN-21 | Immutable credentials baked into validators | Warning     | Validator-reachable top-level `PubKeyHash` / `Credential` / `StakingCredential` / `Address` / `ScriptHash` bindings, and credential-like values specialized into validator code via `applyCode` / `unsafeApplyCode`, cannot be rotated on-chain; prefer datum/state-managed credentials |
 
 For comprehensive guidelines on Plinth security patterns, anti-patterns, and best practices, see the [**Rules Documentation**](./rules.md). This includes detailed explanations of the above rules plus additional security considerations not yet automated.
 

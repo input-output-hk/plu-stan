@@ -21,9 +21,9 @@ import Stan.Core.Id (Id)
 import Stan.Core.List (nonRepeatingPairs)
 import Stan.Core.ModuleName (ModuleName (..))
 import Stan.FileInfo (isExtensionDisabled)
-import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, nameOccName, occNameString, srcSpanEndCol,
-                        srcSpanEndLine, srcSpanStartCol, srcSpanStartLine, isExternalName,
-                        IfaceTyCon (..))
+import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, nameModule, nameOccName, occNameString,
+                        srcSpanEndCol, srcSpanEndLine, srcSpanStartCol, srcSpanStartLine,
+                        isExternalName, IfaceTyCon (..))
 import Stan.Hie (eqAst, slice)
 import Stan.Hie.Compat (ContextInfo (..), HieAST (..), HieASTs (..), HieFile (..),
                         HieArgs (..), HieType (..), HieTypeFlat, Identifier, IdentifierDetails (..),
@@ -32,8 +32,8 @@ import Stan.Hie.Compat (ContextInfo (..), HieAST (..), HieASTs (..), HieFile (..
 import Stan.Hie.MatchAst (hieMatchPatternAst)
 import Stan.Hie.MatchType (hieMatchPatternType)
 import Stan.Inspection (Inspection (..), InspectionAnalysis (..))
-import Stan.NameMeta (NameMeta (..), baseNameFrom, ghcPrimNameFrom, hieMatchNameMeta,
-                      plutusTxNameFrom)
+import Stan.NameMeta (NameMeta (..), baseNameFrom, compareNames, ghcPrimNameFrom,
+                      hieMatchNameMeta, plutusTxNameFrom)
 import Stan.Observation (Observations, mkObservation)
 import Stan.Pattern.Ast (Literal (..), PatternAst (..), anyNamesToPatternAst, app, case',
                          constructor, constructorNameIdentifier, dataDecl, fixity, fun,
@@ -1520,6 +1520,589 @@ analysePrecisionLossDivisionBeforeMultiply insId hie curNode =
 
     isIdentChar :: Char -> Bool
     isIdentChar c = isAlphaNum c || c == '_' || c == '\''
+
+analyseImmutableCredential
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseImmutableCredential insId hie curNode =
+    addObservations $ mkObservation insId hie <$> matchNode curNode
+  where
+    allHieAsts :: [HieAST TypeIndex]
+    allHieAsts = Map.elems $ getAsts $ hie_asts hie
+
+    bindingSpans :: Map Name RealSrcSpan
+    bindingSpans = foldMap collectBindingSpans allHieAsts
+
+    bindingNodes :: Map Name (HieAST TypeIndex)
+    bindingNodes =
+        let spanIndex = foldMap collectSpanIndex allHieAsts
+        in Map.mapMaybe (`Map.lookup` spanIndex) bindingSpans
+
+    bindingTypeIndices :: Map Name (Set TypeIndex)
+    bindingTypeIndices = foldMap collectBindingTypeIndices allHieAsts
+
+    matchBoundNames :: Set Name
+    matchBoundNames = foldMap collectMatchBoundNames allHieAsts
+
+    sourceLines :: [(Int, ByteString)]
+    sourceLines = zip [1 ..] (BS8.lines $ hie_hs_src hie)
+
+    matchBoundLiftArgumentHelpers :: Set Name
+    matchBoundLiftArgumentHelpers =
+        Set.fromList
+            [ name
+            | name <- Set.toList matchBoundNames
+            , helperDefinitionUsesLiftCode name
+            ]
+
+    credentialLikeBindings :: Set Name
+    credentialLikeBindings =
+        Set.fromList
+            [ name
+            | name <- Set.toList trackedBindingNames
+            , bindingIsCredentialLike name
+            ]
+      where
+        trackedBindingNames =
+            Set.fromList (Map.keys bindingNodes) <> Set.fromList (Map.keys bindingTypeIndices)
+
+    bindingDeps :: Map Name (Set Name)
+    bindingDeps =
+        Map.mapWithKey (\name rhsNode -> Set.delete name $ usedBoundNamesInNode rhsNode) bindingNodes
+
+    liftedCredentialBindings :: Set Name
+    liftedCredentialBindings =
+        expandBindingsByUses (directLiftedCredentialBindings <> sourceLiftedCredentialBindings <> helperAppliedCredentialBindings)
+      where
+        directLiftedCredentialBindings =
+            Set.fromList
+                [ name
+                | (name, rhsNode) <- Map.toList bindingNodes
+                , Just liftedArg <- [liftedCredentialArgument name rhsNode]
+                , liftedArgBakesCredential liftedArg
+                ]
+
+        sourceLiftedCredentialBindings =
+            Set.fromList
+                [ name
+                | (name, deps) <- Map.toList bindingDeps
+                , bindingSourceContainsLiftCode name
+                , not (Set.null $ Set.intersection deps credentialLikeBindings)
+                ]
+
+        liftedCredentialArgument :: Name -> HieAST TypeIndex -> Maybe (HieAST TypeIndex)
+        liftedCredentialArgument name rhsNode
+            | Set.member name matchBoundLiftArgumentHelpers = liftCodeArgument rhsNode
+            | otherwise = directLiftCodeArgument rhsNode
+
+        helperAppliedCredentialBindings =
+            Set.fromList
+                [ name
+                | (name, deps) <- Map.toList bindingDeps
+                , bindingSourceUsesAnyBinding matchBoundLiftArgumentHelpers name
+                    || not (Set.null $ Set.intersection deps matchBoundLiftArgumentHelpers)
+                , bindingSourceUsesAnyBinding credentialLikeBindings name
+                    || not (Set.null $ Set.intersection deps credentialLikeBindings)
+                ]
+
+    credentialCarrierBindings :: Set Name
+    credentialCarrierBindings =
+        expandCredentialCarriers liftedCredentialBindings
+
+    projectedCredentialBindings :: Set Name
+    projectedCredentialBindings =
+        liftedCredentialBindings <> Set.filter bindingCarriesCompiledCredentialLike credentialCarrierBindings
+
+    appliedCredentialSites :: [(RealSrcSpan, Set Name)]
+    appliedCredentialSites =
+        concatMap collectAppliedCredentialSites allHieAsts
+
+    appliedCredentialSpans :: Set RealSrcSpan
+    appliedCredentialSpans = Set.fromList $ map fst appliedCredentialSites
+
+    validatorReachableCredentialBindings :: Set Name
+    validatorReachableCredentialBindings =
+        foldMap (reachableCredentialBindingsFromNames . snd) appliedCredentialSites
+
+    topLevelReachableCredentialSpans :: Set RealSrcSpan
+    topLevelReachableCredentialSpans =
+        Set.fromList
+            [ span'
+            | (name, span') <- Map.toList bindingSpans
+            , isTopLevelBindingSpan span'
+            , Set.member name credentialLikeBindings
+            , Set.member name validatorReachableCredentialBindings
+            ]
+
+    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchNode node
+        | nodeSpan node `Set.member` topLevelReachableCredentialSpans
+            || nodeSpan node `Set.member` appliedCredentialSpans =
+            S.one $ nodeSpan node
+        | otherwise = mempty
+
+    collectAppliedCredentialSites :: HieAST TypeIndex -> [(RealSrcSpan, Set Name)]
+    collectAppliedCredentialSites node =
+        let here = case applyCodeOperands node of
+                Just (_compiledNode, argNode)
+                    | Just liftedArg <- liftCodeArgument argNode
+                    , liftedArgBakesCredential liftedArg ->
+                        [(nodeSpan liftedArg, usedBoundNamesInNode liftedArg)]
+                    | nodeUsesLiftedCredentialBinding argNode ->
+                        [(nodeSpan argNode, usedBoundNamesInNode argNode)]
+                _ -> []
+        in here <> concatMap collectAppliedCredentialSites (nodeChildren node)
+
+    liftedArgBakesCredential :: HieAST TypeIndex -> Bool
+    liftedArgBakesCredential liftedArg =
+        nodeTypeMatchesCredentialLike liftedArg
+            || not (Set.null $ reachableCredentialBindingsFromNames $ usedBoundNamesInNode liftedArg)
+
+    nodeUsesLiftedCredentialBinding :: HieAST TypeIndex -> Bool
+    nodeUsesLiftedCredentialBinding node =
+        not $ Set.null $ Set.intersection projectedCredentialBindings (usedBoundNamesInNode node)
+
+    reachableCredentialBindingsFromNames :: Set Name -> Set Name
+    reachableCredentialBindingsFromNames names =
+        Set.intersection credentialLikeBindings (reachableBindingClosure names)
+
+    reachableBindingClosure :: Set Name -> Set Name
+    reachableBindingClosure initial =
+        go $ Set.intersection trackedBindingNames initial
+      where
+        trackedBindingNames = Set.fromList $ Map.keys bindingNodes
+
+        go seen =
+            let newDeps =
+                    Set.fromList
+                        [ dep
+                        | name <- Set.toList seen
+                        , dep <- Set.toList $ Map.findWithDefault Set.empty name bindingDeps
+                        , not (Set.member dep seen)
+                        ]
+            in if Set.null newDeps
+               then seen
+               else go (seen <> newDeps)
+
+    expandBindingsByUses :: Set Name -> Set Name
+    expandBindingsByUses = go
+      where
+        go tainted =
+            let newTainted =
+                    Set.fromList
+                        [ name
+                        | (name, deps) <- Map.toList bindingDeps
+                        , bindingProducesCompiledCode name
+                        , not (Set.member name tainted)
+                        , not (Set.null $ Set.intersection deps tainted)
+                        ]
+            in if Set.null newTainted
+               then tainted
+               else go (tainted <> newTainted)
+
+    expandCredentialCarriers :: Set Name -> Set Name
+    expandCredentialCarriers = go
+      where
+        go carriers =
+            let newCarriers =
+                    Set.fromList
+                        [ name
+                        | (name, deps) <- Map.toList bindingDeps
+                        , bindingCarriesCompiledCredentialLike name
+                        , not (Set.member name carriers)
+                        , not (Set.null $ Set.intersection deps carriers)
+                        ]
+            in if Set.null newCarriers
+               then carriers
+               else go (carriers <> newCarriers)
+
+    bindingIsCredentialLike :: Name -> Bool
+    bindingIsCredentialLike name =
+        fromMaybe False
+            (any typeIndexMatchesCredentialLike . Set.toList <$> Map.lookup name bindingTypeIndices)
+            || fromMaybe False (nodeTypeMatchesCredentialLike <$> Map.lookup name bindingNodes)
+
+    bindingProducesCompiledCode :: Name -> Bool
+    bindingProducesCompiledCode name =
+        fromMaybe False
+            (any typeIndexReturnsCompiledCode . Set.toList <$> Map.lookup name bindingTypeIndices)
+            || fromMaybe False (nodeReturnsCompiledCode <$> Map.lookup name bindingNodes)
+            || bindingSignatureContainsCompiledCode name
+
+    bindingCarriesCompiledCredentialLike :: Name -> Bool
+    bindingCarriesCompiledCredentialLike name =
+        fromMaybe False
+            (any typeIndexContainsCompiledCredentialLike . Set.toList <$> Map.lookup name bindingTypeIndices)
+            || fromMaybe False (nodeCarriesCompiledCredentialLike <$> Map.lookup name bindingNodes)
+            || bindingSignatureContainsCompiledCredentialLike name
+
+    nodeReturnsCompiledCode :: HieAST TypeIndex -> Bool
+    nodeReturnsCompiledCode node = any typeIndexReturnsCompiledCode (nodeTypeIndices node)
+
+    typeIndexReturnsCompiledCode :: TypeIndex -> Bool
+    typeIndexReturnsCompiledCode ix =
+        hieTypeReturnsTyConName "CompiledCode" (hie_types hie Arr.! ix)
+
+    hieTypeReturnsTyConName :: String -> HieTypeFlat -> Bool
+    hieTypeReturnsTyConName needle = \case
+        HTyConApp IfaceTyCon{ifaceTyConName = tyConName} _ ->
+            occNameString (nameOccName tyConName) == needle
+        HFunTy _ _ resultIx ->
+            hieTypeReturnsTyConName needle (hie_types hie Arr.! resultIx)
+        HForAllTy _ innerIx ->
+            hieTypeReturnsTyConName needle (hie_types hie Arr.! innerIx)
+        HQualTy _ innerIx ->
+            hieTypeReturnsTyConName needle (hie_types hie Arr.! innerIx)
+        _ -> False
+
+    nodeCarriesCompiledCredentialLike :: HieAST TypeIndex -> Bool
+    nodeCarriesCompiledCredentialLike node =
+        let typeIndices = nodeTypeIndices node
+        in if null typeIndices
+            then any nodeCarriesCompiledCredentialLike (nodeChildren node)
+            else any typeIndexContainsCompiledCredentialLike typeIndices
+
+    typeIndexContainsCompiledCredentialLike :: TypeIndex -> Bool
+    typeIndexContainsCompiledCredentialLike ix =
+        hieTypeContainsCompiledCredentialLike (hie_types hie Arr.! ix)
+
+    hieTypeContainsCompiledCredentialLike :: HieTypeFlat -> Bool
+    hieTypeContainsCompiledCredentialLike = \case
+        HTyConApp IfaceTyCon{ifaceTyConName = tyConName} (HieArgs args) ->
+            let here =
+                    occNameString (nameOccName tyConName) == "CompiledCode"
+                        && any (typeIndexMatchesCredentialLike . snd) args
+            in here || any (hieTypeContainsCompiledCredentialLike . (hie_types hie Arr.!) . snd) args
+        HFunTy _ a b ->
+            hieTypeContainsCompiledCredentialLike (hie_types hie Arr.! a)
+                || hieTypeContainsCompiledCredentialLike (hie_types hie Arr.! b)
+        HForAllTy _ innerIx ->
+            hieTypeContainsCompiledCredentialLike (hie_types hie Arr.! innerIx)
+        HQualTy _ innerIx ->
+            hieTypeContainsCompiledCredentialLike (hie_types hie Arr.! innerIx)
+        _ -> False
+
+    isTopLevelBindingSpan :: RealSrcSpan -> Bool
+    isTopLevelBindingSpan span' = srcSpanStartCol span' == 1
+
+
+    collectSpanIndex :: HieAST TypeIndex -> Map RealSrcSpan (HieAST TypeIndex)
+    collectSpanIndex n@Node{nodeSpan = span', nodeChildren = children} =
+        Map.insertWith (\_new old -> old) span' n (foldMap collectSpanIndex children)
+
+    collectBindingSpans :: HieAST TypeIndex -> Map Name RealSrcSpan
+    collectBindingSpans = go mempty
+      where
+        go acc n@Node{nodeSpan = fallbackSpan, nodeChildren = children} =
+            let info = nodeInfo n
+                acc' = foldl' (insertBinding fallbackSpan) acc (Map.assocs $ nodeIdentifiers info)
+            in foldl' go acc' children
+
+        insertBinding
+            :: RealSrcSpan
+            -> Map Name RealSrcSpan
+            -> (Identifier, IdentifierDetails TypeIndex)
+            -> Map Name RealSrcSpan
+        insertBinding fallbackSpan acc (ident, details) = case ident of
+            Right name | Just bindSpan <- getBindingSpan details ->
+                Map.insertWith (\_new old -> old) name bindSpan acc
+            Right name | isTrackedBindingDetails details ->
+                Map.insertWith (\_new old -> old) name fallbackSpan acc
+            _ -> acc
+
+    collectBindingTypeIndices :: HieAST TypeIndex -> Map Name (Set TypeIndex)
+    collectBindingTypeIndices = go mempty
+      where
+        go acc n@Node{nodeChildren = children} =
+            let info = nodeInfo n
+                acc' = foldl' insertBindingType acc (Map.assocs $ nodeIdentifiers info)
+            in foldl' go acc' children
+
+        insertBindingType
+            :: Map Name (Set TypeIndex)
+            -> (Identifier, IdentifierDetails TypeIndex)
+            -> Map Name (Set TypeIndex)
+        insertBindingType acc (ident, IdentifierDetails{identInfo = identInfo', identType = Just ty}) =
+            case ident of
+                Right name | any isTrackedBindingCtx identInfo' ->
+                    Map.insertWith (<>) name (Set.singleton ty) acc
+                _ -> acc
+        insertBindingType acc _ = acc
+
+
+
+    collectMatchBoundNames :: HieAST TypeIndex -> Set Name
+    collectMatchBoundNames = go
+      where
+        go n@Node{nodeChildren = children} =
+            matchBoundsHere n <> foldMap go children
+
+        matchBoundsHere :: HieAST TypeIndex -> Set Name
+        matchBoundsHere node =
+            Set.fromList
+                [ name
+                | (Right name, IdentifierDetails{identInfo = identInfo'}) <- Map.assocs $ nodeIdentifiers $ nodeInfo node
+                , MatchBind `Set.member` identInfo'
+                ]
+
+    bindingSourceContainsLiftCode :: Name -> Bool
+    bindingSourceContainsLiftCode name = fromMaybe False $ do
+        block <- bindingSourceBlock name
+        pure $ any (`BS8.isInfixOf` block) ["liftCodeDef", "liftCode"]
+
+    bindingSourceUsesAnyBinding :: Set Name -> Name -> Bool
+    bindingSourceUsesAnyBinding names targetName =
+        let bindingOccs =
+                [ BS8.pack (occNameString $ nameOccName name)
+                | name <- Set.toList names
+                ]
+        in fromMaybe False $ do
+            block <- bindingSourceBlock targetName
+            pure $ any (`containsWordBS` block) bindingOccs
+
+    bindingSignatureContainsCompiledCode :: Name -> Bool
+    bindingSignatureContainsCompiledCode name = fromMaybe False $ do
+        sig <- bindingSignatureLine name
+        pure $ containsWordBS "CompiledCode" sig
+
+    bindingSignatureContainsCompiledCredentialLike :: Name -> Bool
+    bindingSignatureContainsCompiledCredentialLike name = fromMaybe False $ do
+        sig <- bindingSignatureLine name
+        pure $
+            containsWordBS "CompiledCode" sig
+                && any (`containsWordBS` sig)
+                    [ "PubKeyHash"
+                    , "ScriptHash"
+                    , "Credential"
+                    , "StakingCredential"
+                    , "Address"
+                    ]
+
+    bindingSignatureLine :: Name -> Maybe ByteString
+    bindingSignatureLine name = do
+        span' <- Map.lookup name bindingSpans
+        prevLine <- previousSignificantLine (srcSpanStartLine span' - 1)
+        let binderOcc = BS8.pack (occNameString $ nameOccName name)
+            trimmed = BS8.dropWhile isSpace $ lineCodePart prevLine
+        guard $ (binderOcc <> " ::") `BS8.isPrefixOf` trimmed || (binderOcc <> "::") `BS8.isPrefixOf` trimmed
+        pure trimmed
+
+    previousSignificantLine :: Int -> Maybe ByteString
+    previousSignificantLine lineNumber
+        | lineNumber < 1 = Nothing
+        | otherwise = do
+            rawLine <- snd <$> find ((== lineNumber) . fst) sourceLines
+            let trimmed = BS8.dropWhile isSpace $ lineCodePart rawLine
+            if BS8.null trimmed
+                then previousSignificantLine (lineNumber - 1)
+                else Just rawLine
+
+    bindingSourceBlock :: Name -> Maybe ByteString
+    bindingSourceBlock name = do
+        span' <- Map.lookup name bindingSpans
+        let bindingIndent = srcSpanStartCol span' - 1
+            blockLines = map snd $ takeWhile (belongsToBindingBlock (srcSpanStartLine span') bindingIndent)
+                $ drop (srcSpanStartLine span' - 1) sourceLines
+        pure $ BS8.unlines $ map lineCodePart blockLines
+
+    helperDefinitionUsesLiftCode :: Name -> Bool
+    helperDefinitionUsesLiftCode = bindingSourceContainsLiftCode
+
+    belongsToBindingBlock :: Int -> Int -> (Int, ByteString) -> Bool
+    belongsToBindingBlock startLine bindingIndent (lineNumber, rawLine)
+        | lineNumber == startLine = True
+        | otherwise =
+            let code = lineCodePart rawLine
+                stripped = BS8.dropWhile isSpace code
+            in BS8.null stripped || sourceLineIndent rawLine > bindingIndent
+
+    sourceLineIndent :: ByteString -> Int
+    sourceLineIndent = BS8.length . BS8.takeWhile isSpace
+
+    lineCodePart :: ByteString -> ByteString
+    lineCodePart = fst . BS8.breakSubstring "--"
+
+    isIdentifierChar :: Char -> Bool
+    isIdentifierChar c = isAlphaNum c || c == '_' || c == '\''
+
+    containsWordBS :: ByteString -> ByteString -> Bool
+    containsWordBS needle haystack
+        | BS8.null needle = False
+        | otherwise = go haystack
+      where
+        go bs = case BS8.breakSubstring needle bs of
+            (_before, after)
+                | BS8.null after -> False
+                | otherwise ->
+                    let idx = BS8.length bs - BS8.length after
+                        beforeCh = bs BS8.!? (idx - 1)
+                        afterCh = bs BS8.!? (idx + BS8.length needle)
+                        beforeOk = maybe True (not . isIdentifierChar) beforeCh
+                        afterOk = maybe True (not . isIdentifierChar) afterCh
+                    in if beforeOk && afterOk
+                        then True
+                        else go (BS8.drop 1 after)
+    usedBoundNamesInNode :: HieAST TypeIndex -> Set Name
+    usedBoundNamesInNode node =
+        Set.intersection trackedBindingNames (usedNamesInSubtree node)
+      where
+        trackedBindingNames = Set.fromList $ Map.keys bindingNodes
+
+    usedNamesInSubtree :: HieAST TypeIndex -> Set Name
+    usedNamesInSubtree n@Node{nodeChildren = children} =
+        usedNamesHere n <> foldMap usedNamesInSubtree children
+
+    usedNamesHere :: HieAST TypeIndex -> Set Name
+    usedNamesHere node =
+        Set.fromList
+            [ identName
+            | (Right identName, IdentifierDetails{identInfo = identInfo'}) <- Map.assocs $ nodeIdentifiers $ nodeInfo node
+            , Set.member Use identInfo'
+            ]
+
+    getBindingSpan :: IdentifierDetails TypeIndex -> Maybe RealSrcSpan
+    getBindingSpan IdentifierDetails{identInfo = identInfo'} =
+        listToMaybe $ mapMaybe spanFromCtx (toList identInfo')
+      where
+        spanFromCtx (ValBind _ _ (Just s)) = Just s
+        spanFromCtx (PatternBind _ _ (Just s)) = Just s
+        spanFromCtx _ = Nothing
+
+    isTrackedBindingDetails :: IdentifierDetails TypeIndex -> Bool
+    isTrackedBindingDetails IdentifierDetails{identInfo = identInfo'} =
+        any isTrackedBindingCtx identInfo'
+
+    isTrackedBindingCtx :: ContextInfo -> Bool
+    isTrackedBindingCtx = \case
+        ValBind _ _ _ -> True
+        PatternBind _ _ _ -> True
+        MatchBind -> True
+        _ -> False
+
+    applyCodeOperands :: HieAST TypeIndex -> Maybe (HieAST TypeIndex, HieAST TypeIndex)
+    applyCodeOperands node =
+        infixApplyCodeOperands node <|> prefixApplyCodeOperands node
+
+    infixApplyCodeOperands :: HieAST TypeIndex -> Maybe (HieAST TypeIndex, HieAST TypeIndex)
+    infixApplyCodeOperands node = do
+        guard $ nodeHasAnnotation opAppAnnotation node
+        compiledNode:opNode:argNode:_ <- Just $ nodeChildren node
+        guard $ nodeHasAnyPlutusTxOcc ["applyCode", "unsafeApplyCode"] opNode
+        pure (compiledNode, argNode)
+
+    prefixApplyCodeOperands :: HieAST TypeIndex -> Maybe (HieAST TypeIndex, HieAST TypeIndex)
+    prefixApplyCodeOperands node = do
+        guard $ nodeHasAnnotation hsAppAnnotation node
+        let (headNode, args) = appSpine node
+        guard $ nodeHasAnyPlutusTxOcc ["applyCode", "unsafeApplyCode"] headNode
+        compiledNode:argNode:_ <- Just args
+        pure (compiledNode, argNode)
+
+    directLiftCodeArgument :: HieAST TypeIndex -> Maybe (HieAST TypeIndex)
+    directLiftCodeArgument node = do
+        let (headNode, args) = appSpine node
+        guard $ nodeHasAnyPlutusTxOcc ["liftCode", "liftCodeDef"] headNode
+        lastMaybe args
+
+    liftCodeArgument :: HieAST TypeIndex -> Maybe (HieAST TypeIndex)
+    liftCodeArgument node =
+        directLiftCodeArgument node <|> foldr ((<|>) . liftCodeArgument) Nothing (nodeChildren node)
+
+    nodeHasAnyPlutusTxOcc :: [Text] -> HieAST TypeIndex -> Bool
+    nodeHasAnyPlutusTxOcc occNames = go
+      where
+        go n@Node{nodeChildren = children} =
+            any (identifierMatchesAnyPlutusTxOcc occNames) (Map.assocs $ nodeIdentifiers $ nodeInfo n)
+                || any go children
+
+    identifierMatchesAnyPlutusTxOcc
+        :: [Text]
+        -> (Identifier, IdentifierDetails TypeIndex)
+        -> Bool
+    identifierMatchesAnyPlutusTxOcc occNames (Right name, _details) =
+        any (\occName -> nameMatchesExternal "plutus-tx" "PlutusTx" occName name) occNames
+    identifierMatchesAnyPlutusTxOcc _ _ = False
+
+    nodeTypeMatchesCredentialLike :: HieAST TypeIndex -> Bool
+    nodeTypeMatchesCredentialLike node =
+        let typeIndices = nodeTypeIndices node
+        in if null typeIndices
+            then any nodeTypeMatchesCredentialLike (nodeChildren node)
+            else any typeIndexMatchesCredentialLike typeIndices
+
+    typeIndexMatchesCredentialLike :: TypeIndex -> Bool
+    typeIndexMatchesCredentialLike ix =
+        hieTypeMatchesCredentialLike (hie_types hie Arr.! ix)
+
+    hieTypeMatchesCredentialLike :: HieTypeFlat -> Bool
+    hieTypeMatchesCredentialLike = \case
+        HTyConApp IfaceTyCon{ifaceTyConName = tyConName} _ ->
+            isCredentialLikeTyCon tyConName
+        HForAllTy _ innerIx ->
+            typeIndexMatchesCredentialLike innerIx
+        HQualTy _ innerIx ->
+            typeIndexMatchesCredentialLike innerIx
+        _ -> False
+
+    isCredentialLikeTyCon :: Name -> Bool
+    isCredentialLikeTyCon tyConName =
+        any (\occName -> nameMatchesExternal "plutus-ledger-api" "PlutusLedgerApi" occName tyConName)
+            [ "PubKeyHash"
+            , "ScriptHash"
+            , "Credential"
+            , "StakingCredential"
+            , "Address"
+            ]
+
+    nameMatchesExternal :: Text -> Text -> Text -> Name -> Bool
+    nameMatchesExternal packageName modulePrefix occName name
+        | not (isExternalName name) = False
+        | otherwise =
+            let moduleName = fromGhcModule $ nameModule name
+            in modulePrefix `T.isPrefixOf` unModuleName moduleName
+                && compareNames
+                    NameMeta
+                        { nameMetaPackage = packageName
+                        , nameMetaModuleName = moduleName
+                        , nameMetaName = occName
+                        }
+                    name
+
+    nodeTypeIndices :: HieAST TypeIndex -> [TypeIndex]
+    nodeTypeIndices node =
+        let NodeInfo{nodeType = nodeTypes, nodeIdentifiers = identifiers} = nodeInfo node
+            identTypes =
+                [ ty
+                | (_ident, IdentifierDetails{identType = Just ty}) <- Map.assocs identifiers
+                ]
+        in nodeTypes <> identTypes
+
+    nodeHasAnnotation :: NodeAnnotation -> HieAST TypeIndex -> Bool
+    nodeHasAnnotation ann node =
+        let NodeInfo{nodeAnnotations = nodeAnnotations'} = nodeInfo node
+        in ann `Set.member` Set.map toNodeAnnotation nodeAnnotations'
+
+    appSpine :: HieAST TypeIndex -> (HieAST TypeIndex, [HieAST TypeIndex])
+    appSpine node = case node of
+        n@Node{nodeChildren = appFun:arg:_}
+            | nodeHasAnnotation hsAppAnnotation n ->
+                let (f, args) = appSpine appFun
+                in (f, args <> [arg])
+        _ -> (node, [])
+
+    lastMaybe :: [a] -> Maybe a
+    lastMaybe = \case
+        [] -> Nothing
+        [x] -> Just x
+        _ : xs -> lastMaybe xs
+
+    hsAppAnnotation :: NodeAnnotation
+    hsAppAnnotation = mkNodeAnnotation "HsApp" "HsExpr"
+
+    opAppAnnotation :: NodeAnnotation
+    opAppAnnotation = mkNodeAnnotation "OpApp" "HsExpr"
 
 analyseUnsafeFromBuiltinDataInHashComparison
     :: Id Inspection

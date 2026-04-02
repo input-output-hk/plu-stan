@@ -20,12 +20,13 @@ module Test.Stan.Analysis.PlutusTx (
   plustan18Spec,
   plustan19Spec,
   plustan20Spec,
+  plustan21Spec,
 ) where
 
 import Test.Hspec (Spec, describe, it)
 
 import Stan.Analysis (Analysis)
-import Test.Stan.Analysis.Common (noObservationAssert, observationAssert)
+import Test.Stan.Analysis.Common (noObservationAssert, observationAssert, observationAssertMulti)
 
 import qualified Stan.Inspection.AntiPattern as AntiPattern
 
@@ -51,6 +52,7 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   plustan18Spec analysis
   plustan19Spec analysis
   plustan20Spec analysis
+  plustan21Spec analysis
 
 plustan01Spec :: Analysis -> Spec
 plustan01Spec analysis = describe "PLU-STAN-01" $ do
@@ -570,6 +572,8 @@ plustan19Spec analysis = describe "PLU-STAN-19" $ do
 plustan20Spec :: Analysis -> Spec
 plustan20Spec analysis = describe "PLU-STAN-20" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
+      checkObservationMulti = observationAssertMulti ["PlutusTx"] analysis
+      checkNoObservation = noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20
 
   it "flags valueOf mint-only logic without burn path" $
     checkObservation AntiPattern.plustan20 1413 6 22
@@ -901,3 +905,52 @@ plustan20Spec analysis = describe "PLU-STAN-20" $ do
 
   it "flags flattenValue logic when comma-separated guard clauses validate different assets" $
     checkObservation AntiPattern.plustan20 2545 65 75
+
+
+plustan21Spec :: Analysis -> Spec
+plustan21Spec analysis = describe "PLU-STAN-21" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+      checkObservationMulti = observationAssertMulti ["PlutusTx"] analysis
+      checkNoObservation = noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan21
+
+  it "flags validator-reachable top-level PubKeyHash constants" $
+    checkObservationMulti AntiPattern.plustan21 2552 1 2553 58
+
+  it "flags validator-reachable top-level StakingCredential constants" $
+    checkObservationMulti AntiPattern.plustan21 2557 1 2558 61
+
+  it "flags validator-reachable top-level Address constants" $
+    checkObservationMulti AntiPattern.plustan21 2562 1 2563 99
+
+  it "does not flag top-level credentials that are never specialized" $
+    checkNoObservation 2567
+
+  it "flags locally scoped applyCode credentials in isolation" $
+    checkObservation AntiPattern.plustan21 2578 68 81
+
+  it "flags credential-like address arguments baked in via unsafeApplyCode" $
+    checkObservation AntiPattern.plustan21 2587 41 67
+
+  it "flags top-level Credential bindings without explicit signatures" $
+    checkObservationMulti AntiPattern.plustan21 2590 1 2591 47
+
+  it "flags helper-flow baked credentials passed via lifted helper bindings" $
+    checkObservation AntiPattern.plustan21 2602 29 45
+
+  it "flags validator-reachable top-level ScriptHash constants" $
+    checkObservationMulti AntiPattern.plustan21 2606 1 2607 58
+
+  it "flags multiline ScriptHash specializations" $
+    checkObservation AntiPattern.plustan21 2618 9 38
+
+  it "does not flag non-credential lifted arguments" $
+    checkNoObservation 2626
+
+  it "flags MatchBind helper functions that lift credentials" $
+    checkObservation AntiPattern.plustan21 2638 29 45
+
+  it "does not flag mixed lifted bindings when only a non-credential projection is applied" $
+    checkNoObservation 2642
+
+  it "flags mixed lifted bindings when the credential projection is specialized" $
+    checkObservation AntiPattern.plustan21 2668 29 47

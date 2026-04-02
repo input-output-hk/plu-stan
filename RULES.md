@@ -258,7 +258,8 @@ isMaybeStakingCredential' b =
 ## Bindings
 
 - **Non-strict `let` bindings used multiple times:** Make them strict to avoid repeated evaluation. (**Stan:** implemented via `PLU-STAN-08`)
-- **Hardcoded values:** Most ledger-dependent values change across hardforks. Avoid hardcoding unless truly constant; prefer dynamic retrieval or explicit acknowledgment that the value is invariant. 
+- **Immutable credentials baked into validator code:** Validator-reachable top-level `PubKeyHash` / `Credential` / `StakingCredential` / `Address` / `ScriptHash` bindings, or credential-like values specialized into validators with `applyCode` / `unsafeApplyCode`, cannot be rotated on-chain. Prefer storing mutable credentials in datum/state and document intentional immutability. (**Stan:** implemented via `PLU-STAN-21`)
+- **Hardcoded values:** Most ledger-dependent values change across hardforks. Avoid hardcoding unless truly constant; prefer dynamic retrieval or explicit acknowledgment that the value is invariant.
 
 ## Guards
 

@@ -2546,3 +2546,123 @@ plutStan20FlattenCommaGuardDifferentAssetsShouldTrigger ctx =
         | currency == Value.adaSymbol, token == otherToken, amount < 0 -> True
         | otherwise -> False
       _ -> False
+
+plutStan21ImmutableAdminKey :: PubKeyHash
+-- PLU-STAN-21 (should trigger): top-level credential constant is immutable.
+plutStan21ImmutableAdminKey =
+  PubKeyHash (BI.stringToBuiltinByteStringHex "deadbeef")
+
+plutStan21ImmutableStakeCredential :: StakingCredential
+-- PLU-STAN-21 (should trigger): top-level staking credential constant is immutable.
+plutStan21ImmutableStakeCredential =
+  StakingHash (PubKeyCredential plutStan21ImmutableAdminKey)
+
+plutStan21ImmutableAddress :: Address
+-- PLU-STAN-21 (should trigger): top-level address constant is immutable.
+plutStan21ImmutableAddress =
+  Address (PubKeyCredential plutStan21ImmutableAdminKey) (Just plutStan21ImmutableStakeCredential)
+
+plutStan21UnusedAdminKeyShouldPass :: PubKeyHash
+-- PLU-STAN-21 (should NOT trigger): top-level credentials outside compiled-validator specialization are out of scope.
+plutStan21UnusedAdminKeyShouldPass =
+  PubKeyHash (BI.stringToBuiltinByteStringHex "cafebabe")
+
+plutStan21CompiledAdminValidator :: Tx.CompiledCode (PubKeyHash -> BuiltinData -> BuiltinData)
+plutStan21CompiledAdminValidator = undefined
+
+plutStan21BakedLocalCredentialApplyCode :: Either String (Tx.CompiledCode (BuiltinData -> BuiltinData))
+-- PLU-STAN-21 (should trigger): locally scoped credentials specialized with applyCode are still baked into the validator.
+plutStan21BakedLocalCredentialApplyCode =
+  let localAdminKey :: PubKeyHash
+      localAdminKey = PubKeyHash (BI.stringToBuiltinByteStringHex "deadbeef")
+  in Tx.applyCode plutStan21CompiledAdminValidator (Tx.liftCodeDef localAdminKey)
+
+plutStan21CompiledAddressValidator :: Tx.CompiledCode (Address -> BuiltinData -> BuiltinData)
+plutStan21CompiledAddressValidator = undefined
+
+plutStan21BakedAddressUnsafeApplyCode :: Tx.CompiledCode (BuiltinData -> BuiltinData)
+-- PLU-STAN-21 (should trigger): credential-like address baked into compiled code via unsafeApplyCode.
+plutStan21BakedAddressUnsafeApplyCode =
+  plutStan21CompiledAddressValidator
+    `Tx.unsafeApplyCode` Tx.liftCodeDef plutStan21ImmutableAddress
+
+-- Intentionally left without a standalone type signature to exercise semantic binder-type detection.
+plutStan21ImplicitCredential =
+  PubKeyCredential plutStan21ImmutableAdminKey
+
+plutStan21CompiledCredentialValidator :: Tx.CompiledCode (Credential -> BuiltinData -> BuiltinData)
+plutStan21CompiledCredentialValidator = undefined
+
+plutStan21BakedCredentialHelperFlow :: Tx.CompiledCode (BuiltinData -> BuiltinData)
+-- PLU-STAN-21 (should trigger): helper indirection before and after liftCodeDef still bakes the credential into the validator.
+plutStan21BakedCredentialHelperFlow =
+  let credentialHelper = plutStan21ImplicitCredential
+      liftedCredential = Tx.liftCodeDef credentialHelper
+  in plutStan21CompiledCredentialValidator
+       `Tx.unsafeApplyCode` liftedCredential
+
+plutStan21ImmutableScriptHash :: ScriptHash
+-- PLU-STAN-21 (should trigger): top-level script hash specialized into validator code is immutable.
+plutStan21ImmutableScriptHash =
+  ScriptHash (BI.stringToBuiltinByteStringHex "deadbeef")
+
+plutStan21CompiledScriptHashValidator :: Tx.CompiledCode (ScriptHash -> BuiltinData -> BuiltinData)
+plutStan21CompiledScriptHashValidator = undefined
+
+plutStan21BakedScriptHashMultilineApplyCode :: Either String (Tx.CompiledCode (BuiltinData -> BuiltinData))
+-- PLU-STAN-21 (should trigger): multiline ScriptHash specialization still bakes the hash into compiled code.
+plutStan21BakedScriptHashMultilineApplyCode =
+  Tx.applyCode
+    plutStan21CompiledScriptHashValidator
+    ( Tx.liftCodeDef
+        plutStan21ImmutableScriptHash
+    )
+
+plutStan21CompiledIntegerValidator :: Tx.CompiledCode (Integer -> BuiltinData -> BuiltinData)
+plutStan21CompiledIntegerValidator = undefined
+
+plutStan21BakedIntegerShouldPass :: Tx.CompiledCode (BuiltinData -> BuiltinData)
+-- PLU-STAN-21 (should NOT trigger): non-credential parameters are out of scope.
+plutStan21BakedIntegerShouldPass =
+  plutStan21CompiledIntegerValidator
+    `Tx.unsafeApplyCode` Tx.liftCodeDef (42 :: Integer)
+
+plutStan21MatchBindLiftHelperFlow :: Tx.CompiledCode (BuiltinData -> BuiltinData)
+-- PLU-STAN-21 (should trigger): MatchBind helper functions that lift credentials still bake them into validator code.
+plutStan21MatchBindLiftHelperFlow =
+  let liftCredential :: Credential -> Tx.CompiledCode Credential
+      liftCredential cred = Tx.liftCodeDef cred
+      liftedCredential :: Tx.CompiledCode Credential
+      liftedCredential = liftCredential plutStan21ImplicitCredential
+  in plutStan21CompiledCredentialValidator
+       `Tx.unsafeApplyCode` liftedCredential
+
+plutStan21MixedLiftedTupleProjectionShouldPass :: Tx.CompiledCode (BuiltinData -> BuiltinData)
+-- PLU-STAN-21 (should NOT trigger): selecting a non-credential lifted value from a mixed helper binding stays out of scope.
+plutStan21MixedLiftedTupleProjectionShouldPass =
+  let liftedCredential :: Tx.CompiledCode Credential
+      liftedCredential = Tx.liftCodeDef plutStan21ImplicitCredential
+      liftedInteger :: Tx.CompiledCode Integer
+      liftedInteger = Tx.liftCodeDef (42 :: Integer)
+      liftedArgs :: (Tx.CompiledCode Credential, Tx.CompiledCode Integer)
+      liftedArgs = (liftedCredential, liftedInteger)
+      selectedInteger :: Tx.CompiledCode Integer
+      selectedInteger = case liftedArgs of
+        (_credentialArg, integerArg) -> integerArg
+  in plutStan21CompiledIntegerValidator
+       `Tx.unsafeApplyCode` selectedInteger
+
+plutStan21MixedLiftedTupleCredentialProjection :: Tx.CompiledCode (BuiltinData -> BuiltinData)
+-- PLU-STAN-21 (should trigger): selecting the credential-like lifted value from a mixed helper binding still bakes it into validator code.
+plutStan21MixedLiftedTupleCredentialProjection =
+  let liftedCredential :: Tx.CompiledCode Credential
+      liftedCredential = Tx.liftCodeDef plutStan21ImplicitCredential
+      liftedInteger :: Tx.CompiledCode Integer
+      liftedInteger = Tx.liftCodeDef (42 :: Integer)
+      liftedArgs :: (Tx.CompiledCode Credential, Tx.CompiledCode Integer)
+      liftedArgs = (liftedCredential, liftedInteger)
+      selectedCredential :: Tx.CompiledCode Credential
+      selectedCredential = case liftedArgs of
+        (credentialArg, _integerArg) -> credentialArg
+  in plutStan21CompiledCredentialValidator
+       `Tx.unsafeApplyCode` selectedCredential
