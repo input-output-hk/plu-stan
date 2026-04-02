@@ -14,12 +14,13 @@ module Stan.Analysis.Analyser
 import Extensions (ExtensionsResult)
 import GHC.LanguageExtensions.Type (Extension (Strict, StrictData))
 import Slist (Slist)
+import qualified Data.Text as T
 
 import Stan.Analysis.Visitor (Visitor (..), VisitorState (..), addFixity, addObservation,
                               addObservations, addOpDecl, getFinalObservations)
 import Stan.Core.Id (Id)
 import Stan.Core.List (nonRepeatingPairs)
-import Stan.Core.ModuleName (ModuleName (..))
+import Stan.Core.ModuleName (ModuleName (..), fromGhcModule)
 import Stan.FileInfo (isExtensionDisabled)
 import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, nameModule, nameOccName, occNameString,
                         srcSpanEndCol, srcSpanEndLine, srcSpanStartCol, srcSpanStartLine,
@@ -86,6 +87,7 @@ createVisitor hie exts inspections = Visitor $ \node ->
         PrecisionLossDivisionBeforeMultiply -> analysePrecisionLossDivisionBeforeMultiply inspectionId hie node
         RedeemerSuppliedIndicesUniqueness -> analyseRedeemerSuppliedIndicesUniqueness inspectionId hie node
         LazyAndInOnChainCode -> analyseLazyAndInOnChainCode inspectionId hie node
+        ImmutableCredential -> analyseImmutableCredential inspectionId hie node
         MissingTxOutReferenceScriptCheck -> analyseMissingTxOutReferenceScriptCheck inspectionId hie node
         MissingTxOutStakingCredentialCheck -> analyseMissingTxOutStakingCredentialCheck inspectionId hie node
         MissingTxOutValueCheck -> analyseMissingTxOutValueCheck inspectionId hie node

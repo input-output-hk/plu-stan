@@ -132,6 +132,8 @@ data InspectionAnalysis
     | RedeemerSuppliedIndicesUniqueness
     -- | `&&` used in on-chain code (prefer strict builtinAnd).
     | LazyAndInOnChainCode
+    -- | Credential-like values are stored top-level or baked into compiled code.
+    | ImmutableCredential
     -- | TxOut validation misses reference script checks.
     | MissingTxOutReferenceScriptCheck
     -- | TxOut validation misses staking credential checks.
