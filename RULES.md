@@ -190,6 +190,9 @@ isMaybeStakingCredential' b =
   ```
   This passes the `Burn` check while still minting `TokenB`.
 
+- **Minting logic without burning logic:** Policies that validate only positive mint amounts can block required burn flows (or make protocol paths unfulfillable). (**Stan:** implemented via `PLU-STAN-20`)
+  - **Detector:** Flags `valueOf`/`flattenValue` checks over `txInfoMint` that validate minting (`> 0`, `>= 0`, or `== positive`) but do not validate burning (`< 0`, `<= 0`, or `== negative`) in the same function logic.
+
 ## Equality
 
 - **Eq on `ScriptHash` / `PubKeyHash` / `PaymentCredential`:** Potential staking value theft. Prefer equality on full `Address`. (**Stan:** implemented via `PLU-STAN-04`)
@@ -255,7 +258,8 @@ isMaybeStakingCredential' b =
 ## Bindings
 
 - **Non-strict `let` bindings used multiple times:** Make them strict to avoid repeated evaluation. (**Stan:** implemented via `PLU-STAN-08`)
-- **Hardcoded values:** Most ledger-dependent values change across hardforks. Avoid hardcoding unless truly constant; prefer dynamic retrieval or explicit acknowledgment that the value is invariant. 
+- **Immutable credentials baked into validator code:** Validator-reachable top-level `PubKeyHash` / `Credential` / `StakingCredential` / `Address` / `ScriptHash` bindings, or credential-like values specialized into validators with `applyCode` / `unsafeApplyCode`, cannot be rotated on-chain. Prefer storing mutable credentials in datum/state and document intentional immutability. (**Stan:** implemented via `PLU-STAN-21`)
+- **Hardcoded values:** Most ledger-dependent values change across hardforks. Avoid hardcoding unless truly constant; prefer dynamic retrieval or explicit acknowledgment that the value is invariant.
 
 ## Guards
 
