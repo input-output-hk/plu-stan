@@ -1,10 +1,15 @@
 {
   "name": "vscode-plustan",
-  "displayName": "Plu-Stan (VS Code/Cursor)",
-  "description": "Standalone VS Code/Cursor extension for onchain module discovery and Plu-Stan analysis.",
-  "version": "0.0.8",
-  "publisher": "local",
+  "displayName": "Plu-Stan",
+  "description": "Security and performance static analysis for Cardano smart contracts written in Plinth.",
+  "version": "0.0.11",
+  "icon": "media/logo.png",
+  "publisher": "IOG",
   "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/input-output-hk/plu-stan"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -119,7 +124,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package:vsix": "npx @vscode/vsce package"
+    "package:vsix": "npx @vscode/vsce package --readme-path MARKETPLACE.md"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

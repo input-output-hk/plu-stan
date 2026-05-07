@@ -1,5 +1,7 @@
 # Plu-Stan
 
+![Plu-Stan](media/banner.png)
+
 [![GitHub CI](https://github.com/input-output-hk/plu-stan/actions)](https://github.com/input-output-hk/plu-stan/actions)
 [![MPL-2.0 license](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](https://github.com/kowainik/stan/blob/main/LICENSE)
 
@@ -112,7 +114,7 @@ plustan analyze --json
 plustan analyze --json --module Target.PlutusTx
 ```
 
-The repository also includes a standalone VS Code/Cursor extension scaffold in `vscode-plustan/`.
+The repository also includes a VS Code/Cursor extension available on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=IOG.vscode-plustan). Source is in `vscode-plustan/`.
 
 ### Haskell language server integration
 
