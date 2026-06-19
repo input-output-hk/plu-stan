@@ -101,8 +101,22 @@ jobs:
         with:
           file: ${{ env.BINARY_PATH }}
 
+      # See Note [environment variables]
+      - if: matrix.os == 'windows-latest'
+        name: Copy binary to unique asset name on Windows
+        run: |
+          Copy-Item "${{ env.BINARY_PATH }}" "./dist/stan-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe"
+          echo "ASSET_PATH=./dist/stan-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}.exe" >> $env:GITHUB_ENV
+
+      # See Note [environment variables]
+      - if: matrix.os != 'windows-latest'
+        name: Copy binary to unique asset name not on Windows
+        run: |
+          cp "${{ env.BINARY_PATH }}" "./dist/stan-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}"
+          echo "ASSET_PATH=./dist/stan-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}" >> "$GITHUB_ENV"
+
       - name: Upload Release Asset
-        run: gh release upload ${{ github.ref_name }} "${{ env.BINARY_PATH }}#stan-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}"
+        run: gh release upload ${{ github.ref_name }} "${{ env.ASSET_PATH }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
