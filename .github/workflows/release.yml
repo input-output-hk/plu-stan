@@ -71,7 +71,7 @@ jobs:
           sudo install -m 644 bindings/blst.h bindings/blst_aux.h /usr/local/include/
           sudo install -m 644 libblst.a /usr/local/lib/
           sudo mkdir -p /usr/local/lib/pkgconfig
-          printf 'Name: blst\nVersion: 0.3\nDescription: BLS12-381 signature library\nLibs: -L/usr/local/lib -lblst\nCflags: -I/usr/local/include\n' | sudo tee /usr/local/lib/pkgconfig/blst.pc
+          printf 'Name: libblst\nVersion: 0.3\nDescription: BLS12-381 signature library\nLibs: -L/usr/local/lib -lblst\nCflags: -I/usr/local/include\n' | sudo tee /usr/local/lib/pkgconfig/libblst.pc
           echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
 
       - name: Install system dependencies (macOS)
