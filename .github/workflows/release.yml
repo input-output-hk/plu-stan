@@ -164,6 +164,8 @@ jobs:
           cabal install exe:plustan --install-method=copy --overwrite-policy=always --installdir=dist
 
       - name: Upload plustan canonical asset
-        run: gh release upload ${{ github.ref_name }} "./dist/${{ matrix.binary }}#plustan-${{ steps.tag.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}"
+        run: |
+          cp "./dist/${{ matrix.binary }}" "./dist/plustan-${{ steps.tag.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}"
+          gh release upload ${{ github.ref_name }} "./dist/plustan-${{ steps.tag.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
