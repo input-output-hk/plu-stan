@@ -143,3 +143,86 @@ jobs:
           asset_path: ${{ env.BINARY_PATH }}
           asset_name: stan-${{ steps.tag.outputs.tag }}-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
           asset_content_type: application/octet-stream
+
+  build_plustan_canonical:
+    needs: [create_release]
+    name: plustan / ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            binary: plustan
+            ext: ""
+          - os: macos-latest
+            target: darwin-arm64
+            binary: plustan
+            ext: ""
+          - os: macos-13
+            target: darwin-x64
+            binary: plustan
+            ext: ""
+          - os: windows-latest
+            target: windows-x64
+            binary: plustan.exe
+            ext: ".exe"
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set tag name
+        uses: olegtarasov/get-tag@v2.1.2
+        id: tag
+        with:
+          tagRegex: "v(.*)"
+          tagRegexGroup: 1
+
+      - name: Setup Haskell
+        uses: haskell/actions/setup@v2.4.7
+        id: setup-haskell-cabal
+        with:
+          ghc-version: "9.6.7"
+          cabal-version: "3.12"
+
+      - name: Freeze
+        run: cabal freeze
+
+      - name: Cache ~/.cabal/store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
+          key: ${{ runner.os }}-9.6.7-plustan-${{ hashFiles('cabal.project.freeze') }}
+
+      - name: Build plustan binary
+        run: |
+          mkdir dist
+          cabal install exe:plustan --install-method=copy --overwrite-policy=always --installdir=dist
+
+      - name: Load Release URL File from release job
+        uses: actions/download-artifact@v3
+        with:
+          name: release_url
+          path: release_url
+
+      # See Note [environment variables]
+      - if: matrix.os == 'windows-latest'
+        name: Get Upload URL (Windows)
+        run: echo "upload_url=$(cat release_url/release_url.txt)" >> $env:GITHUB_ENV
+
+      # See Note [environment variables]
+      - if: matrix.os != 'windows-latest'
+        name: Get Upload URL (non-Windows)
+        run: echo "upload_url=$(cat release_url/release_url.txt)" >> "$GITHUB_ENV"
+
+      - name: Upload plustan canonical asset
+        uses: actions/upload-release-asset@v1.0.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ env.upload_url }}
+          asset_path: ./dist/${{ matrix.binary }}
+          asset_name: plustan-${{ steps.tag.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}
+          asset_content_type: application/octet-stream

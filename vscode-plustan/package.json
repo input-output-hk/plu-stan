@@ -24,15 +24,7 @@
     "Linters",
     "Programming Languages"
   ],
-  "activationEvents": [
-    "onView:plustanOnchainModules",
-    "onCommand:plustan.refreshOnchainModules",
-    "onCommand:plustan.runWorkspace",
-    "onCommand:plustan.runModule",
-    "onCommand:plustan.clearDiagnostics",
-    "onCommand:plustan.openOutput",
-    "onCommand:plustan.openSettings"
-  ],
+
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -59,6 +51,10 @@
       {
         "command": "plustan.openSettings",
         "title": "Plu-Stan: Open Settings"
+      },
+      {
+        "command": "plustan.checkForUpdates",
+        "title": "Plu-Stan: Check for Updates"
       }
     ],
     "viewsContainers": {

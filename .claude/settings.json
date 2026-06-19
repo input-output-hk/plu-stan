@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\Romain\\\\Documents\\\\GitHub\\\\plu-stan\" | Where-Object { $_.Name -ne '.git' } | Select-Object Name, PSIsContainer)"
+    ]
+  }
+}

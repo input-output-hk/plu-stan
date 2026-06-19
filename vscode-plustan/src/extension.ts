@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import * as vscode from "vscode";
+import { getCachedBinaryPath, offerDownload, checkForUpdates } from "./downloadManager";
 
 type AnnotationSource = "hi" | "source" | "both";
 type RunScope = "all" | "module";
@@ -170,6 +171,20 @@ export function activate(context: vscode.ExtensionContext): void {
   const diagnostics = vscode.languages.createDiagnosticCollection("plu-stan");
   const provider = new OnchainModulesProvider();
 
+  const resolveSettings = (folder: vscode.WorkspaceFolder): PluStanSettings => {
+    const settings = readSettings(folder);
+    if (!settings.binaryPath) {
+      const cached = getCachedBinaryPath(context.globalState);
+      if (cached) return { ...settings, binaryPath: cached };
+    }
+    return settings;
+  };
+
+  const isEffectivelyConfigured = (folder: vscode.WorkspaceFolder): boolean => {
+    const settings = readSettings(folder);
+    return hasConfiguredBinaryPath(settings) || getCachedBinaryPath(context.globalState) !== undefined;
+  };
+
   context.subscriptions.push(output, diagnostics);
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("plustanOnchainModules", provider)
@@ -190,12 +205,12 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!folder) {
         return;
       }
-      const settings = await ensureBinaryConfigured(folder, provider);
+      const settings = await ensureBinaryConfigured(folder, provider, resolveSettings);
       if (!settings) {
         return;
       }
       await withUserProgress("Refreshing onchain modules", async (token) => {
-        const payload = await runListOnchain(folder, output, token);
+        const payload = await runListOnchain(settings, output, token);
         appendOnchainModulesSummary(payload, folder, output);
         provider.setData(payload.modules, payload.workspaceRoot);
         vscode.window.setStatusBarMessage(
@@ -215,12 +230,12 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!folder) {
         return;
       }
-      const settings = await ensureBinaryConfigured(folder, provider);
+      const settings = await ensureBinaryConfigured(folder, provider, resolveSettings);
       if (!settings) {
         return;
       }
       await withUserProgress("Running Plu-Stan on workspace", async (token) => {
-        const payload = await runAnalyze(folder, output, token);
+        const payload = await runAnalyze(settings, output, token);
         appendAnalyzeSummary(payload, folder, output);
         publishDiagnostics(payload, folder, diagnostics);
         vscode.window.setStatusBarMessage(
@@ -240,16 +255,16 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!folder) {
         return;
       }
-      const settings = await ensureBinaryConfigured(folder, provider);
+      const settings = await ensureBinaryConfigured(folder, provider, resolveSettings);
       if (!settings) {
         return;
       }
       await withUserProgress("Running Plu-Stan on module", async (token) => {
-        const moduleName = item?.moduleInfo.moduleName ?? (await pickModuleName(provider, folder, output, token));
+        const moduleName = item?.moduleInfo.moduleName ?? (await pickModuleName(provider, settings, folder, output, token));
         if (!moduleName) {
           return;
         }
-        const payload = await runAnalyze(folder, output, token, moduleName);
+        const payload = await runAnalyze(settings, output, token, moduleName);
         appendAnalyzeSummary(payload, folder, output);
         publishDiagnostics(payload, folder, diagnostics);
         vscode.window.setStatusBarMessage(
@@ -274,14 +289,23 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("plustan.checkForUpdates", async () => {
+      await checkForUpdates(context, output);
+      try {
+        const folder = getWorkspaceFolder();
+        provider.setBinaryConfigured(isEffectivelyConfigured(folder));
+      } catch { /* no workspace open */ }
+    })
+  );
+
+  context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(async (event) => {
       if (!event.affectsConfiguration("plustan.binaryPath")) {
         return;
       }
       try {
         const folder = getWorkspaceFolder();
-        const settings = readSettings(folder);
-        provider.setBinaryConfigured(hasConfiguredBinaryPath(settings));
+        provider.setBinaryConfigured(isEffectivelyConfigured(folder));
       } catch {
         provider.setBinaryConfigured(false);
       }
@@ -290,8 +314,15 @@ export function activate(context: vscode.ExtensionContext): void {
 
   try {
     const folder = getWorkspaceFolder();
-    const settings = readSettings(folder);
-    provider.setBinaryConfigured(hasConfiguredBinaryPath(settings));
+    const configured = isEffectivelyConfigured(folder);
+    provider.setBinaryConfigured(configured);
+    if (!configured) {
+      void offerDownload(context, output).then((downloadedPath) => {
+        if (downloadedPath) {
+          provider.setBinaryConfigured(true);
+        }
+      });
+    }
   } catch {
     provider.setBinaryConfigured(false);
   }
@@ -303,13 +334,14 @@ export function deactivate(): void {
 
 async function pickModuleName(
   provider: OnchainModulesProvider,
+  settings: PluStanSettings,
   folder: vscode.WorkspaceFolder,
   output: vscode.OutputChannel,
   token: vscode.CancellationToken
 ): Promise<string | undefined> {
   let modules = provider.getData();
   if (modules.length === 0) {
-    const payload = await runListOnchain(folder, output, token);
+    const payload = await runListOnchain(settings, output, token);
     provider.setData(payload.modules, payload.workspaceRoot);
     modules = payload.modules;
   }
@@ -334,11 +366,10 @@ async function pickModuleName(
 }
 
 async function runListOnchain(
-  folder: vscode.WorkspaceFolder,
+  settings: PluStanSettings,
   output: vscode.OutputChannel,
   token: vscode.CancellationToken
 ): Promise<ListOnchainPayload> {
-  const settings = readSettings(folder);
   const payload = await runPluStanJson<ListOnchainPayload>(
     ["list-onchain", "--json", "--hiedir", settings.hieDir],
     settings,
@@ -354,12 +385,11 @@ async function runListOnchain(
 }
 
 async function runAnalyze(
-  folder: vscode.WorkspaceFolder,
+  settings: PluStanSettings,
   output: vscode.OutputChannel,
   token: vscode.CancellationToken,
   moduleName?: string
 ): Promise<AnalyzePayload> {
-  const settings = readSettings(folder);
   const args = ["analyze", "--json", "--hiedir", settings.hieDir, ...settings.extraArgs];
   if (moduleName) {
     args.push("--module", moduleName);
@@ -490,9 +520,10 @@ function hasConfiguredBinaryPath(settings: PluStanSettings): boolean {
 
 async function ensureBinaryConfigured(
   folder: vscode.WorkspaceFolder,
-  provider: OnchainModulesProvider
+  provider: OnchainModulesProvider,
+  resolveSettings: (f: vscode.WorkspaceFolder) => PluStanSettings
 ): Promise<PluStanSettings | undefined> {
-  const settings = readSettings(folder);
+  const settings = resolveSettings(folder);
   const configured = hasConfiguredBinaryPath(settings);
   provider.setBinaryConfigured(configured);
   if (configured) {
@@ -500,10 +531,13 @@ async function ensureBinaryConfigured(
   }
 
   const choice = await vscode.window.showWarningMessage(
-    "Set `plustan.binaryPath` in settings before running Plu-Stan commands.",
+    "No plu-stan binary found. Download one or set `plustan.binaryPath` in settings.",
+    "Download",
     "Open Settings"
   );
-  if (choice) {
+  if (choice === "Download") {
+    await vscode.commands.executeCommand("plustan.checkForUpdates");
+  } else if (choice === "Open Settings") {
     await vscode.commands.executeCommand("plustan.openSettings");
   }
   return undefined;
