@@ -14,7 +14,7 @@
 
 - The `plustan` binary built from [input-output-hk/plu-stan](https://github.com/input-output-hk/plu-stan)
 - A Haskell workspace compiled with `.hie`/`.hi` artifacts (Plu-Stan will trigger a build automatically if needed)
-- GHC 9.6.6+ and the Cardano system libraries (`secp256k1`, `sodium`, `blst`)
+- A GHC the extension ships a prebuilt binary for (currently 9.6.7, 9.8.4, 9.10.3, 9.12.2). The `plustan` binary reads `.hie` files, whose format is locked to the **exact** GHC version that produced them, so the extension auto-downloads the binary matching your project's GHC. If your project uses a different GHC, build `plustan` with that GHC and set `plustan.binaryPath`.
 
 ## Getting Started
 
