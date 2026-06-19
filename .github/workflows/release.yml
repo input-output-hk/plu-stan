@@ -97,7 +97,7 @@ jobs:
         run: echo "BINARY_PATH=./dist/stan" >> "$GITHUB_ENV"
 
       - name: Compress binary
-        uses: svenstaro/upx-action@v2.4.1
+        uses: svenstaro/upx-action@2.4.1
         with:
           file: ${{ env.BINARY_PATH }}
 
@@ -160,7 +160,7 @@ jobs:
         uses: haskell/actions/setup@v2.4.7
         id: setup-haskell-cabal
         with:
-          ghc-version: "9.6.7"
+          ghc-version: "9.6.6"
           cabal-version: "3.12"
 
       - name: Freeze
@@ -170,7 +170,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
-          key: ${{ runner.os }}-9.6.7-plustan-${{ hashFiles('cabal.project.freeze') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-9.6.6-plustan-${{ hashFiles('cabal.project.freeze') }}
 
       - name: Build plustan binary
         run: |
