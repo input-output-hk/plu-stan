@@ -45,13 +45,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macOS-latest, windows-latest]
         ghc:
-          - "8.8.4"
-          - "8.10.7"
-          - "9.0.2"
-          - "9.2.3"
-          - "9.4.7"
-          - "9.6.3"
-        cabal: ["3.8"]
+          - "9.6.6"
+          - "9.8.4"
+          - "9.10.2"
+        cabal: ["3.12"]
 
     steps:
       - name: Check out code
