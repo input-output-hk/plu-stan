@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import * as vscode from "vscode";
-import { getCachedBinaryPath, offerDownload, checkForUpdates } from "./downloadManager";
+import { getCachedBinaryPath, offerDownload, checkForUpdates, detectProjectGhc } from "./downloadManager";
 
 type AnnotationSource = "hi" | "source" | "both";
 type RunScope = "all" | "module";
@@ -174,7 +174,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const resolveSettings = (folder: vscode.WorkspaceFolder): PluStanSettings => {
     const settings = readSettings(folder);
     if (!settings.binaryPath) {
-      const cached = getCachedBinaryPath(context.globalState);
+      const ghc = detectProjectGhc(settings.hieDir, settings.projectDir);
+      const cached = getCachedBinaryPath(context.globalState, ghc);
       if (cached) return { ...settings, binaryPath: cached };
     }
     return settings;
@@ -182,7 +183,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const isEffectivelyConfigured = (folder: vscode.WorkspaceFolder): boolean => {
     const settings = readSettings(folder);
-    return hasConfiguredBinaryPath(settings) || getCachedBinaryPath(context.globalState) !== undefined;
+    if (hasConfiguredBinaryPath(settings)) {
+      return true;
+    }
+    const ghc = detectProjectGhc(settings.hieDir, settings.projectDir);
+    return getCachedBinaryPath(context.globalState, ghc) !== undefined;
   };
 
   context.subscriptions.push(output, diagnostics);
@@ -290,7 +295,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("plustan.checkForUpdates", async () => {
-      await checkForUpdates(context, output);
+      const ghc = detectGhcForActiveFolder();
+      await checkForUpdates(context, output, ghc);
       try {
         const folder = getWorkspaceFolder();
         provider.setBinaryConfigured(isEffectivelyConfigured(folder));
@@ -317,7 +323,8 @@ export function activate(context: vscode.ExtensionContext): void {
     const configured = isEffectivelyConfigured(folder);
     provider.setBinaryConfigured(configured);
     if (!configured) {
-      void offerDownload(context, output).then((downloadedPath) => {
+      const ghc = detectProjectGhc(readSettings(folder).hieDir, readSettings(folder).projectDir);
+      void offerDownload(context, output, ghc).then((downloadedPath) => {
         if (downloadedPath) {
           provider.setBinaryConfigured(true);
         }
@@ -483,6 +490,15 @@ function getWorkspaceFolder(): vscode.WorkspaceFolder {
   return active ?? folders[0];
 }
 
+/** Best-effort GHC version of the active workspace folder's .hie files. */
+function detectGhcForActiveFolder(): string | null {
+  try {
+    const settings = readSettings(getWorkspaceFolder());
+    return detectProjectGhc(settings.hieDir, settings.projectDir);
+  } catch {
+    return null;
+  }
+}
 
 function getWorkspaceFolderOrNotify(): vscode.WorkspaceFolder | undefined {
   try {
@@ -601,11 +617,14 @@ async function runPluStanJson<T>(
   try {
     parsed = parseJsonFromOutput(stdout);
   } catch (error) {
-    const exitSuffix = exitCode !== 0 ? `\nExit code: ${exitCode}` : "";
-    throw new Error(
-      `Failed to parse plustan JSON output: ${formatError(error)}${exitSuffix}\n` +
-      `stderr:\n${stderr}\nstdout:\n${stdout}`
-    );
+    // The binary produced no usable JSON. Before showing the raw parser error
+    // (which surfaces as the cryptic "Unexpected end of JSON input"), classify
+    // the failure so the message tells the user what to actually do. The most
+    // common cause is a GHC mismatch: stan reads .hie files whose format is
+    // locked to the exact GHC that built them, so a binary built with a
+    // different GHC panics and emits nothing on stdout.
+    output.appendLine(`Plu-Stan: stdout had no parseable JSON (exit ${exitCode}). Parser said: ${formatError(error)}`);
+    throw new Error(describePluStanFailure(stdout, stderr, exitCode));
   }
 
   if (exitCode !== 0) {
@@ -613,6 +632,38 @@ async function runPluStanJson<T>(
   }
 
   return parsed as T;
+}
+
+/** Turn a no-JSON plustan run into an actionable, user-facing message. */
+function describePluStanFailure(stdout: string, stderr: string, exitCode: number): string {
+  const haystack = `${stderr}\n${stdout}`;
+  const ghcMismatch = /hie file versions|readHieFile|built by a different ghc|different ghc/i.test(haystack);
+  const panicked = /panic!|the 'impossible' happened/i.test(haystack);
+
+  if (ghcMismatch) {
+    return (
+      "Plu-Stan couldn't read your project's .hie files: they were built with a different GHC " +
+      "than the plustan binary. Rebuild your project with the GHC the binary targets, or run " +
+      "\"Plu-Stan: Check for Updates\" to fetch a binary matching your project's GHC. " +
+      "(Full output is in the Plu-Stan output channel.)"
+    );
+  }
+
+  if (panicked) {
+    return (
+      `Plu-Stan crashed (exit ${exitCode}) and produced no analysis. ` +
+      "See the Plu-Stan output channel for the full crash log."
+    );
+  }
+
+  const noOutput = stdout.trim().length === 0;
+  return (
+    `Plu-Stan produced no JSON output (exit ${exitCode}). ` +
+    (noOutput
+      ? "The binary wrote nothing to stdout — it likely failed before analysis (e.g. an outdated or incompatible binary, or a build error). "
+      : "The output wasn't valid JSON. ") +
+    "See the Plu-Stan output channel for details; try \"Plu-Stan: Check for Updates\" if the binary may be outdated."
+  );
 }
 
 function parseJsonFromOutput(stdout: string): unknown {

@@ -21,20 +21,34 @@ jobs:
 
   build_plustan_canonical:
     needs: [create_release]
-    name: plustan / ${{ matrix.target }}
+    name: plustan / ${{ matrix.target }} / ghc ${{ matrix.ghc }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Use bash on every OS (including the Windows runner's Git bash) so the
+        # build/upload steps below share a single, portable shell.
+        shell: bash
     strategy:
+      # Don't fail fast: one GHC/platform leg failing must not stop the others
+      # from shipping. Whatever builds gets uploaded; the publish job promotes
+      # the release regardless (see promote_release).
       fail-fast: false
       matrix:
+        # stan reads .hie files, whose on-disk format is locked to the exact
+        # GHC PATCH version that produced them (the binary panics with
+        # "readHieFile: hie file versions" otherwise). So we ship one binary
+        # *per GHC patch*, and the extension downloads the one matching the
+        # user's project GHC. The set below is what CI proves green on all
+        # three OSes; expand it to cover the GHC patches your users run.
+        #
+        # `os` and `ghc` are BOTH base dimensions -> the full 3x4 = 12 jobs.
+        # The `include` block only attaches target/ext to each `os` value.
+        ghc: ["9.6.7", "9.8.4", "9.10.3", "9.12.2"]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
-          - os: ubuntu-latest
-            target: linux-x64
-            binary: plustan
-            ext: ""
-          - os: macos-latest
-            target: darwin-arm64
-            binary: plustan
-            ext: ""
+          - { os: ubuntu-latest,  target: linux-x64,    ext: "" }
+          - { os: macos-latest,   target: darwin-arm64, ext: "" }
+          - { os: windows-latest, target: windows-x64,  ext: ".exe" }
 
     steps:
       - name: Check out code
@@ -51,7 +65,7 @@ jobs:
         uses: haskell-actions/setup@v2
         id: setup-haskell-cabal
         with:
-          ghc-version: "9.6.6"
+          ghc-version: ${{ matrix.ghc }}
           cabal-version: "3.12"
 
       - name: Install system dependencies (Linux)
@@ -79,6 +93,10 @@ jobs:
           printf "Name: libblst\nVersion: 0.3\nDescription: BLS12-381 signature library\nLibs: -L$BREW_PREFIX/lib -lblst\nCflags: -I$BREW_PREFIX/include\n" > "$BREW_PREFIX/lib/pkgconfig/libblst.pc"
           echo "PKG_CONFIG_PATH=$BREW_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
 
+      # Windows needs no manual Cardano system libraries: CI builds the full
+      # stack green on windows-latest without them (haskell-actions/setup pulls
+      # what's required). So there is no Windows dependency step on purpose.
+
       - name: Freeze
         run: cabal freeze
 
@@ -86,16 +104,48 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
-          key: ${{ runner.os }}-${{ matrix.target }}-9.6.6-plustan-${{ hashFiles('cabal.project.freeze') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-${{ matrix.ghc }}-plustan-${{ hashFiles('cabal.project.freeze') }}
 
       - name: Build plustan binary
         run: |
-          mkdir dist
+          mkdir -p dist
           cabal install exe:plustan --install-method=copy --overwrite-policy=always --installdir=dist
 
-      - name: Upload plustan canonical asset
+      - name: Upload plustan asset
         run: |
-          cp "./dist/${{ matrix.binary }}" "./dist/plustan-${{ steps.tag.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}"
-          gh release upload ${{ github.ref_name }} "./dist/plustan-${{ steps.tag.outputs.tag }}-${{ matrix.target }}${{ matrix.ext }}"
+          ASSET="plustan-${{ steps.tag.outputs.tag }}-${{ matrix.target }}-ghc${{ matrix.ghc }}${{ matrix.ext }}"
+          cp "./dist/plustan${{ matrix.ext }}" "./dist/${ASSET}"
+          gh release upload ${{ github.ref_name }} "./dist/${ASSET}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  promote_release:
+    # Publish (un-draft) the release once the build matrix has finished.
+    # `if: always()` means a failed Windows/GHC leg never blocks shipping the
+    # binaries that did build — the release still goes live and becomes the one
+    # the extension's releases/latest lookup resolves to.
+    needs: [build_plustan_canonical]
+    if: always()
+    name: Promote release to latest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+
+      - name: Publish release (only if binaries were uploaded)
+        run: |
+          # `if: always()` above means we run even when some build legs failed,
+          # so one bad GHC/OS leg never blocks shipping the rest. But never
+          # promote an EMPTY release to `--latest`: that would point every
+          # user's auto-download at a release with no binaries. Require at
+          # least one uploaded asset before un-drafting.
+          COUNT=$(gh release view ${{ github.ref_name }} --json assets --jq '.assets | length')
+          echo "Uploaded assets: ${COUNT}"
+          if [ "${COUNT}" -gt 0 ]; then
+            gh release edit ${{ github.ref_name }} --draft=false --latest
+          else
+            echo "No assets uploaded — leaving release as draft." >&2
+            exit 1
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
