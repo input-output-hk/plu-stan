@@ -1,10 +1,15 @@
 {
   "name": "vscode-plustan",
-  "displayName": "Plu-Stan (VS Code/Cursor)",
-  "description": "Standalone VS Code/Cursor extension for onchain module discovery and Plu-Stan analysis.",
-  "version": "0.0.8",
-  "publisher": "local",
+  "displayName": "Plu-Stan",
+  "description": "Security and performance static analysis for Cardano smart contracts written in Plinth.",
+  "version": "0.0.11",
+  "icon": "media/logo.png",
+  "publisher": "IOG",
   "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/input-output-hk/plu-stan"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -19,15 +24,7 @@
     "Linters",
     "Programming Languages"
   ],
-  "activationEvents": [
-    "onView:plustanOnchainModules",
-    "onCommand:plustan.refreshOnchainModules",
-    "onCommand:plustan.runWorkspace",
-    "onCommand:plustan.runModule",
-    "onCommand:plustan.clearDiagnostics",
-    "onCommand:plustan.openOutput",
-    "onCommand:plustan.openSettings"
-  ],
+
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -54,6 +51,10 @@
       {
         "command": "plustan.openSettings",
         "title": "Plu-Stan: Open Settings"
+      },
+      {
+        "command": "plustan.checkForUpdates",
+        "title": "Plu-Stan: Check for Updates"
       }
     ],
     "viewsContainers": {
@@ -119,7 +120,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package:vsix": "npx @vscode/vsce package"
+    "package:vsix": "npx @vscode/vsce package --readme-path MARKETPLACE.md"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

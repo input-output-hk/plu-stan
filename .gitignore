@@ -48,6 +48,11 @@ tags
 # VS
 .vscode/
 
+# VS Code extension
+vscode-plustan/out/
+vscode-plustan/node_modules/
+vscode-plustan/*.vsix
+
 # Emacs
 *#
 .dir-locals.el
