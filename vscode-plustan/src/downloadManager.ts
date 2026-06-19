@@ -7,19 +7,17 @@ const GITHUB_API_LATEST = "https://api.github.com/repos/input-output-hk/plu-stan
 const CACHED_BINARY_KEY = "plustan.cachedBinaryPath";
 const CACHED_VERSION_KEY = "plustan.cachedVersion";
 
-type Platform = "linux-x64" | "darwin-x64" | "darwin-arm64" | "windows-x64";
+type Platform = "linux-x64" | "darwin-arm64";
 
 function detectPlatform(): Platform | null {
   const { arch, platform } = process;
   if (platform === "linux" && arch === "x64") return "linux-x64";
-  if (platform === "darwin" && arch === "x64") return "darwin-x64";
-  if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
-  if (platform === "win32" && arch === "x64") return "windows-x64";
+  if (platform === "darwin") return "darwin-arm64"; // Rosetta runs it on Intel too
   return null;
 }
 
 function assetName(version: string, platform: Platform): string {
-  return `plustan-${version}-${platform}${platform === "windows-x64" ? ".exe" : ""}`;
+  return `plustan-${version}-${platform}`;
 }
 
 interface GitHubRelease {
@@ -151,15 +149,12 @@ export async function downloadLatest(
           fs.mkdirSync(storageDir, { recursive: true });
         }
 
-        const ext = resolved === "windows-x64" ? ".exe" : "";
-        const binaryPath = path.join(storageDir, `plustan${ext}`);
+        const binaryPath = path.join(storageDir, "plustan");
 
         output.appendLine(`Plu-Stan: downloading ${name}...`);
         await downloadFile(asset.browser_download_url, binaryPath, token);
 
-        if (resolved !== "windows-x64") {
-          fs.chmodSync(binaryPath, 0o755);
-        }
+        fs.chmodSync(binaryPath, 0o755);
 
         await context.globalState.update(CACHED_BINARY_KEY, binaryPath);
         await context.globalState.update(CACHED_VERSION_KEY, version);

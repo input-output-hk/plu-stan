@@ -35,14 +35,6 @@ jobs:
             target: darwin-arm64
             binary: plustan
             ext: ""
-          - os: macos-13
-            target: darwin-x64
-            binary: plustan
-            ext: ""
-          - os: windows-latest
-            target: windows-x64
-            binary: plustan.exe
-            ext: ".exe"
 
     steps:
       - name: Check out code
@@ -86,23 +78,6 @@ jobs:
           mkdir -p "$BREW_PREFIX/lib/pkgconfig"
           printf "Name: libblst\nVersion: 0.3\nDescription: BLS12-381 signature library\nLibs: -L$BREW_PREFIX/lib -lblst\nCflags: -I$BREW_PREFIX/include\n" > "$BREW_PREFIX/lib/pkgconfig/libblst.pc"
           echo "PKG_CONFIG_PATH=$BREW_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
-
-      - name: Install system dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          pacman -S --noconfirm mingw-w64-x86_64-libsodium mingw-w64-x86_64-pkg-config
-          # Build secp256k1 from source
-          git clone --depth 1 https://github.com/bitcoin-core/secp256k1.git /tmp/secp256k1
-          cd /tmp/secp256k1 && ./autogen.sh && ./configure --prefix=/mingw64 && make && make install
-          # Build blst from source
-          git clone --depth 1 https://github.com/supranational/blst.git /tmp/blst
-          cd /tmp/blst && ./build.sh
-          install -m 644 bindings/blst.h bindings/blst_aux.h /mingw64/include/
-          install -m 644 libblst.a /mingw64/lib/
-          mkdir -p /mingw64/lib/pkgconfig
-          printf 'Name: libblst\nVersion: 0.3\nDescription: BLS12-381 signature library\nLibs: -L/mingw64/lib -lblst\nCflags: -I/mingw64/include\n' > /mingw64/lib/pkgconfig/libblst.pc
-          echo "PKG_CONFIG_PATH=C:/msys64/mingw64/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Freeze
         run: cabal freeze
