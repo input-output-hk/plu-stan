@@ -80,11 +80,12 @@ jobs:
           brew install libsodium secp256k1
           git clone --depth 1 https://github.com/supranational/blst.git /tmp/blst
           cd /tmp/blst && ./build.sh
-          sudo install -m 644 bindings/blst.h bindings/blst_aux.h /usr/local/include/
-          sudo install -m 644 libblst.a /usr/local/lib/
-          sudo mkdir -p /usr/local/lib/pkgconfig
-          printf 'Name: libblst\nVersion: 0.3\nDescription: BLS12-381 signature library\nLibs: -L/usr/local/lib -lblst\nCflags: -I/usr/local/include\n' | sudo tee /usr/local/lib/pkgconfig/libblst.pc
-          echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          BREW_PREFIX=$(brew --prefix)
+          install -m 644 bindings/blst.h bindings/blst_aux.h "$BREW_PREFIX/include/"
+          install -m 644 libblst.a "$BREW_PREFIX/lib/"
+          mkdir -p "$BREW_PREFIX/lib/pkgconfig"
+          printf "Name: libblst\nVersion: 0.3\nDescription: BLS12-381 signature library\nLibs: -L$BREW_PREFIX/lib -lblst\nCflags: -I$BREW_PREFIX/include\n" > "$BREW_PREFIX/lib/pkgconfig/libblst.pc"
+          echo "PKG_CONFIG_PATH=$BREW_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
