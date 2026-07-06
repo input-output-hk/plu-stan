@@ -33,6 +33,9 @@ jobs:
           # See https://github.com/haskell/cabal/issues/10397
           - "9.4.7"
           - "9.4.8"
+          # 9.6.3 is in the release matrix (plutus projects commonly pin it),
+          # so CI must prove it green too
+          - "9.6.3"
           - "9.6.7"
           - "9.8.4"
           - "9.10.2"

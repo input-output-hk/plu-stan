@@ -237,8 +237,11 @@ export async function downloadLatest(
             (available.length
               ? `That release ships binaries for GHC: ${available.join(", ")}. `
               : `That release ships no ${resolved} binaries. `) +
-            `Rebuild your project with one of those GHC versions, or build plustan with GHC ${ghc} ` +
-            `and point \`plustan.binaryPath\` at it.`
+            `GHC ${ghc} was detected from your project's .hie files, not from your installed ` +
+            `toolchain — switching GHC (e.g. with ghcup) has no effect until you rebuild the ` +
+            `project and regenerate them. Rebuild with one of the shipped GHC versions ` +
+            `(clearing stale .hie files first), or build plustan with GHC ${ghc} yourself and ` +
+            `point \`plustan.binaryPath\` at it.`
           );
         }
 
