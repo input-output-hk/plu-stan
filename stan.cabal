@@ -1,6 +1,6 @@
 cabal-version:       2.4
 name:                stan
-version:             0.2.3.0
+version:             0.2.4.0
 synopsis:            Haskell STatic ANalyser
 description:
     Stan is a Haskell __ST__atic __AN__alysis CLI tool.
@@ -38,6 +38,15 @@ flag directory-ospath-streaming
   manual: False
   description:
     Whether to use directory-ospath-streaming. Should be false with 9.6 > ghc.
+
+flag fixtures
+  default: True
+  manual: True
+  description:
+    Build the plutus test fixtures (library target). These pull in plutus-tx /
+    plutus-ledger-api and the Cardano crypto system libraries (libsodium,
+    secp256k1, blst). Disable (-f-fixtures) to build a plutus-free plustan --
+    e.g. for release binaries, which never link plutus. Tests need it ON.
 
 common common-options
   build-depends:       base >= 4.13 && < 4.22 && (< 4.16.3.0 || >= 4.17)
@@ -208,6 +217,8 @@ executable plustan
 library target
   import:              common-options
   hs-source-dirs:      target
+  if !flag(fixtures)
+    buildable: False
   build-depends:       bytestring
                      , filepath
                      , scientific
