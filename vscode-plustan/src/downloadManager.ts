@@ -1,6 +1,7 @@
 import * as https from "node:https";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 
 const GITHUB_API_LATEST = "https://api.github.com/repos/input-output-hk/plu-stan/releases/latest";
@@ -161,6 +162,29 @@ function downloadFile(
   });
 }
 
+/**
+ * Re-sign a downloaded binary ad-hoc on macOS. Release binaries are
+ * linker-signed, and after the GitHub upload/download round-trip the kernel
+ * rejects their pages at exec time — "SIGKILL (Code Signature Invalid)" —
+ * even though static `codesign --verify` passes. A local ad-hoc re-sign
+ * rewrites the signature so the binary actually runs. Best-effort: failure is
+ * logged but never fails the download, since the binary may still run.
+ */
+function resignAdHoc(binaryPath: string, output: vscode.OutputChannel): Promise<void> {
+  return new Promise((resolve) => {
+    execFile("/usr/bin/codesign", ["--force", "--sign", "-", binaryPath], (error, _stdout, stderr) => {
+      if (error) {
+        output.appendLine(
+          `Plu-Stan: ad-hoc re-sign failed (macOS may kill the binary with SIGKILL): ${stderr || error.message}`
+        );
+      } else {
+        output.appendLine("Plu-Stan: re-signed binary ad-hoc for macOS.");
+      }
+      resolve();
+    });
+  });
+}
+
 export function getCachedBinaryPath(globalState: vscode.Memento, ghc: string | null): string | undefined {
   if (!ghc) {
     return undefined;
@@ -258,6 +282,9 @@ export async function downloadLatest(
 
         if (process.platform !== "win32") {
           fs.chmodSync(binaryPath, 0o755);
+        }
+        if (process.platform === "darwin") {
+          await resignAdHoc(binaryPath, output);
         }
 
         const cache = getCacheMap(context.globalState);

@@ -487,32 +487,42 @@ hasOnchainAnnotation iface = any isOnchainAnn (mi_anns iface)
         _ -> False
 
 discoverOnchainModules :: FilePath -> [HieFile] -> IO [OnchainModule]
-discoverOnchainModules hieDir hieFiles =
-  handle @SomeException (\_ -> pure []) $ runGhc (Just libdir) $ do
-    dflags <- getSessionDynFlags
-    _ <- setSessionDynFlags dflags
-    hiFiles <- liftIO $ listFilesWithExt hieDir ".hi"
-    nameCache <- liftIO $ initNameCache 'z' []
-    let profile = targetProfile dflags
+discoverOnchainModules hieDir hieFiles = do
+  -- Source route: the .hie files are already loaded and embed the module
+  -- source, so this needs no GHC session. It must NOT run inside runGhc:
+  -- release binaries bake in the build runner's libdir (ghc-paths), which
+  -- doesn't exist on user machines, and a failed session must not hide
+  -- annotations that are sitting in plain sight in the source.
+  let fromSourceSet = Set.fromList
+        [ hie_module
+        | HieFile{..} <- hieFiles
+        , hasOnchainAnnotationInSource hie_hs_src
+        ]
 
-    let moduleToFile = Map.fromList [(hie_module, hie_hs_file) | HieFile{..} <- hieFiles]
-    annotatedFromHi <- liftIO $ fmap catMaybes $ forM hiFiles $ \hiPath -> do
-      iface <- readModIface profile nameCache hiPath
-      pure $ iface >>= \modIface ->
-        if hasOnchainAnnotation modIface
-          then Just (mi_module modIface)
-          else Nothing
+  -- .hi route: reading ModIface annotations requires a GHC session and hence
+  -- a valid libdir. Best-effort: fully works for a locally built plustan,
+  -- degrades to empty (leaving the source route intact) for downloaded
+  -- binaries whose baked-in libdir is absent.
+  fromHiSet <- handle @SomeException (\_ -> pure Set.empty) $
+    runGhc (Just libdir) $ do
+      dflags <- getSessionDynFlags
+      _ <- setSessionDynFlags dflags
+      hiFiles <- liftIO $ listFilesWithExt hieDir ".hi"
+      nameCache <- liftIO $ initNameCache 'z' []
+      let profile = targetProfile dflags
+      annotatedFromHi <- liftIO $ fmap catMaybes $ forM hiFiles $ \hiPath -> do
+        iface <- readModIface profile nameCache hiPath
+        pure $ iface >>= \modIface ->
+          if hasOnchainAnnotation modIface
+            then Just (mi_module modIface)
+            else Nothing
+      pure $ Set.fromList annotatedFromHi
 
-    let fromHiSet = Set.fromList annotatedFromHi
-    let fromSourceSet = Set.fromList
-          [ hie_module
-          | HieFile{..} <- hieFiles
-          , hasOnchainAnnotationInSource hie_hs_src
-          ]
-    let allOnchainModules = Set.toList (Set.union fromHiSet fromSourceSet)
+  let moduleToFile = Map.fromList [(hie_module, hie_hs_file) | HieFile{..} <- hieFiles]
+  let allOnchainModules = Set.toList (Set.union fromHiSet fromSourceSet)
 
-    pure $ sortOn (unModuleName . onchainModuleName) $
-      mapMaybe (toOnchainModule moduleToFile fromHiSet fromSourceSet) allOnchainModules
+  pure $ sortOn (unModuleName . onchainModuleName) $
+    mapMaybe (toOnchainModule moduleToFile fromHiSet fromSourceSet) allOnchainModules
   where
     toOnchainModule moduleToFile fromHiSet fromSourceSet ghcModule = do
       filePath <- Map.lookup ghcModule moduleToFile

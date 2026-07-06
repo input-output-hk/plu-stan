@@ -351,24 +351,55 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  try {
-    const folder = getWorkspaceFolder();
-    const configured = isEffectivelyConfigured(folder);
-    provider.setBinaryConfigured(configured);
-    if (!configured) {
-      const ghc = detectProjectGhc(readSettings(folder).hieDir, readSettings(folder).projectDir);
+  // Auto-reveal the Plu-Stan view (once per session) when the user views a
+  // Haskell file annotated as an onchain contract. Seeing an annotation — not
+  // mere activation — is also what gates the first-time download offer: with
+  // `onLanguage:haskell` / `workspaceContains:**/*.hs` activation the
+  // extension wakes up in every Haskell workspace, and non-Plutus projects
+  // must never get a toast or a sidebar takeover.
+  let onchainSeenThisSession = false;
+  const offerDownloadIfUnconfigured = (): void => {
+    try {
+      const folder = getWorkspaceFolder();
+      if (isEffectivelyConfigured(folder)) {
+        return;
+      }
+      const settings = readSettings(folder);
+      const ghc = detectProjectGhc(settings.hieDir, settings.projectDir);
       void offerDownload(context, output, ghc).then((downloadedPath) => {
         if (downloadedPath) {
           provider.setBinaryConfigured(true);
         }
       });
-    } else {
+    } catch {
+      // no workspace open
+    }
+  };
+  const maybeRevealOnchainView = (editor: vscode.TextEditor | undefined): void => {
+    if (onchainSeenThisSession || !editor || !isOnchainContractDocument(editor.document)) {
+      return;
+    }
+    onchainSeenThisSession = true;
+    void vscode.commands.executeCommand("plustanOnchainModules.focus", { preserveFocus: true });
+    offerDownloadIfUnconfigured();
+  };
+  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(maybeRevealOnchainView));
+
+  try {
+    const folder = getWorkspaceFolder();
+    const configured = isEffectivelyConfigured(folder);
+    provider.setBinaryConfigured(configured);
+    if (configured) {
       // Already have a binary — quietly see if a newer backend shipped.
       void maybeAutoCheckForUpdates();
     }
   } catch {
     provider.setBinaryConfigured(false);
   }
+
+  // Covers the restored-tabs case: the annotated file may already be the
+  // active editor by the time we activate, so the listener alone would miss it.
+  maybeRevealOnchainView(vscode.window.activeTextEditor);
 }
 
 export function deactivate(): void {
@@ -524,6 +555,22 @@ function getWorkspaceFolder(): vscode.WorkspaceFolder {
     : undefined;
 
   return active ?? folders[0];
+}
+
+/**
+ * Whether a document is a Haskell source file carrying the onchain-contract
+ * module annotation. Mirrors the backend's source-side detection
+ * (hasOnchainAnnotationInSource in app/PluStan.hs) — one line containing both
+ * markers — so the extension and the binary never disagree on what counts.
+ */
+function isOnchainContractDocument(document: vscode.TextDocument): boolean {
+  if (document.uri.scheme !== "file" || !document.fileName.endsWith(".hs")) {
+    return false;
+  }
+  return document
+    .getText()
+    .split("\n")
+    .some((line) => line.includes("{-# ANN module") && line.includes("onchain-contract"));
 }
 
 /** Best-effort GHC version of the active workspace folder's .hie files. */
