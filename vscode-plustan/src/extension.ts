@@ -3,6 +3,10 @@ import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 import { getCachedBinaryPath, offerDownload, checkForUpdates, detectProjectGhc } from "./downloadManager";
 
+// Throttle for the background "newer backend available?" check on activation.
+const LAST_AUTO_UPDATE_CHECK_KEY = "plustan.lastAutoUpdateCheck";
+const AUTO_UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // once per day
+
 type AnnotationSource = "hi" | "source" | "both";
 type RunScope = "all" | "module";
 
@@ -190,6 +194,35 @@ export function activate(context: vscode.ExtensionContext): void {
     return getCachedBinaryPath(context.globalState, ghc) !== undefined;
   };
 
+  // Background, throttled "is there a newer backend?" check. Runs at most once
+  // per AUTO_UPDATE_INTERVAL_MS and only when the extension manages the binary
+  // (no user-set binaryPath) and one is already downloaded — first-time setup
+  // is handled by offerDownload. Quiet: it only surfaces UI when an update
+  // actually exists, so a new backend release reaches users with no extension
+  // republish and no startup nagging.
+  const maybeAutoCheckForUpdates = async (): Promise<void> => {
+    try {
+      const folder = getWorkspaceFolder();
+      const settings = readSettings(folder);
+      if (hasConfiguredBinaryPath(settings)) {
+        return; // user manages their own binary
+      }
+      const ghc = detectProjectGhc(settings.hieDir, settings.projectDir);
+      if (getCachedBinaryPath(context.globalState, ghc) === undefined) {
+        return; // nothing downloaded yet; offerDownload covers that
+      }
+      const last = context.globalState.get<number>(LAST_AUTO_UPDATE_CHECK_KEY, 0);
+      const now = Date.now();
+      if (now - last < AUTO_UPDATE_INTERVAL_MS) {
+        return;
+      }
+      await context.globalState.update(LAST_AUTO_UPDATE_CHECK_KEY, now);
+      await checkForUpdates(context, output, ghc, /* quiet */ true);
+    } catch {
+      // best-effort; never block activation on an update check
+    }
+  };
+
   context.subscriptions.push(output, diagnostics);
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("plustanOnchainModules", provider)
@@ -329,6 +362,9 @@ export function activate(context: vscode.ExtensionContext): void {
           provider.setBinaryConfigured(true);
         }
       });
+    } else {
+      // Already have a binary — quietly see if a newer backend shipped.
+      void maybeAutoCheckForUpdates();
     }
   } catch {
     provider.setBinaryConfigured(false);

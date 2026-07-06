@@ -23,11 +23,6 @@ jobs:
     needs: [create_release]
     name: plustan / ${{ matrix.target }} / ghc ${{ matrix.ghc }}
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        # Use bash on every OS (including the Windows runner's Git bash) so the
-        # build/upload steps below share a single, portable shell.
-        shell: bash
     strategy:
       # Don't fail fast: one GHC/platform leg failing must not stop the others
       # from shipping. Whatever builds gets uploaded; the publish job promotes
@@ -67,6 +62,7 @@ jobs:
         with:
           ghc-version: ${{ matrix.ghc }}
           cabal-version: "3.12"
+          cabal-update: true
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -97,24 +93,35 @@ jobs:
       # stack green on windows-latest without them (haskell-actions/setup pulls
       # what's required). So there is no Windows dependency step on purpose.
 
-      - name: Freeze
-        run: cabal freeze
+      # Mirror ci.yml's proven-green solve: configure with tests/benchmarks and
+      # generate plan.json, instead of `cabal freeze`. `cabal freeze` was
+      # failing at the solve step on windows-* (all GHCs) and on 9.12.2 (all
+      # OSes), whereas this exact recipe is green across all 12 os x ghc legs
+      # in ci.yml. The plan.json it produces is the cache key.
+      - name: Configure
+        run: cabal configure --enable-tests --enable-benchmarks
+
+      - name: Generate build plan (for cache key)
+        run: cabal build all --dry-run
 
       - name: Cache ~/.cabal/store
         uses: actions/cache@v4
         with:
           path: ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
-          key: ${{ runner.os }}-${{ matrix.target }}-${{ matrix.ghc }}-plustan-${{ hashFiles('cabal.project.freeze') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-${{ matrix.ghc }}-plustan-${{ hashFiles('dist-newstyle/cache/plan.json') }}
 
       - name: Build plustan binary
-        run: |
-          mkdir -p dist
-          cabal install exe:plustan --install-method=copy --overwrite-policy=always --installdir=dist
+        run: cabal build exe:plustan
 
       - name: Upload plustan asset
+        # bash is needed for $(cabal list-bin ...) and the cp/upload below; the
+        # cabal steps above run on each runner's native shell (matching ci.yml).
+        shell: bash
         run: |
+          mkdir -p dist
+          BIN=$(cabal list-bin exe:plustan)
           ASSET="plustan-${{ steps.tag.outputs.tag }}-${{ matrix.target }}-ghc${{ matrix.ghc }}${{ matrix.ext }}"
-          cp "./dist/plustan${{ matrix.ext }}" "./dist/${ASSET}"
+          cp "$BIN" "./dist/${ASSET}"
           gh release upload ${{ github.ref_name }} "./dist/${ASSET}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
