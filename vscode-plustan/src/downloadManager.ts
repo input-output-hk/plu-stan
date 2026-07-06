@@ -274,22 +274,34 @@ export async function downloadLatest(
   );
 }
 
+/**
+ * Check GitHub for a newer backend binary and offer to download it.
+ *
+ * When `quiet` is true (background/auto checks), stay silent unless a newer
+ * release is actually available — no "already up to date" or error toasts,
+ * just a log line — so the once-a-day startup check never nags the user.
+ */
 export async function checkForUpdates(
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
-  ghc: string | null
+  ghc: string | null,
+  quiet = false
 ): Promise<void> {
   const platform = detectPlatform();
   if (!platform) {
-    vscode.window.showWarningMessage("Plu-Stan: auto-download is not supported on this platform.");
+    if (!quiet) {
+      vscode.window.showWarningMessage("Plu-Stan: auto-download is not supported on this platform.");
+    }
     return;
   }
 
   if (!ghc) {
-    vscode.window.showWarningMessage(
-      "Plu-Stan: couldn't detect your project's GHC version (no .hie files found). " +
-      "Build your project first so Plu-Stan can fetch a matching binary."
-    );
+    if (!quiet) {
+      vscode.window.showWarningMessage(
+        "Plu-Stan: couldn't detect your project's GHC version (no .hie files found). " +
+        "Build your project first so Plu-Stan can fetch a matching binary."
+      );
+    }
     return;
   }
 
@@ -300,7 +312,11 @@ export async function checkForUpdates(
     const cachedVersion = getCacheMap(context.globalState)[ghc]?.version;
 
     if (cachedVersion === latestVersion) {
-      vscode.window.showInformationMessage(`Plu-Stan: already up to date (${latestVersion}, GHC ${ghc}).`);
+      if (!quiet) {
+        vscode.window.showInformationMessage(`Plu-Stan: already up to date (${latestVersion}, GHC ${ghc}).`);
+      } else {
+        output.appendLine(`Plu-Stan: up to date (${latestVersion}, GHC ${ghc}).`);
+      }
       return;
     }
 
@@ -316,6 +332,8 @@ export async function checkForUpdates(
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     output.appendLine(`Plu-Stan: update check failed: ${msg}`);
-    vscode.window.showErrorMessage(`Plu-Stan: update check failed — ${msg}`);
+    if (!quiet) {
+      vscode.window.showErrorMessage(`Plu-Stan: update check failed — ${msg}`);
+    }
   }
 }
