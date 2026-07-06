@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Colourista (errorMessage, infoMessage, successMessage, warningMessage)
-import Control.Exception (SomeException, handle, try)
+import Control.Exception (SomeException, displayException, handle, try)
 import Control.Monad (forM, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson.Micro (ToJSON (..), encode, object, (.=))
@@ -170,7 +170,7 @@ runAnalyze AnalyzeArgs{..} =
       reportWarning notJson "No .hie files found after build. Ensure the project is compiled with -fwrite-ide-info and -hiedir=.hie."
       exitFailure
 
-    onchainModules <- discoverOnchainModules hieDir hieFiles
+    onchainModules <- discoverOnchainModules hieDir notJson hieFiles
     targetModule <- resolveTargetModule analyzeModule onchainModules notJson
     let targetFiles = maybe Set.empty (Set.singleton . onchainModuleFile) targetModule
     let filteredHieFiles =
@@ -238,7 +238,7 @@ runListOnchain ListOnchainArgs{..} = do
   let hieDir = listOnchainHieDir
   ensureFreshHieFiles hieDir notJson
   hieFiles <- readHieFilesOrRebuild hieDir notJson
-  modules <- discoverOnchainModules hieDir hieFiles
+  modules <- discoverOnchainModules hieDir notJson hieFiles
   currentDir <- getCurrentDirectory
   if listOnchainJson
     then putJson ListOnchainJsonPayload
@@ -493,8 +493,8 @@ hasOnchainAnnotation iface = any isOnchainAnn (mi_anns iface)
           Nothing -> False
         _ -> False
 
-discoverOnchainModules :: FilePath -> [HieFile] -> IO [OnchainModule]
-discoverOnchainModules hieDir hieFiles = do
+discoverOnchainModules :: FilePath -> Bool -> [HieFile] -> IO [OnchainModule]
+discoverOnchainModules hieDir notJson hieFiles = do
   -- Source route: the .hie files are already loaded and embed the module
   -- source, so this needs no GHC session. It must NOT run inside runGhc:
   -- release binaries bake in the build runner's libdir (ghc-paths), which
@@ -508,9 +508,14 @@ discoverOnchainModules hieDir hieFiles = do
 
   -- .hi route: reading ModIface annotations requires a GHC session and hence
   -- a valid libdir. Best-effort: fully works for a locally built plustan,
-  -- degrades to empty (leaving the source route intact) for downloaded
-  -- binaries whose baked-in libdir is absent.
-  fromHiSet <- handle @SomeException (\_ -> pure Set.empty) $
+  -- degrades to the source route alone for downloaded binaries whose baked-in
+  -- libdir is absent — but says so, instead of silently returning nothing.
+  fromHiSet <- handle @SomeException (\e -> do
+    reportWarning notJson $
+      "Skipping .hi interface annotations (onchain modules are still detected "
+        <> "from source annotations in .hie files). Reason: "
+        <> Text.pack (displayException e)
+    pure Set.empty) $
     runGhc (Just libdir) $ do
       dflags <- getSessionDynFlags
       _ <- setSessionDynFlags dflags
