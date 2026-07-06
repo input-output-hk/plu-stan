@@ -393,9 +393,11 @@ reportWarning notJson msg =
 
 ensureFreshHieFiles :: FilePath -> Bool -> IO ()
 ensureFreshHieFiles hieDir notJson = do
+  -- Only .hie files are required: builds no longer redirect -hidir into the
+  -- hie dir (see buildHieFiles), so requiring .hi here would force a full
+  -- rebuild on every single run.
   hasHie <- hasFilesWithExt hieDir ".hie"
-  hasHi <- hasFilesWithExt hieDir ".hi"
-  if not (hasHie && hasHi)
+  if not hasHie
     then do
       when notJson $ infoMessage "Missing .hie/.hi files. Running full cabal build to generate artifacts..."
       buildHieFiles hieDir notJson True
@@ -430,9 +432,14 @@ buildHieFiles hieDir notJson forceRecomp = do
         ]
         <> forceRecompArg
         <>
+        -- No -hidir override: redirecting .hi files away from the per-unit
+        -- dist dirs breaks cabal's library registration (ABI hash) step with
+        -- "cannot find any of [Module.hi]" whenever a library isn't already
+        -- registered — i.e. exactly the cold starts (fresh checkout, first
+        -- run, version bump) this rebuild exists for. Onchain discovery works
+        -- from .hie sources alone; .hi files are a best-effort bonus.
         [ "--ghc-options=-fwrite-ide-info"
         , "--ghc-options=-hiedir=" <> hieDir
-        , "--ghc-options=-hidir=" <> hieDir
         ]
   if notJson
     then callProcess "cabal" buildArgs
