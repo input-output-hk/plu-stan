@@ -30,6 +30,25 @@ describe("SpawnAnalyzerClient", () => {
     assert.strictEqual(p.observations.length, 2);
     assert.strictEqual(p.observations[0].fingerprint, "FPR-PLU-STAN-04-aaa-bbb");
   });
+  it("passes --module for module-scoped analysis", async () => {
+    // fake-plustan.js reports runScope "module" only when it sees a literal --module arg,
+    // so this pins the exact flag spelling.
+    const p = await client().analyze({ kind: "module", moduleName: "Fixture.Validator" });
+    assert.strictEqual(p.runScope, "module");
+  });
+  it("lists onchain modules", async () => {
+    const p = await client().listOnchain();
+    assert.strictEqual(p.modules.length, 1);
+    assert.strictEqual(p.modules[0].moduleName, "Fixture.Validator");
+  });
+  it("rejects with kind cancelled when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      client().capabilities(controller.signal),
+      (e: unknown) => e instanceof AnalyzerError && e.kind === "cancelled"
+    );
+  });
   it("classifies a missing binary as not-found", async () => {
     const bad = new SpawnAnalyzerClient(
       () => ({ binaryPath: "/nonexistent/plustan", binaryPrefixArgs: [], cwd: fixtures, hieDir: ".hie", extraArgs: [] }),
@@ -51,6 +70,10 @@ describe("parseJsonFromOutput", () => {
   });
   it("throws on pure garbage input", () => {
     assert.throws(() => parseJsonFromOutput("not json at all\nstill not json\n"));
+  });
+  it("does not let a stray numeric noise line shadow the payload", () => {
+    const stdout = JSON.stringify({ ok: true }) + "\n42\n";
+    assert.deepStrictEqual(parseJsonFromOutput(stdout), { ok: true });
   });
 });
 

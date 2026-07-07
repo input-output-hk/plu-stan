@@ -11,6 +11,7 @@ export type AnalyzerErrorKind =
   | "ghc-mismatch"     // .hie files built by a different GHC
   | "build-failed"     // cabal build inside plustan failed
   | "crash"            // GHC panic
+  | "cancelled"        // run was aborted by the caller; callers should swallow it silently
   | "no-json";         // anything else that produced no usable JSON
 
 export class AnalyzerError extends Error {
@@ -60,11 +61,20 @@ export class SpawnAnalyzerClient implements AnalyzerClient {
   }
 
   private async runJson(args: string[], signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted) {
+      throw new AnalyzerError("cancelled", "Plu-Stan run cancelled.");
+    }
     const config = this.getConfig();
     const fullArgs = [...config.binaryPrefixArgs, ...args];
     this.log(`$ ${config.binaryPath} ${fullArgs.join(" ")}`);
 
     const { stdout, stderr, exitCode } = await this.spawnOnce(config, fullArgs, signal);
+
+    // A cancelled run's output is meaningless (usually truncated by SIGTERM);
+    // don't let it fall through to the "binary may be outdated" classifier.
+    if (signal?.aborted) {
+      throw new AnalyzerError("cancelled", "Plu-Stan run cancelled.");
+    }
 
     let parsed: unknown;
     try {
@@ -91,6 +101,10 @@ export class SpawnAnalyzerClient implements AnalyzerClient {
         child.kill("SIGTERM");
       };
       signal?.addEventListener("abort", onAbort, { once: true });
+      // addEventListener does NOT fire for an already-aborted signal; kill immediately.
+      if (signal?.aborted) {
+        onAbort();
+      }
 
       child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
       child.stderr.on("data", (chunk: Buffer) => {
@@ -120,7 +134,11 @@ export function parseJsonFromOutput(stdout: string): unknown {
   const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     try {
-      return JSON.parse(lines[i]);
+      const parsed: unknown = JSON.parse(lines[i]);
+      // Only object payloads count: a stray numeric/quoted noise line must not shadow the real payload.
+      if (typeof parsed === "object" && parsed !== null) {
+        return parsed;
+      }
     } catch {
       // keep scanning earlier lines
     }
@@ -131,7 +149,7 @@ export function parseJsonFromOutput(stdout: string): unknown {
 /** Turn a no-JSON plustan run into a typed, user-actionable error. */
 export function classifyNoJsonFailure(stdout: string, stderr: string, exitCode: number): AnalyzerError {
   const haystack = `${stderr}\n${stdout}`;
-  if (/hie file versions|readHieFile|built by a different ghc|different ghc/i.test(haystack)) {
+  if (/hie file versions|readHieFile|different ghc/i.test(haystack)) {
     return new AnalyzerError("ghc-mismatch",
       "Plu-Stan couldn't read your project's .hie files: they were built with a different GHC than the plustan binary. " +
       "Rebuild with the matching GHC, or run \"Plu-Stan: Check for Updates\".");
