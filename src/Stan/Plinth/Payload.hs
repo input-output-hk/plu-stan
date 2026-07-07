@@ -16,6 +16,7 @@ module Stan.Plinth.Payload
 
 import Data.Aeson.Micro (Value, object, (.=))
 
+import Stan.Core.Id (unId)
 import Stan.Core.ModuleName (ModuleName)
 import Stan.Ghc.Compat (srcSpanEndCol, srcSpanEndLine, srcSpanStartCol, srcSpanStartLine)
 import Stan.Inspection (Inspection (..))
@@ -49,6 +50,10 @@ mkAnalyzePayload targetModule inspections observations = object
 (same rule, same module, same flagged text) get @#2@, @#3@… suffixes
 in span order, so dismissing one of two identical findings never
 dismisses both.
+
+Observations are sorted by a total order (file, full span, inspection
+id) first, so both the suffix assignment and the payload's observation
+order are canonical regardless of upstream traversal order.
 -}
 uniquifyFingerprints :: [Observation] -> [(Observation, Text)]
 uniquifyFingerprints observations =
@@ -57,11 +62,14 @@ uniquifyFingerprints observations =
     sorted :: [Observation]
     sorted = sortOn spanKey observations
 
-    spanKey :: Observation -> (FilePath, Int, Int)
+    spanKey :: Observation -> (FilePath, Int, Int, Int, Int, Text)
     spanKey o =
         ( observationFile o
         , srcSpanStartLine (observationSrcSpan o)
         , srcSpanStartCol (observationSrcSpan o)
+        , srcSpanEndLine (observationSrcSpan o)
+        , srcSpanEndCol (observationSrcSpan o)
+        , unId (observationInspectionId o)
         )
 
     step
