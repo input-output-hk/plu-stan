@@ -23,4 +23,17 @@ describe("dismissals", () => {
     assert.deepStrictEqual(parseDismissals("not json {"), emptyDismissals());
     assert.deepStrictEqual(parseDismissals('{"version":1}'), emptyDismissals());
   });
+  it("drops malformed entries but keeps valid ones", () => {
+    const parsed = parseDismissals(
+      '{"version":1,"dismissals":[{"fingerprint":"f1","inspectionId":"X","dismissedAt":"t"},{"note":"garbage, no fingerprint"}]}'
+    );
+    assert.strictEqual(parsed.dismissals.length, 1);
+    assert.strictEqual(parsed.dismissals[0].fingerprint, "f1");
+  });
+  it("moves a re-added entry to the end", () => {
+    let d = addDismissal(emptyDismissals(), { fingerprint: "f1", inspectionId: "X", dismissedAt: "t1" });
+    d = addDismissal(d, { fingerprint: "f2", inspectionId: "X", dismissedAt: "t2" });
+    d = addDismissal(d, { fingerprint: "f1", inspectionId: "X", dismissedAt: "t3" });
+    assert.deepStrictEqual(d.dismissals.map((e) => e.fingerprint), ["f2", "f1"]);
+  });
 });
