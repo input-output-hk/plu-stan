@@ -3,6 +3,23 @@
 `stan` uses [PVP Versioning][1].
 The change log is available [on GitHub][2].
 
+## 0.2.5.0
+
+* Add a `plustan capabilities` subcommand: a machine-readable, project-free
+  JSON handshake reporting `schemaVersion`, `ghcVersion`, and the set of
+  supported `features`.
+
+* Bump the `plustan analyze --json` payload to schema v2:
+
+    * Each observation now carries a stable `fingerprint`.
+    * Inspections include documentation fields (`whyItMatters`,
+      `badExample`, `goodExample`, `docsAnchor`) when available.
+    * Observations are now a top-level `observations` array instead of
+      being nested inside an `analysis` field, which has been removed.
+
+* `plustan list-onchain --json` now reports the same schema version as
+  `analyze --json` instead of a hardcoded `1`.
+
 ## 0.2.1.0
 
 * Fix high memory usage in finding Cabal files

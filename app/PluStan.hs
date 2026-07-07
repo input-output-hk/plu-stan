@@ -40,6 +40,7 @@ import Stan.Info (ProjectInfo (..), StanEnv (..))
 import Stan.Inspection (Inspection (..))
 import Stan.Inspection.All (getInspectionById)
 import Stan.Observation (Observation (..))
+import Stan.Plinth.Payload (analyzeSchemaVersion, mkAnalyzePayload, mkCapabilitiesPayload)
 import Stan.Report (generateReport)
 import Stan.Report.Settings (OutputSettings (..), ToggleSolution (..), Verbosity (..))
 import Stan.Severity (Severity (..))
@@ -81,10 +82,12 @@ runPluStan = do
     Right command -> case command of
       CommandAnalyze analyzeArgs -> runAnalyze analyzeArgs
       CommandListOnchain listArgs -> runListOnchain listArgs
+      CommandCapabilities -> runCapabilities
 
 data PluStanCommand
   = CommandAnalyze AnalyzeArgs
   | CommandListOnchain ListOnchainArgs
+  | CommandCapabilities
 
 data AnalyzeArgs = AnalyzeArgs
   { analyzeReport :: Bool
@@ -141,23 +144,6 @@ instance ToJSON ListOnchainJsonPayload where
     , "modules" .= listPayloadModules
     ]
 
-data AnalyzeJsonPayload = AnalyzeJsonPayload
-  { analyzePayloadVersion :: Int
-  , analyzePayloadRunScope :: Text
-  , analyzePayloadTargetModule :: Maybe ModuleName
-  , analyzePayloadInspections :: [Inspection]
-  , analyzePayloadAnalysis :: Analysis
-  }
-
-instance ToJSON AnalyzeJsonPayload where
-  toJSON AnalyzeJsonPayload{..} = object
-    [ "version" .= analyzePayloadVersion
-    , "runScope" .= analyzePayloadRunScope
-    , "targetModule" .= analyzePayloadTargetModule
-    , "inspections" .= analyzePayloadInspections
-    , "analysis" .= analyzePayloadAnalysis
-    ]
-
 runAnalyze :: AnalyzeArgs -> IO ()
 runAnalyze AnalyzeArgs{..} =
   whenResult_ (finaliseConfig pluStanConfig) $ \warnings config -> do
@@ -191,14 +177,10 @@ runAnalyze AnalyzeArgs{..} =
     let usedInspections = sortOn inspectionId $ map getInspectionById (toList $ analysisInspections analysis)
 
     if analyzeJson
-      then do
-        putJson AnalyzeJsonPayload
-          { analyzePayloadVersion = 1
-          , analyzePayloadRunScope = maybe "all" (const "module") targetModule
-          , analyzePayloadTargetModule = onchainModuleName <$> targetModule
-          , analyzePayloadInspections = usedInspections
-          , analyzePayloadAnalysis = analysis
-          }
+      then putJson $ mkAnalyzePayload
+             (onchainModuleName <$> targetModule)
+             usedInspections
+             (toList observations)
       else do
         if null observations
           then successMessage "All clean! Plu-Stan did not find any observations at the moment."
@@ -231,6 +213,11 @@ runAnalyze AnalyzeArgs{..} =
     getObservationSeverity :: Observation -> Severity
     getObservationSeverity = inspectionSeverity . getInspectionById . observationInspectionId
 
+-- | Machine-readable handshake: always JSON, no project needed.
+runCapabilities :: IO ()
+runCapabilities = putJson $
+  mkCapabilitiesPayload (Text.pack (showVersion compilerVersion))
+
 runListOnchain :: ListOnchainArgs -> IO ()
 runListOnchain ListOnchainArgs{..} = do
   let notJson = not listOnchainJson
@@ -242,7 +229,7 @@ runListOnchain ListOnchainArgs{..} = do
   currentDir <- getCurrentDirectory
   if listOnchainJson
     then putJson ListOnchainJsonPayload
-      { listPayloadVersion = 1
+      { listPayloadVersion = analyzeSchemaVersion
       , listPayloadWorkspaceRoot = currentDir
       , listPayloadHieDir = hieDir
       , listPayloadModules = modules
@@ -265,6 +252,7 @@ usage = Text.unlines
   , "  plustan [--report] [--browse] [--json] [--module MODULE] [--project DIR] [--hiedir DIR] [PROJECT_DIR]"
   , "  plustan analyze [--report] [--browse] [--json] [--module MODULE] [--project DIR] [--hiedir DIR]"
   , "  plustan list-onchain [--json] [--project DIR] [--hiedir DIR]"
+  , "  plustan capabilities            Print JSON schema/feature handshake"
   , ""
   , "Options:"
   , "  --report        Generate stan.html report (analyze only)"
@@ -280,6 +268,7 @@ parsePluStanCommand = \case
   [] -> CommandAnalyze <$> parseAnalyzeArgs True defaultAnalyzeArgs []
   "analyze":rest -> CommandAnalyze <$> parseAnalyzeArgs False defaultAnalyzeArgs rest
   "list-onchain":rest -> CommandListOnchain <$> parseListOnchainArgs defaultListOnchainArgs rest
+  "capabilities":_ -> Right CommandCapabilities
   "help":_ -> Left "help"
   "--help":_ -> Left "help"
   "-h":_ -> Left "help"
