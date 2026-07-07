@@ -194,3 +194,17 @@ Three independently shippable phases; each is roughly one implementation plan.
 - LSP server / multi-editor support.
 - Auditor-oriented triage states and exportable reports.
 - MCP/agent integration.
+
+## Known limitations (Phase 1)
+
+- **Duplicate-fingerprint dismissal migration.** When two byte-identical findings
+  of the same rule occur in one module, they share a base fingerprint and are
+  disambiguated only by a run-local `#2`, `#3`… suffix assigned in span order
+  (`uniquifyFingerprints`). Dismissals are keyed on the fingerprint string alone,
+  so if the user dismisses the first occurrence (bare `FPR-…`) and then edits or
+  fixes it, on the next run the surviving twin inherits the bare fingerprint and
+  is silently auto-marked dismissed — a false negative for a finding that was
+  never triaged. Trigger is narrow and it is recoverable (undismiss). Phase 2
+  hardening: key dismissals on `inspectionId` + span (or anchor base fingerprints
+  positionally) rather than the bare fingerprint. Surfaced by the whole-branch
+  review, 2026-07-07.
