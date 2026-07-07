@@ -135,6 +135,7 @@ library
                            Stan.Pattern.Edsl
                            Stan.Pattern.Type
                          Stan.Plinth.Docs
+                         Stan.Plinth.Payload
                          Stan.Report
                            Stan.Report.Css
                            Stan.Report.Html
@@ -271,6 +272,7 @@ test-suite stan-test
                      , hedgehog >= 1.0 && < 1.6
                      , hspec >= 2.7 && < 2.12
                      , hspec-hedgehog >= 0.0.1.2
+                     , microaeson ^>= 0.1.0.0
                      , optparse-applicative
                      , process
                      , text
