@@ -28,6 +28,12 @@ observationSpec = describe "Observation" $ do
         it "extracts a multi-line span" $
             observationSpanText (mkObs2 2 5 3 6 sampleContent)
                 `shouldBe` "expr here\ny = 2"
+        it "trims a single-line span ending mid-line (exclusive end col)" $
+            observationSpanText (mkObs 2 5 9 sampleContent)
+                `shouldBe` "expr"
+        it "trims a multi-line span ending mid-line" $
+            observationSpanText (mkObs2 2 5 3 2 sampleContent)
+                `shouldBe` "expr here\ny"
 
     describe "observationFingerprint" $ do
         it "is stable when the same flagged text moves to another line" $
