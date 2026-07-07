@@ -52,6 +52,12 @@ tags
 vscode-plustan/out/
 vscode-plustan/node_modules/
 vscode-plustan/*.vsix
+vscode-plustan/.vscode-test/
+
+# Integration test fixture workspace settings (needed to point the fixture at
+# the fake plustan binary); un-ignore despite the blanket ".vscode/" rule above.
+!vscode-plustan/test-fixtures/workspace/.vscode/
+!vscode-plustan/test-fixtures/workspace/.vscode/settings.json
 
 # Emacs
 *#

@@ -595,7 +595,10 @@ function getWorkspaceFolderOrNotify(): vscode.WorkspaceFolder | undefined {
 function readSettings(folder: vscode.WorkspaceFolder): PluStanSettings {
   const config = vscode.workspace.getConfiguration("plustan", folder.uri);
 
-  const binaryPath = config.get<string>("binaryPath", "").trim();
+  // VS Code does NOT expand `${workspaceFolder}` in arbitrary string settings
+  // (only in launch.json/tasks.json), so the extension expands it itself.
+  const rawBinaryPath = config.get<string>("binaryPath", "").trim();
+  const binaryPath = rawBinaryPath.replace("${workspaceFolder}", folder.uri.fsPath);
   const configuredProjectDir = config.get<string>("projectDir", "").trim();
   const projectDir = configuredProjectDir
     ? resolveAgainst(folder.uri.fsPath, configuredProjectDir)

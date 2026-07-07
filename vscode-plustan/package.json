@@ -24,7 +24,6 @@
     "Linters",
     "Programming Languages"
   ],
-
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:haskell",
@@ -190,12 +189,14 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test:unit": "npm run compile && mocha \"out/core/**/*.test.js\" \"out/analyzer/**/*.test.js\"",
+    "test:integration": "npm run compile && node out/test/runTest.js",
     "package:vsix": "npx @vscode/vsce package --readme-path MARKETPLACE.md"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.14.10",
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^2.5.2",
     "mocha": "^10.8.2",
     "typescript": "^5.5.4"
   }
