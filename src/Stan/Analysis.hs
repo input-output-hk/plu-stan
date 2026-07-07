@@ -5,15 +5,20 @@ Maintainer: Kowainik <xrom.xkov@gmail.com>
 
 Static analysis of all HIE files.
 -}
-
-module Stan.Analysis
-    ( Analysis (..)
-    , runAnalysis
-    ) where
+module Stan.Analysis (
+  Analysis (..),
+  runAnalysis,
+) where
 
 import Data.Aeson.Micro (ToJSON (..), object, (.=))
-import Extensions (ExtensionsError (..), OnOffExtension, ParsedExtensions (..),
-                   SafeHaskellExtension, parseSourceWithPath, showOnOffExtension)
+import Extensions (
+  ExtensionsError (..),
+  OnOffExtension,
+  ParsedExtensions (..),
+  SafeHaskellExtension,
+  parseSourceWithPath,
+  showOnOffExtension,
+ )
 import Relude.Extra.Lens (Lens', lens, over)
 
 import Stan.Analysis.Analyser (analyseAst)
@@ -28,88 +33,96 @@ import Stan.Inspection (Inspection)
 import Stan.Inspection.All (lookupInspectionById)
 import Stan.Observation (Observation (..), Observations)
 
-import Data.List (isInfixOf)
+import qualified Data.ByteString.Char8 as BS8
 import qualified Data.HashMap.Strict as HM
+import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import qualified Slist as S
-import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Text as Text
+import qualified Slist as S
 
-
-{- | This data type stores all information collected during static analysis.
--}
+-- | This data type stores all information collected during static analysis.
 data Analysis = Analysis
-    { analysisModulesNum          :: !Int
-    , analysisLinesOfCode         :: !Int
-    , analysisUsedExtensions      :: !(Set OnOffExtension, Set SafeHaskellExtension)
-    , analysisInspections         :: !(HashSet (Id Inspection))
-    , analysisObservations        :: !Observations
-    , analysisIgnoredObservations :: !Observations
-    , analysisFileMap             :: !FileMap
-    } deriving stock (Show)
+  { analysisModulesNum :: !Int
+  , analysisLinesOfCode :: !Int
+  , analysisUsedExtensions :: !(Set OnOffExtension, Set SafeHaskellExtension)
+  , analysisInspections :: !(HashSet (Id Inspection))
+  , analysisObservations :: !Observations
+  , analysisIgnoredObservations :: !Observations
+  , analysisFileMap :: !FileMap
+  }
+  deriving stock (Show)
 
 instance ToJSON Analysis where
-    toJSON Analysis{..} = object
-        [ "modulesNum"  .= analysisModulesNum
-        , "linesOfCode" .= analysisLinesOfCode
-        , "usedExtensions" .=
-            let (ext, safeExt) = analysisUsedExtensions
-            in map showOnOffExtension (toList ext)
-            <> map (show @Text) (toList safeExt)
-        , "inspections"  .= toList analysisInspections
-        , "observations" .= toJsonObs analysisObservations
-        , "ignoredObservations" .= toJsonObs analysisIgnoredObservations
-        , "fileMap" .= map (first toText) (Map.toList analysisFileMap)
-        ]
-      where
-        toJsonObs :: Observations -> [Observation]
-        toJsonObs = toList . S.sortOn observationSrcSpan
+  toJSON Analysis{..} =
+    object
+      [ "modulesNum" .= analysisModulesNum
+      , "linesOfCode" .= analysisLinesOfCode
+      , "usedExtensions"
+          .= let (ext, safeExt) = analysisUsedExtensions
+              in map showOnOffExtension (toList ext)
+                  <> map (show @Text) (toList safeExt)
+      , "inspections" .= toList analysisInspections
+      , "observations" .= toJsonObs analysisObservations
+      , "ignoredObservations" .= toJsonObs analysisIgnoredObservations
+      , "fileMap" .= map (first toText) (Map.toList analysisFileMap)
+      ]
+   where
+    toJsonObs :: Observations -> [Observation]
+    toJsonObs = toList . S.sortOn observationSrcSpan
 
 modulesNumL :: Lens' Analysis Int
-modulesNumL = lens
+modulesNumL =
+  lens
     analysisModulesNum
-    (\analysis new -> analysis { analysisModulesNum = new })
+    (\analysis new -> analysis{analysisModulesNum = new})
 
 linesOfCodeL :: Lens' Analysis Int
-linesOfCodeL = lens
+linesOfCodeL =
+  lens
     analysisLinesOfCode
-    (\analysis new -> analysis { analysisLinesOfCode = new })
+    (\analysis new -> analysis{analysisLinesOfCode = new})
 
 extensionsL :: Lens' Analysis (Set OnOffExtension, Set SafeHaskellExtension)
-extensionsL = lens
+extensionsL =
+  lens
     analysisUsedExtensions
-    (\analysis new -> analysis { analysisUsedExtensions = new })
+    (\analysis new -> analysis{analysisUsedExtensions = new})
 
 inspectionsL :: Lens' Analysis (HashSet (Id Inspection))
-inspectionsL = lens
+inspectionsL =
+  lens
     analysisInspections
-    (\analysis new -> analysis { analysisInspections = new })
+    (\analysis new -> analysis{analysisInspections = new})
 
 observationsL :: Lens' Analysis Observations
-observationsL = lens
+observationsL =
+  lens
     analysisObservations
-    (\analysis new -> analysis { analysisObservations = new })
+    (\analysis new -> analysis{analysisObservations = new})
 
 ignoredObservationsL :: Lens' Analysis Observations
-ignoredObservationsL = lens
+ignoredObservationsL =
+  lens
     analysisIgnoredObservations
-    (\analysis new -> analysis { analysisIgnoredObservations = new })
+    (\analysis new -> analysis{analysisIgnoredObservations = new})
 
 fileMapL :: Lens' Analysis FileMap
-fileMapL = lens
+fileMapL =
+  lens
     analysisFileMap
-    (\analysis new -> analysis { analysisFileMap = new })
+    (\analysis new -> analysis{analysisFileMap = new})
 
 initialAnalysis :: Analysis
-initialAnalysis = Analysis
-    { analysisModulesNum          = 0
-    , analysisLinesOfCode         = 0
-    , analysisUsedExtensions      = mempty
-    , analysisInspections         = mempty
-    , analysisObservations        = mempty
+initialAnalysis =
+  Analysis
+    { analysisModulesNum = 0
+    , analysisLinesOfCode = 0
+    , analysisUsedExtensions = mempty
+    , analysisInspections = mempty
+    , analysisObservations = mempty
     , analysisIgnoredObservations = mempty
-    , analysisFileMap             = mempty
+    , analysisFileMap = mempty
     }
 
 incModulesNum :: State Analysis ()
@@ -135,83 +148,117 @@ addIgnoredObservations obs = modify' $ over ignoredObservationsL (obs <>)
 
 isInlineIgnored :: HieFile -> Observation -> Bool
 isInlineIgnored HieFile{..} Observation{..} =
-    let lineNo = srcSpanStartLine observationSrcSpan
-        marker = "stan-ignore: " <> Text.unpack (unId observationInspectionId)
-        linesSrc = BS8.lines hie_hs_src
-        lineHas n =
-            if n <= 0
-            then False
-            else case linesSrc !!? (n - 1) of
-                Nothing -> False
-                Just line -> marker `isInfixOf` BS8.unpack line
-    in lineHas lineNo || lineHas (lineNo - 1)
+  let lineNo = srcSpanStartLine observationSrcSpan
+      marker = "stan-ignore: " <> Text.unpack (unId observationInspectionId)
+      linesSrc = BS8.lines hie_hs_src
+      lineHas n =
+        if n <= 0
+          then False
+          else case linesSrc !!? (n - 1) of
+            Nothing -> False
+            Just line -> marker `isInfixOf` BS8.unpack line
+   in lineHas lineNo || lineHas (lineNo - 1)
 
 -- | Collect all unique used extensions.
 addExtensions :: ParsedExtensions -> State Analysis ()
-addExtensions ParsedExtensions{..} = modify' $ over extensionsL
-    (\(setExts, setSafeExts) ->
-        ( Set.union (Set.fromList parsedExtensionsAll) setExts
-        , maybe setSafeExts (`Set.insert` setSafeExts) parsedExtensionsSafe
-        )
-    )
+addExtensions ParsedExtensions{..} =
+  modify' $
+    over
+      extensionsL
+      ( \(setExts, setSafeExts) ->
+          ( Set.union (Set.fromList parsedExtensionsAll) setExts
+          , maybe setSafeExts (`Set.insert` setSafeExts) parsedExtensionsSafe
+          )
+      )
 
 -- | Update 'FileInfo' for the given 'FilePath'.
 updateFileMap :: FilePath -> FileInfo -> State Analysis ()
 updateFileMap fp fi = modify' $ over fileMapL (Map.insert fp fi)
 
-{- | Perform static analysis of given 'HieFile'.
+-- | Perform static analysis of given 'HieFile'.
+runAnalysis ::
+  Map FilePath (Either ExtensionsError ParsedExtensions) ->
+  HashMap FilePath (HashSet (Id Inspection)) ->
+  -- | List of to-be-ignored Observations.
+  [Id Observation] ->
+  [HieFile] ->
+  Analysis
+-- NOTE [Observation dedup backstop]
+-- Some Plinth analysers (e.g. PLU-STAN-11 currencySymbolValueOf, -09 valueOf-in-comparison,
+-- -17, -18, -08) currently recurse into nodeChildren themselves while the AST visitor already
+-- visits every node, causing the same observation (identical OBS id = inspection+module+span)
+-- to be emitted once per enclosing node (multiplier ~ AST depth; up to 18x observed).
+-- This dedup collapses exact-id repeats so counts/reports are correct (314 -> 197 unique).
+-- TODO(Option 1): fix the root cause by making those analysers non-recursive (let the visitor
+-- drive traversal), but ONLY after rigorous verification that de-recursing does not change
+-- plustan's real observations/specs. Until then this backstop must stay.
+-- runAnalysis cabalExtensionsMap checksMap obs = over observationsL dedupObservations . executingState initialAnalysis .
+-- analyse cabalExtensionsMap checksMap obs
+runAnalysis cabalExtensionsMap checksMap obs =
+  over fileMapL (Map.map (\fi -> fi{fileInfoObservations = dedupObservations (fileInfoObservations fi)}))
+    . over ignoredObservationsL dedupObservations
+    . over observationsL dedupObservations
+    . executingState initialAnalysis
+    . analyse cabalExtensionsMap checksMap obs
+
+{- | Order-preserving dedup of observations by their stable 'observationId'
+(OBS-<inspection>-<moduleHash>-<line:col>). See NOTE [Observation dedup backstop].
 -}
-runAnalysis
-    :: Map FilePath (Either ExtensionsError ParsedExtensions)
-    -> HashMap FilePath (HashSet (Id Inspection))
-    -> [Id Observation]  -- ^ List of to-be-ignored Observations.
-    -> [HieFile]
-    -> Analysis
-runAnalysis cabalExtensionsMap checksMap obs = executingState initialAnalysis .
-    analyse cabalExtensionsMap checksMap obs
+dedupObservations :: Observations -> Observations
+dedupObservations = S.slist . go Set.empty . toList
+ where
+  go _ [] = []
+  go seen (o : os)
+    | observationId o `Set.member` seen = go seen os
+    | otherwise = o : go (Set.insert (observationId o) seen) os
 
-analyse
-    :: Map FilePath (Either ExtensionsError ParsedExtensions)
-    -> HashMap FilePath (HashSet (Id Inspection))
-    -> [Id Observation]  -- ^ List of to-be-ignored Observations.
-    -> [HieFile]
-    -> State Analysis ()
+analyse ::
+  Map FilePath (Either ExtensionsError ParsedExtensions) ->
+  HashMap FilePath (HashSet (Id Inspection)) ->
+  -- | List of to-be-ignored Observations.
+  [Id Observation] ->
+  [HieFile] ->
+  State Analysis ()
 analyse _extsMap _checksMap _observations [] = pass
-analyse cabalExtensions checksMap observations (hieFile@HieFile{..}:hieFiles) = do
-    whenJust (HM.lookup hie_hs_file checksMap)
-        (analyseHieFile hieFile cabalExtensions observations)
-    analyse cabalExtensions checksMap observations hieFiles
+analyse cabalExtensions checksMap observations (hieFile@HieFile{..} : hieFiles) = do
+  whenJust
+    (HM.lookup hie_hs_file checksMap)
+    (analyseHieFile hieFile cabalExtensions observations)
+  analyse cabalExtensions checksMap observations hieFiles
 
-analyseHieFile
-    :: HieFile
-    -> Map FilePath (Either ExtensionsError ParsedExtensions)
-    -> [Id Observation]  -- ^ List of to-be-ignored Observations.
-    -> HashSet (Id Inspection)
-    -> State Analysis ()
+analyseHieFile ::
+  HieFile ->
+  Map FilePath (Either ExtensionsError ParsedExtensions) ->
+  -- | List of to-be-ignored Observations.
+  [Id Observation] ->
+  HashSet (Id Inspection) ->
+  State Analysis ()
 analyseHieFile hieFile@HieFile{..} cabalExts obs insIds = do
-    -- traceM (hie_hs_file hieFile)
-    let fileInfoLoc = countLinesOfCode hieFile
-    let fileInfoCabalExtensions = fromMaybe
-            (Left $ NotCabalModule hie_hs_file)
-            (Map.lookup hie_hs_file cabalExts)
-    let fileInfoExtensions = first (ModuleParseError hie_hs_file) $
-            parseSourceWithPath hie_hs_file hie_hs_src
-    let fileInfoPath = hie_hs_file
-    let fileInfoModuleName = fromGhcModule hie_module
-    -- merge cabal and module extensions and update overall exts
-    let fileInfoMergedExtensions = mergeParsedExtensions fileInfoCabalExtensions fileInfoExtensions
-    -- get list of inspections for the file
-    let inss = mapMaybe lookupInspectionById (toList insIds)
-    -- get all observations by analysing ast
-    let rawObservations = analyseAst hieFile fileInfoMergedExtensions inss
-    let allObservations = S.filter (not . isInlineIgnored hieFile) rawObservations
-    let (ignoredObs, fileInfoObservations) = S.partition ((`elem` obs) . observationId) allObservations
+  -- traceM (hie_hs_file hieFile)
+  let fileInfoLoc = countLinesOfCode hieFile
+  let fileInfoCabalExtensions =
+        fromMaybe
+          (Left $ NotCabalModule hie_hs_file)
+          (Map.lookup hie_hs_file cabalExts)
+  let fileInfoExtensions =
+        first (ModuleParseError hie_hs_file) $
+          parseSourceWithPath hie_hs_file hie_hs_src
+  let fileInfoPath = hie_hs_file
+  let fileInfoModuleName = fromGhcModule hie_module
+  -- merge cabal and module extensions and update overall exts
+  let fileInfoMergedExtensions = mergeParsedExtensions fileInfoCabalExtensions fileInfoExtensions
+  -- get list of inspections for the file
+  let inss = mapMaybe lookupInspectionById (toList insIds)
+  -- get all observations by analysing ast
+  let rawObservations = analyseAst hieFile fileInfoMergedExtensions inss
+  let allObservations = S.filter (not . isInlineIgnored hieFile) rawObservations
+  let (ignoredObs, fileInfoObservations) = S.partition ((`elem` obs) . observationId) allObservations
 
-    incModulesNum
-    incLinesOfCode fileInfoLoc
-    updateFileMap hie_hs_file FileInfo{..}
-    whenRight_ fileInfoExtensions addExtensions
-    whenRight_ fileInfoCabalExtensions addExtensions
-    addInspections insIds
-    addObservations fileInfoObservations
-    addIgnoredObservations ignoredObs
+  incModulesNum
+  incLinesOfCode fileInfoLoc
+  updateFileMap hie_hs_file FileInfo{..}
+  whenRight_ fileInfoExtensions addExtensions
+  whenRight_ fileInfoCabalExtensions addExtensions
+  addInspections insIds
+  addObservations fileInfoObservations
+  addIgnoredObservations ignoredObs
