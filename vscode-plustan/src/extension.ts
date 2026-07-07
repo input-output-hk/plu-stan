@@ -185,6 +185,11 @@ export function activate(context: vscode.ExtensionContext): void {
     (line) => output.appendLine(line)
   );
 
+  // Assigned below once a workspace folder is resolved (inside `if (folder)`).
+  // The legacy one-shot commands read it to detect an active review session so
+  // they don't clobber the session's diagnostics; stays undefined with no folder.
+  let activeController: ReviewController | undefined;
+
   context.subscriptions.push(
     vscode.commands.registerCommand("plustan.openSettings", async () => {
       await vscode.commands.executeCommand("workbench.action.openSettings", "plustan.binaryPath");
@@ -221,6 +226,13 @@ export function activate(context: vscode.ExtensionContext): void {
   // auto-rerun on save (that is what "Start Review" is for now).
   context.subscriptions.push(
     vscode.commands.registerCommand("plustan.runWorkspace", async () => {
+      if (activeController?.sessionState.phase === "active") {
+        vscode.window.showInformationMessage(
+          "Plu-Stan: a review session is active — use the Findings view (or End Review first). " +
+          "Legacy one-shot analysis is disabled during a session."
+        );
+        return;
+      }
       if (!await saveWorkspaceBeforeRun()) {
         return;
       }
@@ -240,6 +252,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("plustan.runModule", async (item?: OnchainModuleItem) => {
+      if (activeController?.sessionState.phase === "active") {
+        vscode.window.showInformationMessage(
+          "Plu-Stan: a review session is active — use the Findings view (or End Review first). " +
+          "Legacy one-shot analysis is disabled during a session."
+        );
+        return;
+      }
       if (!await saveWorkspaceBeforeRun()) {
         return;
       }
@@ -342,6 +361,10 @@ export function activate(context: vscode.ExtensionContext): void {
   })();
 
   if (folder) {
+    // Capture the resolved root once: `folder` is a const narrowed to defined
+    // here, but that narrowing is not carried into the hoisted openFinding
+    // function declaration below, so read the path eagerly.
+    const workspaceRoot = folder.uri.fsPath;
     const statusBar = new PluStanStatusBar();
     const findingsTree = new FindingsTreeProvider();
 
@@ -352,10 +375,12 @@ export function activate(context: vscode.ExtensionContext): void {
       context.workspaceState,
       (state, inspections) => {
         findingsTree.setData(state, inspections);
-        publishSessionDiagnostics(state, inspections, folder.uri.fsPath, diagnostics);
+        publishSessionDiagnostics(state, inspections, workspaceRoot, diagnostics);
       },
       output
     );
+    // Expose to the legacy one-shot commands so they can defer while a session runs.
+    activeController = controller;
 
     const detailPanel = new FindingDetailProvider(
       (finding) => { void controller.dismiss(finding.fingerprint, finding.inspectionId); },
@@ -365,8 +390,10 @@ export function activate(context: vscode.ExtensionContext): void {
     controller.restore();
 
     async function openFinding(finding: SessionFinding): Promise<void> {
-      const f = getWorkspaceFolder();
-      const filePath = path.isAbsolute(finding.file) ? finding.file : path.join(f.uri.fsPath, finding.file);
+      // Use the captured workspaceRoot (definite inside this block); re-deriving
+      // via getWorkspaceFolder() could throw, and this runs void-ed from the
+      // detail panel where a throw would become an unhandled rejection.
+      const filePath = path.isAbsolute(finding.file) ? finding.file : path.join(workspaceRoot, finding.file);
       const doc = await vscode.workspace.openTextDocument(filePath);
       const editor = await vscode.window.showTextDocument(doc, { preserveFocus: false });
       const range = toRange(finding);
