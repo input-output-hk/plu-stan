@@ -116,4 +116,14 @@ describe("session reducer", () => {
     assert.strictEqual(s2.phase, "active");
     assert.strictEqual(s2.runCount, 0);
   });
+
+  it("freezes lastSeenRun at the last run that reported the finding", () => {
+    const s1 = afterRun(started(), [obs("f1")]);
+    assert.strictEqual(s1.findings["f1"].lastSeenRun, 1);
+    // Run 2 covers src/V.hs but does not report f1; it reports f2 instead.
+    const s2 = afterRun(s1, [obs("f2", "src/V.hs", 7)]);
+    assert.strictEqual(s2.findings["f1"].status, "fixed");
+    assert.strictEqual(s2.findings["f1"].lastSeenRun, 1, "f1 keeps the run it was last reported in");
+    assert.strictEqual(s2.findings["f2"].lastSeenRun, 2, "f2 was reported in run 2");
+  });
 });

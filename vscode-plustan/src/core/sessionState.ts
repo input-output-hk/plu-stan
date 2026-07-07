@@ -16,11 +16,25 @@ export interface SessionState {
 
 export type SessionEvent =
   | { type: "sessionStarted"; startedAt: string }
+  // `dismissedFingerprints` is the COMPLETE source of truth for this run: the
+  // caller must pass the full current dismissal set every run, not a delta.
+  // A re-reported finding whose fingerprint is absent from this set will reopen.
+  // (This matches the design: the dismissals file is durable truth, read fresh
+  // each run.)
   | { type: "runCompleted"; coveredFiles: string[]; observations: ObservationV2[]; dismissedFingerprints: string[] }
   | { type: "fileEdited"; file: string }
   | { type: "findingDismissed"; fingerprint: string }
   | { type: "findingUndismissed"; fingerprint: string }
   | { type: "sessionEnded" };
+
+/**
+ * Compile-time exhaustiveness guard: adding a SessionEvent variant without
+ * handling it in reduceSession turns into a type error at the call to this
+ * helper (its argument is `never` only when every variant is handled).
+ */
+function assertNever(event: never): never {
+  throw new Error(`Unhandled SessionEvent: ${JSON.stringify(event)}`);
+}
 
 export const initialSessionState: SessionState = {
   phase: "idle",
@@ -86,6 +100,9 @@ export function reduceSession(state: SessionState, event: SessionEvent): Session
       const status: FindingStatus = event.type === "findingDismissed" ? "dismissed" : "open";
       return { ...state, findings: { ...state.findings, [event.fingerprint]: { ...f, status } } };
     }
+
+    default:
+      return assertNever(event);
   }
 }
 
