@@ -98,19 +98,20 @@ plinthDocsMap = fromList
               , "is usually deconstructed immediately afterwards, paying execution units for"
               , "nothing. Worse, defaulting with 'fromMaybe' silently substitutes a value in"
               , "exactly the cases where a validator should reject the transaction, so a"
-              , "\"not found\" turns into a successful validation with a bogus value. Fast-fail"
-              , "recursion (or continuation-passing) is both cheaper and safer."
+              , "\"not found\" turns into a successful validation with a bogus value. Explicit"
+              , "fast-fail matching (or continuation-passing) is both cheaper and safer."
               ]
           , docsBadExample = Text.unlines
-              [ "-- allocates a Maybe just to unwrap it, and 'find' is a higher-order helper"
-              , "ownInput = fromMaybe (traceError \"no input\") (find isOwn inputs)"
+              [ "-- a missing value silently becomes 0 and validation \"succeeds\" on garbage"
+              , "total = fromMaybe 0 (lookupValue token outputs)"
               ]
           , docsGoodExample = Text.unlines
-              [ "-- specialized fast-fail search: no Maybe allocation, one traversal"
-              , "ownInput = go inputs"
-              , "  where"
-              , "    go []       = traceError \"no input\""
-              , "    go (i : is) = if isOwn i then i else go is"
+              [ "-- fail fast: a missing value must reject the transaction"
+              , "-- (traceError is safe inside a case branch; Plinth's strict application"
+              , "--  means it would fire eagerly in an argument position like fromMaybe's)"
+              , "total = case lookupValue token outputs of"
+              , "  Nothing -> traceError \"token value missing\""
+              , "  Just v  -> v"
               ]
           , docsAnchor = "optional-types"
           }
@@ -118,10 +119,13 @@ plinthDocsMap = fromList
     , ( Id "PLU-STAN-04"
       , InspectionDocs
           { docsWhyItMatters = Text.unlines
-              [ "Comparing only a PubKeyHash, ScriptHash, or Credential checks the payment"
-              , "part of an address and ignores the staking part. An attacker can construct"
-              , "an output that passes the credential check while redirecting the staking"
-              , "rewards of the locked value to their own stake key — staking value theft."
+              [ "When the hash is drawn from an output's address, comparing only a"
+              , "PubKeyHash, ScriptHash, or Credential checks the payment part of that"
+              , "address and ignores the staking part. An attacker can construct an output"
+              , "that passes the credential check while redirecting the staking rewards of"
+              , "the locked value to their own stake key — staking value theft. The rule"
+              , "also fires on legitimate uses (e.g. 'txInfoSignatories' membership checks);"
+              , "those can be reviewed and suppressed."
               ]
           , docsBadExample = Text.unlines
               [ "-- only the payment credential is compared"
@@ -239,7 +243,7 @@ plinthDocsMap = fromList
               [ "'valueOf' inspects a single currency/token entry, so a comparison built on"
               , "it says nothing about the rest of the Value. An output can satisfy"
               , "'valueOf out cs tn >= n' while also carrying any number of unexpected dust"
-              , "tokens (a Dusk-token attack when the token set is unbounded), and"
+              , "tokens (a dust token attack when the token set is unbounded), and"
               , "lovelace-only checks silently depend on the min-UTxO requirement, which is a"
               , "protocol parameter that changes over time. Compare whole values, or bound"
               , "the token set explicitly."

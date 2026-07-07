@@ -150,7 +150,7 @@ isMaybeStakingCredential' b =
 
 ## Value Handling
 
-- **`valueOf` instead of `valueEq` without limits:** Potential Dusk token attack when the number of unique tokens is unbounded. (**Stan:** partially implemented via `PLU-STAN-09` for `valueOf` in boolean comparisons)
+- **`valueOf` instead of `valueEq` without limits:** Potential dust token attack when the number of unique tokens is unbounded. (**Stan:** partially implemented via `PLU-STAN-09` for `valueOf` in boolean comparisons)
 - **`valueOf` with `adaSymbol` and `adaToken`:** Prefer extracting ADA directly. (**Stan:** not implemented)
   ```haskell
   -- BuiltinData variant

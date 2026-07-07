@@ -2,11 +2,11 @@ module Test.Stan.Plinth
     ( plinthSpec
     ) where
 
-import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe, shouldSatisfy)
+import Test.Hspec (Spec, describe, it, shouldBe)
 
 import Stan.Core.Id (Id (..))
 import Stan.Inspection.All (inspectionsMap)
-import Stan.Plinth.Docs (InspectionDocs (..), lookupDocs)
+import Stan.Plinth.Docs (InspectionDocs (..), lookupDocs, plinthDocsMap)
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as Text
@@ -18,10 +18,16 @@ plinthSpec = describe "Stan.Plinth.Docs" $ do
         let plinthIds = filter (Text.isPrefixOf "PLU-STAN" . unId) (HM.keys inspectionsMap)
         let missing = filter (isNothing . lookupDocs) plinthIds
         missing `shouldBe` []
-    it "has non-empty teaching content everywhere" $
-        case lookupDocs (Id "PLU-STAN-04") of
-            Nothing -> expectationFailure "no docs for PLU-STAN-04"
-            Just InspectionDocs{..} -> do
-                docsWhyItMatters `shouldSatisfy` (not . Text.null)
-                docsBadExample `shouldSatisfy` (not . Text.null)
-                docsGoodExample `shouldSatisfy` (not . Text.null)
+    it "has no stale docs for removed or renamed inspections" $ do
+        let stale = filter (\insId -> not (HM.member insId inspectionsMap))
+                (HM.keys plinthDocsMap)
+        stale `shouldBe` []
+    it "has non-empty teaching content everywhere" $ do
+        let offenders =
+                [ unId insId
+                | (insId, InspectionDocs{..}) <- HM.toList plinthDocsMap
+                , Text.null docsWhyItMatters
+                    || Text.null docsBadExample
+                    || Text.null docsGoodExample
+                ]
+        offenders `shouldBe` []
