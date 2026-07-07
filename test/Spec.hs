@@ -14,6 +14,7 @@ import Test.Stan.Cli (cliSpec)
 import Test.Stan.Config (configSpec)
 import Test.Stan.Number (linesOfCodeSpec, modulesNumSpec)
 import Test.Stan.Observation (observationSpec)
+import Test.Stan.Plinth (plinthSpec)
 import Test.Stan.Toml (tomlSpec)
 
 import Control.Exception (try)
@@ -38,6 +39,7 @@ main = do
                 tomlSpec
                 configSpec
                 observationSpec
+                plinthSpec
                 analysisSpec testHies
 
 isTargetFile :: HieFile -> Bool
