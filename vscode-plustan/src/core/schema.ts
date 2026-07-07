@@ -59,6 +59,12 @@ export function parseAnalyzePayload(raw: unknown): AnalyzePayloadV2 {
   if (!Array.isArray(o.inspections) || !Array.isArray(o.observations)) {
     throw new SchemaError("malformed", "analyze payload: missing inspections/observations arrays");
   }
+  for (const insp of o.inspections) {
+    const r = asRecord(insp, "inspection");
+    if (typeof r.id !== "string") {
+      throw new SchemaError("malformed", "inspection: missing string field 'id'");
+    }
+  }
   for (const obs of o.observations) {
     const r = asRecord(obs, "observation");
     for (const key of ["fingerprint", "inspectionId", "file", "moduleName"]) {
@@ -84,6 +90,10 @@ export function parseCapabilities(raw: unknown): CapabilitiesPayload {
   return o as unknown as CapabilitiesPayload;
 }
 
+// Deliberately version-agnostic: the list-onchain shape is identical across
+// schema v1/v2, and `plustan capabilities` is the version gate for the session.
+// list-onchain must keep working against older binaries for the legacy
+// module-listing commands, so no version check here.
 export function parseListOnchain(raw: unknown): ListOnchainPayload {
   const o = asRecord(raw, "list-onchain payload");
   if (!Array.isArray(o.modules)) {
