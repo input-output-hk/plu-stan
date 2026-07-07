@@ -94,6 +94,21 @@ describe("session reducer", () => {
     assert.strictEqual(s3.findings["f1"].status, "fixed");
   });
 
+  it("fileEdited returns the SAME state reference when no open finding transitions", () => {
+    // f1 is fixed in src/V.hs; g1 lives in another file. Editing src/V.hs must
+    // stale nothing, so callers can skip re-persisting on this no-op edit.
+    const s1 = afterRun(started(), [obs("f1"), obs("g1", "src/Other.hs")]);
+    const fixed = afterRun(s1, [obs("g1", "src/Other.hs")]); // f1 -> fixed, g1 carried forward
+    assert.strictEqual(fixed.findings["f1"].status, "fixed");
+    // Edit a file with no open findings of its own.
+    const edited = reduceSession(fixed, { type: "fileEdited", file: "src/V.hs" });
+    assert.strictEqual(edited, fixed, "no-op fileEdited must return the identical reference");
+    // And editing a file with an open finding still produces a new reference.
+    const editedOther = reduceSession(fixed, { type: "fileEdited", file: "src/Other.hs" });
+    assert.notStrictEqual(editedOther, fixed, "a real transition must return a new reference");
+    assert.strictEqual(editedOther.findings["g1"].status, "stale");
+  });
+
   it("counts totals across a mixed state", () => {
     const s1 = afterRun(started(), [obs("f1"), obs("f2", "src/V.hs", 7), obs("f3", "src/V.hs", 9)]);
     const s2 = reduceSession(s1, { type: "findingDismissed", fingerprint: "f3" });

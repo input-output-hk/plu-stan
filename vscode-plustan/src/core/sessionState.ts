@@ -82,13 +82,17 @@ export function reduceSession(state: SessionState, event: SessionEvent): Session
     }
 
     case "fileEdited": {
+      let changed = false;
       const findings = { ...state.findings };
-      for (const f of Object.values(findings)) {
+      for (const f of Object.values(state.findings)) {
         if (f.file === event.file && f.status === "open") {
           findings[f.fingerprint] = { ...f, status: "stale" };
+          changed = true;
         }
       }
-      return { ...state, findings };
+      // Return the SAME reference when nothing transitioned so callers can skip
+      // re-persisting/re-publishing on no-op edits (e.g. every keystroke).
+      return changed ? { ...state, findings } : state;
     }
 
     case "findingDismissed":

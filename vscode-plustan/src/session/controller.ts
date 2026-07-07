@@ -22,7 +22,9 @@ export class ReviewController implements vscode.Disposable {
   private readonly queue = new RunCoalescer();
   private running = false;
   private buildFailed = false;
-  private debounceTimer: NodeJS.Timeout | undefined;
+  // One debounce timer per module: saving module A then module B within the
+  // window must schedule TWO runs, not let B's reset cancel A's pending run.
+  private readonly debounceTimers = new Map<string, NodeJS.Timeout>();
   private abort: AbortController | undefined;
   private readonly disposables: vscode.Disposable[] = [];
 
@@ -38,11 +40,8 @@ export class ReviewController implements vscode.Disposable {
       vscode.workspace.onDidSaveTextDocument((doc) => this.handleSave(doc)),
       // A finding is stale as soon as its file is *edited*, not only once saved.
       vscode.workspace.onDidChangeTextDocument((e) => {
-        if (this.state.phase === "active" && e.contentChanges.length > 0) {
-          const file = this.fileKeyForDocument(e.document);
-          if (this.moduleForDocument(e.document)) {
-            this.dispatch({ type: "fileEdited", file });
-          }
+        if (this.state.phase === "active" && e.contentChanges.length > 0 && this.moduleForDocument(e.document)) {
+          this.dispatch({ type: "fileEdited", file: this.fileKeyForDocument(e.document) });
         }
       })
     );
@@ -103,7 +102,10 @@ export class ReviewController implements vscode.Disposable {
   async endReview(): Promise<void> {
     this.dispatch({ type: "sessionEnded" });
     await vscode.commands.executeCommand("setContext", "plustan.sessionActive", false);
+    // Cancel the in-flight run AND any pending debounced runs, so no callback
+    // later builds a fresh run and dispatches runCompleted against the idle state.
     this.abort?.abort();
+    this.clearDebounceTimers();
     const c = this.state.findings;
     this.output.appendLine(
       `Plu-Stan review ended: ${Object.values(c).filter((f) => f.status === "fixed").length} fixed, ` +
@@ -131,19 +133,31 @@ export class ReviewController implements vscode.Disposable {
       return;
     }
     this.dispatch({ type: "fileEdited", file: this.fileKeyForDocument(doc) });
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
+    const existing = this.debounceTimers.get(moduleName);
+    if (existing) {
+      clearTimeout(existing);
     }
-    this.debounceTimer = setTimeout(() => {
-      this.queue.request({ kind: "module", moduleName });
-      void this.pump();
-    }, SAVE_DEBOUNCE_MS);
+    this.debounceTimers.set(
+      moduleName,
+      setTimeout(() => {
+        this.debounceTimers.delete(moduleName);
+        this.queue.request({ kind: "module", moduleName });
+        void this.pump();
+      }, SAVE_DEBOUNCE_MS)
+    );
+  }
+
+  private clearDebounceTimers(): void {
+    for (const timer of this.debounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.debounceTimers.clear();
   }
 
   /** The backend reports workspace-relative paths; match on suffix. */
   private moduleForDocument(doc: vscode.TextDocument): string | undefined {
     for (const [file, moduleName] of this.moduleByFile) {
-      if (doc.fileName.endsWith(file)) {
+      if (this.pathEndsWith(doc.fileName, file)) {
         return moduleName;
       }
     }
@@ -152,11 +166,20 @@ export class ReviewController implements vscode.Disposable {
 
   private fileKeyForDocument(doc: vscode.TextDocument): string {
     for (const [file] of this.moduleByFile) {
-      if (doc.fileName.endsWith(file)) {
+      if (this.pathEndsWith(doc.fileName, file)) {
         return file;
       }
     }
     return doc.fileName;
+  }
+
+  /**
+   * Suffix match on a path boundary only: "src/MyV.hs" must NOT match the
+   * relative path "V.hs". The backend reports forward-slash relative paths,
+   * so a POSIX "/" boundary check is sufficient.
+   */
+  private pathEndsWith(full: string, suffix: string): boolean {
+    return full === suffix || full.endsWith((suffix.startsWith("/") ? "" : "/") + suffix);
   }
 
   private async pump(): Promise<void> {
@@ -174,7 +197,7 @@ export class ReviewController implements vscode.Disposable {
       this.buildFailed = false;
     } catch (error) {
       if (error instanceof AnalyzerError && error.kind === "cancelled") {
-        // A newer save superseded this run; not a failure — stay quiet.
+        // endReview/dispose aborted this run; not a failure — stay quiet.
       } else if (error instanceof AnalyzerError && error.kind === "build-failed") {
         this.buildFailed = true; // keep findings; status bar explains; next save retries
         this.output.appendLine(error.message);
@@ -209,6 +232,11 @@ export class ReviewController implements vscode.Disposable {
     const covered = new Set(coveredFiles);
     const observations = payload.observations.filter((o) => covered.has(o.file));
     const dismissed = (await this.dismissals.load()).dismissals.map((d) => d.fingerprint);
+    // Defense-in-depth: if the session ended while this run was in flight, don't
+    // dispatch runCompleted against the now-idle state.
+    if (this.state.phase !== "active") {
+      return;
+    }
     this.dispatch({
       type: "runCompleted",
       coveredFiles,
@@ -218,7 +246,14 @@ export class ReviewController implements vscode.Disposable {
   }
 
   private dispatch(event: Parameters<typeof reduceSession>[1]): void {
-    this.state = reduceSession(this.state, event);
+    const next = reduceSession(this.state, event);
+    // A no-op edit (e.g. a keystroke in a file with no open finding) leaves the
+    // reference unchanged: skip the Memento write and republish to avoid
+    // per-keystroke write amplification.
+    if (next === this.state) {
+      return;
+    }
+    this.state = next;
     void this.workspaceState.update(SESSION_STORAGE_KEY, {
       state: this.state,
       inspections: [...this.inspections.entries()],
@@ -247,9 +282,7 @@ export class ReviewController implements vscode.Disposable {
 
   dispose(): void {
     this.abort?.abort();
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-    }
+    this.clearDebounceTimers();
     for (const d of this.disposables) {
       d.dispose();
     }
