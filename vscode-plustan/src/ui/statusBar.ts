@@ -14,10 +14,15 @@ export class PluStanStatusBar implements vscode.Disposable {
       this.item.hide();
       return;
     }
+    if (running) {
+      this.item.text = "$(sync~spin) Plu-Stan: analyzing…";
+      this.item.tooltip = "Plu-Stan is running an analysis…";
+      this.item.show();
+      return;
+    }
     const counts = countByStatus(state);
-    const spinner = running ? "$(sync~spin) " : "";
-    const failure = buildFailed ? " · build failed — results stale" : "";
-    this.item.text = `${spinner}Plu-Stan: ${counts.open + counts.stale} open · ${counts.fixed} fixed${failure}`;
+    const failure = buildFailed ? " · $(warning) build failed — results stale" : "";
+    this.item.text = `Plu-Stan: ${counts.open + counts.stale} open · ${counts.fixed} fixed${failure}`;
     this.item.tooltip = "Plu-Stan review session — click to open findings";
     this.item.show();
   }

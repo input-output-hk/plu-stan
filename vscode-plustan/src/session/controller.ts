@@ -72,10 +72,18 @@ export class ReviewController implements vscode.Disposable {
   async startReview(scopeArg?: "all" | string[]): Promise<void> {
     let moduleByFile: Map<string, string>;
     try {
-      await this.client.capabilities();
-      const list = await this.client.listOnchain();
-      this.lastListing = list;
-      moduleByFile = new Map(list.modules.map((m) => [m.file, m.moduleName]));
+      // Discovery (handshake + list-onchain) can be the slowest step on a cold
+      // start because list-onchain triggers a .hie build — show a progress bar
+      // in the Findings view so the click doesn't feel unresponsive.
+      moduleByFile = await vscode.window.withProgress(
+        { location: { viewId: "plustanFindings" }, title: "Plu-Stan: discovering onchain modules…" },
+        async () => {
+          await this.client.capabilities();
+          const list = await this.client.listOnchain();
+          this.lastListing = list;
+          return new Map(list.modules.map((m) => [m.file, m.moduleName]));
+        }
+      );
     } catch (error) {
       await this.explainStartFailure(error);
       return;
@@ -197,7 +205,13 @@ export class ReviewController implements vscode.Disposable {
     this.running = true;
     this.publish();
     try {
-      await this.runOne(next);
+      const title = next.kind === "workspace"
+        ? "Plu-Stan: analyzing workspace…"
+        : `Plu-Stan: analyzing ${next.moduleName}…`;
+      await vscode.window.withProgress(
+        { location: { viewId: "plustanFindings" }, title },
+        () => this.runOne(next)
+      );
       this.buildFailed = false;
     } catch (error) {
       if (error instanceof AnalyzerError && error.kind === "cancelled") {
