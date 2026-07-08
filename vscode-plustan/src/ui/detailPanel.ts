@@ -93,10 +93,23 @@ function wrap(body: string): string {
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
     <style>
-      body { font-family: var(--vscode-font-family); font-size: 13px; padding: 8px; }
-      pre { background: var(--vscode-textCodeBlock-background); padding: 6px; overflow-x: auto; }
-      .muted { opacity: 0.7; }
-      button { margin-right: 6px; }
+      body { font-family: var(--vscode-font-family); font-size: 13px; padding: 12px 16px; line-height: 1.5; }
+      h2 { margin: 0 0 4px; font-size: 1.15em; }
+      h3 { margin: 16px 0 6px; font-size: 1em; }
+      p { margin: 8px 0; }
+      pre {
+        background: var(--vscode-textCodeBlock-background);
+        padding: 10px 12px;
+        margin: 4px 0 12px;
+        border-radius: 4px;
+        line-height: 1.45;
+        overflow-x: auto;
+      }
+      .muted { opacity: 0.7; margin-bottom: 12px; display: block; }
+      .actions { margin-top: 16px; display: flex; gap: 8px; }
+      button { padding: 4px 12px; }
+      ul { margin: 6px 0; padding-left: 20px; }
+      li { margin: 3px 0; }
     </style></head>
     <body>${body}
     <script>const vscode = acquireVsCodeApi(); function post(type) { vscode.postMessage({ type }); }</script>
