@@ -116,7 +116,7 @@ export class ReviewController implements vscode.Disposable {
 
   async dismiss(fingerprint: string, inspectionId: string, note?: string): Promise<void> {
     await this.dismissals.add({ fingerprint, inspectionId, note, dismissedAt: new Date().toISOString() });
-    this.dispatch({ type: "findingDismissed", fingerprint });
+    this.dispatch({ type: "findingDismissed", fingerprint, note });
   }
 
   async undismiss(fingerprint: string): Promise<void> {
@@ -231,7 +231,14 @@ export class ReviewController implements vscode.Disposable {
     // workspace-kind run — keep only files inside the session scope.
     const covered = new Set(coveredFiles);
     const observations = payload.observations.filter((o) => covered.has(o.file));
-    const dismissed = (await this.dismissals.load()).dismissals.map((d) => d.fingerprint);
+    const dismissalEntries = (await this.dismissals.load()).dismissals;
+    const dismissed = dismissalEntries.map((d) => d.fingerprint);
+    const dismissalNotes: Record<string, string> = {};
+    for (const entry of dismissalEntries) {
+      if (entry.note) {
+        dismissalNotes[entry.fingerprint] = entry.note;
+      }
+    }
     // Defense-in-depth: if the session ended while this run was in flight, don't
     // dispatch runCompleted against the now-idle state.
     if (this.state.phase !== "active") {
@@ -241,7 +248,8 @@ export class ReviewController implements vscode.Disposable {
       type: "runCompleted",
       coveredFiles,
       observations,
-      dismissedFingerprints: dismissed
+      dismissedFingerprints: dismissed,
+      dismissalNotes
     });
   }
 

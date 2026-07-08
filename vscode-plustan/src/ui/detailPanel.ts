@@ -71,9 +71,13 @@ function findingHtml(f: SessionFinding, inspection: InspectionV2 | undefined): s
     ? `<h3>✗ Avoid</h3><pre>${esc(inspection.badExample)}</pre>
        <h3>✓ Prefer</h3><pre>${esc(inspection.goodExample)}</pre>`
     : "";
+  const dismissalNote = f.status === "dismissed" && f.dismissalNote
+    ? `<p class="muted">Dismissed — ${esc(f.dismissalNote)}</p>`
+    : "";
   return wrap(`
     <h2>${esc(f.inspectionId)} · ${esc(name)}</h2>
     <p class="muted">${esc(severity)} · ${esc(f.file)}:${f.startLine}:${f.startCol} · status: ${esc(f.status)}</p>
+    ${dismissalNote}
     ${why ? `<p>${esc(why)}</p>` : ""}
     ${examples}
     ${solutions ? `<h3>How to fix</h3><ul>${solutions}</ul>` : ""}

@@ -21,6 +21,9 @@ export class FindingTreeItem extends vscode.TreeItem {
     super(`${path.basename(finding.file)}:${finding.startLine}`, vscode.TreeItemCollapsibleState.None);
     this.description = inspection ? inspection.name : finding.inspectionId;
     this.tooltip = `[${finding.inspectionId}] ${finding.file}:${finding.startLine}:${finding.startCol}`;
+    if (finding.status === "dismissed" && finding.dismissalNote) {
+      this.tooltip += `\nDismissed: ${finding.dismissalNote}`;
+    }
     this.contextValue = finding.status === "dismissed" ? "plustanDismissedFinding" : "plustanFinding";
     this.iconPath = new vscode.ThemeIcon(
       finding.status === "stale" ? "history"

@@ -5,6 +5,7 @@ export type FindingStatus = "open" | "stale" | "fixed" | "dismissed";
 export interface SessionFinding extends ObservationV2 {
   status: FindingStatus;
   lastSeenRun: number;
+  dismissalNote?: string;
 }
 
 export interface SessionState {
@@ -21,9 +22,17 @@ export type SessionEvent =
   // A re-reported finding whose fingerprint is absent from this set will reopen.
   // (This matches the design: the dismissals file is durable truth, read fresh
   // each run.)
-  | { type: "runCompleted"; coveredFiles: string[]; observations: ObservationV2[]; dismissedFingerprints: string[] }
+  | {
+      type: "runCompleted";
+      coveredFiles: string[];
+      observations: ObservationV2[];
+      dismissedFingerprints: string[];
+      // fingerprint -> dismissal note, mirroring DismissalEntry.note. A plain
+      // Record (not the dismissals module type) keeps this file vscode-free.
+      dismissalNotes?: Record<string, string>;
+    }
   | { type: "fileEdited"; file: string }
-  | { type: "findingDismissed"; fingerprint: string }
+  | { type: "findingDismissed"; fingerprint: string; note?: string }
   | { type: "findingUndismissed"; fingerprint: string }
   | { type: "sessionEnded" };
 
@@ -65,10 +74,12 @@ export function reduceSession(state: SessionState, event: SessionEvent): Session
       }
       // Everything reported by this run is open (or dismissed).
       for (const o of event.observations) {
+        const isDismissed = dismissed.has(o.fingerprint);
         findings[o.fingerprint] = {
           ...o,
-          status: dismissed.has(o.fingerprint) ? "dismissed" : "open",
-          lastSeenRun: runCount
+          status: isDismissed ? "dismissed" : "open",
+          lastSeenRun: runCount,
+          dismissalNote: isDismissed ? event.dismissalNotes?.[o.fingerprint] : undefined
         };
       }
       // Previously-known findings in covered files that were NOT re-reported: fixed.
@@ -95,14 +106,26 @@ export function reduceSession(state: SessionState, event: SessionEvent): Session
       return changed ? { ...state, findings } : state;
     }
 
-    case "findingDismissed":
+    case "findingDismissed": {
+      const f = state.findings[event.fingerprint];
+      if (!f) {
+        return state;
+      }
+      return {
+        ...state,
+        findings: { ...state.findings, [event.fingerprint]: { ...f, status: "dismissed", dismissalNote: event.note } }
+      };
+    }
+
     case "findingUndismissed": {
       const f = state.findings[event.fingerprint];
       if (!f) {
         return state;
       }
-      const status: FindingStatus = event.type === "findingDismissed" ? "dismissed" : "open";
-      return { ...state, findings: { ...state.findings, [event.fingerprint]: { ...f, status } } };
+      return {
+        ...state,
+        findings: { ...state.findings, [event.fingerprint]: { ...f, status: "open", dismissalNote: undefined } }
+      };
     }
 
     default:

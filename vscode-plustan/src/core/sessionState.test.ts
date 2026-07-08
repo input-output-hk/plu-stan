@@ -132,6 +132,30 @@ describe("session reducer", () => {
     assert.strictEqual(s2.runCount, 0);
   });
 
+  it("findingDismissed with a note sets dismissalNote; findingUndismissed clears it", () => {
+    const s1 = afterRun(started(), [obs("f1")]);
+    const s2 = reduceSession(s1, { type: "findingDismissed", fingerprint: "f1", note: "intentional" });
+    assert.strictEqual(s2.findings["f1"].status, "dismissed");
+    assert.strictEqual(s2.findings["f1"].dismissalNote, "intentional");
+    const s3 = reduceSession(s2, { type: "findingUndismissed", fingerprint: "f1" });
+    assert.strictEqual(s3.findings["f1"].status, "open");
+    assert.strictEqual(s3.findings["f1"].dismissalNote, undefined);
+  });
+
+  it("runCompleted maps dismissalNotes onto a re-reported-and-dismissed finding", () => {
+    const s1 = afterRun(started(), [obs("f1")], ["f1"]);
+    assert.strictEqual(s1.findings["f1"].dismissalNote, undefined);
+    const s2 = reduceSession(s1, {
+      type: "runCompleted",
+      coveredFiles: ["src/V.hs"],
+      observations: [obs("f1")],
+      dismissedFingerprints: ["f1"],
+      dismissalNotes: { f1: "credential-only comparison is intentional here" }
+    });
+    assert.strictEqual(s2.findings["f1"].status, "dismissed");
+    assert.strictEqual(s2.findings["f1"].dismissalNote, "credential-only comparison is intentional here");
+  });
+
   it("freezes lastSeenRun at the last run that reported the finding", () => {
     const s1 = afterRun(started(), [obs("f1")]);
     assert.strictEqual(s1.findings["f1"].lastSeenRun, 1);
