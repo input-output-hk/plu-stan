@@ -107,7 +107,8 @@
         {
           "id": "plustanFindingDetail",
           "name": "Finding Detail",
-          "type": "webview"
+          "type": "webview",
+          "visibility": "collapsed"
         },
         {
           "id": "plustanOnchainModules",

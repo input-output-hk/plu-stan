@@ -31,9 +31,11 @@ export class FindingDetailProvider implements vscode.WebviewViewProvider {
   }
 
   showFinding(finding: SessionFinding, inspection: InspectionV2 | undefined): void {
+    // Update the content but do NOT force the (collapsed-by-default) view open —
+    // it only takes screen space when the user expands it themselves, at which
+    // point resolveWebviewView renders whatever finding is currently selected.
     this.current = { finding, inspection };
     this.render();
-    this.view?.show?.(true);
   }
 
   clear(): void {
