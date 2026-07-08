@@ -29,7 +29,7 @@ module Stan.Hie.Compat904
     , nodeInfo
     ) where
 
-import GHC.Iface.Ext.Binary (HieFileResult (hie_file_result), readHieFile)
+import GHC.Iface.Ext.Binary (HieFileResult (hie_file_result), HieHeader, readHieFileWithVersion)
 import GHC.Iface.Ext.Types
                  (ContextInfo (..), DeclType (..), HieAST (..), HieASTs (..), HieArgs (..),
                  HieFile (..), HieType (..), HieTypeFlat, IEType (..), Identifier,
@@ -40,6 +40,10 @@ import GHC.Types.Name.Cache (initNameCache)
 import GHC.Data.FastString (FastString)
 import GHC.Utils.Outputable (ppr, showSDocUnsafe)
 
+import Data.Version (showVersion)
+import System.Info (compilerVersion)
+
+import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as S
 
@@ -92,7 +96,44 @@ hFunTy2 t = case t of
 readHieFileWithNameCache :: IO (FilePath -> IO HieFileResult)
 readHieFileWithNameCache = do
     nameCache <- initNameCache 'z' []
-    pure (readHieFile nameCache)
+    pure $ \file -> do
+        result <- readHieFileWithVersion isCompatibleHieVersion nameCache file
+        case result of
+            Right hieFileResult -> pure hieFileResult
+            Left (fileHieVersion, fileGhcVersion) -> error $ toText $ mconcat
+                [ "Stan cannot read the .hie file '", file, "': it was produced by GHC "
+                , BS8.unpack fileGhcVersion, " (.hie format version "
+                , Text.Show.show fileHieVersion
+                , "), which belongs to a different GHC major.minor series than the compiler"
+                , " Stan was built with (GHC ", showVersion compilerVersion
+                , "). Rebuild Stan with a GHC from the same series to analyse these files."
+                ]
+
+-- | Predicate for 'readHieFileWithVersion': accept a @.hie@ file when the GHC
+-- that produced it shares the major.minor series of the compiler that built
+-- Stan (e.g. a 9.6.x build reads any 9.6.y file).
+--
+-- GHC bumps the integer @.hie@-file version on /every/ release, patch releases
+-- included — @hieVersion = read (cProjectVersionInt ++ cProjectPatchLevel)@ in
+-- "GHC.Iface.Ext.Types" — even when the on-disk format is unchanged. The stock
+-- 'GHC.Iface.Ext.Binary.readHieFile' compares that integer exactly, so a build
+-- made with GHC 9.6.6 refuses a GHC-9.6.7 @.hie@ file. Patch releases do not
+-- change the on-disk @.hie@ format, so matching on the major.minor series lets
+-- one Stan build read every patch release in its series while still rejecting
+-- files from other series, whose format genuinely may differ.
+isCompatibleHieVersion :: HieHeader -> Bool
+isCompatibleHieVersion (_fileHieVersion, fileGhcVersion) =
+    majorMinor (BS8.unpack fileGhcVersion) == majorMinor (showVersion compilerVersion)
+  where
+    -- First two version components, so "9.6.7" and "9.6" both give ["9","6"].
+    -- String-based to stay robust to multi-digit patch levels.
+    majorMinor :: String -> [String]
+    majorMinor = take 2 . splitOnDot
+
+    splitOnDot :: String -> [String]
+    splitOnDot s = case break (== '.') s of
+        (component, '.' : rest) -> component : splitOnDot rest
+        (component, _)          -> [component]
 
 newtype DeclType = DeclType GHC.Iface.Ext.Types.DeclType
   deriving stock Eq
