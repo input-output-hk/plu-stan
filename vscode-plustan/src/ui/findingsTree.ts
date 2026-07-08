@@ -8,10 +8,15 @@ type Grouping = "severity" | "module";
 const SEVERITY_ORDER = ["Error", "Warning", "PotentialBug", "Performance", "Style"];
 
 class GroupItem extends vscode.TreeItem {
-  constructor(label: string, readonly children: (GroupItem | FindingTreeItem)[], icon?: string) {
+  constructor(
+    label: string,
+    readonly children: (GroupItem | FindingTreeItem)[],
+    icon?: string,
+    iconColor?: vscode.ThemeColor
+  ) {
     super(label, vscode.TreeItemCollapsibleState.Expanded);
     if (icon) {
-      this.iconPath = new vscode.ThemeIcon(icon);
+      this.iconPath = new vscode.ThemeIcon(icon, iconColor);
     }
   }
 }
@@ -25,12 +30,19 @@ export class FindingTreeItem extends vscode.TreeItem {
       this.tooltip += `\nDismissed: ${finding.dismissalNote}`;
     }
     this.contextValue = finding.status === "dismissed" ? "plustanDismissedFinding" : "plustanFinding";
-    this.iconPath = new vscode.ThemeIcon(
+    // Icon *shape* encodes status; icon *color* encodes severity. Active
+    // findings (open/stale) get the severity colour so the tree reads as a
+    // colour-coded list; resolved findings are neutral (green check / muted slash).
+    const shape =
       finding.status === "stale" ? "history"
         : finding.status === "fixed" ? "check"
         : finding.status === "dismissed" ? "circle-slash"
-        : "warning"
-    );
+        : "circle-filled";
+    const color =
+      finding.status === "fixed" ? new vscode.ThemeColor("charts.green")
+        : finding.status === "dismissed" ? new vscode.ThemeColor("descriptionForeground")
+        : severityColor(inspection?.severity);
+    this.iconPath = new vscode.ThemeIcon(shape, color);
     if (finding.status === "stale") {
       this.description = `~ ${this.description ?? ""}`;
     }
@@ -106,9 +118,14 @@ export class FindingsTreeProvider implements vscode.TreeDataProvider<Node> {
       const ruleNodes = ruleIds.map((ruleId) => {
         const inRule = inSeverity.filter((f) => f.inspectionId === ruleId).sort(bySpan);
         const name = this.inspections.get(ruleId)?.name ?? "";
-        return new GroupItem(`${ruleId} ${name} (${inRule.length})`, inRule.map((f) => this.item(f)));
+        return new GroupItem(
+          `${ruleId} ${name} (${inRule.length})`,
+          inRule.map((f) => this.item(f)),
+          "circle-filled",
+          severityColor(severity)
+        );
       });
-      return new GroupItem(`${severity} (${inSeverity.length})`, ruleNodes, severityIcon(severity));
+      return new GroupItem(`${severity} (${inSeverity.length})`, ruleNodes, severityIcon(severity), severityColor(severity));
     });
   }
 
@@ -131,4 +148,20 @@ function bySpan(a: SessionFinding, b: SessionFinding): number {
 
 function severityIcon(severity: string): string {
   return severity === "Error" ? "error" : severity === "Performance" ? "zap" : "warning";
+}
+
+/**
+ * Severity → theme colour for icon tinting. Uses the built-in `charts.*`
+ * palette so it adapts to light/dark themes. `undefined` (unknown severity)
+ * falls back to the icon's default colour.
+ */
+function severityColor(severity: string | undefined): vscode.ThemeColor | undefined {
+  switch (severity) {
+    case "Error": return new vscode.ThemeColor("charts.red");
+    case "Warning": return new vscode.ThemeColor("charts.yellow");
+    case "PotentialBug": return new vscode.ThemeColor("charts.orange");
+    case "Performance": return new vscode.ThemeColor("charts.blue");
+    case "Style": return new vscode.ThemeColor("charts.purple");
+    default: return undefined;
+  }
 }
