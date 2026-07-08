@@ -418,8 +418,10 @@ export function activate(context: vscode.ExtensionContext): void {
         const settings = await ensureBinaryConfigured(f, provider, resolveSettings);
         if (!settings) { return; }
         await controller.startReview(scopeArg);
-        // Reuse the listing startReview() already fetched — don't call listOnchain twice.
-        // Absent when the handshake failed or the user cancelled the module picker.
+        // Reuse the listing startReview() already fetched (captured before the
+        // module-scope picker, so it's the full set) — don't call listOnchain
+        // twice. Undefined only until a first successful handshake; once set it
+        // persists, so we populate the Onchain Modules view whenever we have it.
         if (controller.onchainListing) {
           provider.setData(controller.onchainListing.modules, controller.onchainListing.workspaceRoot);
         }
