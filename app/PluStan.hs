@@ -40,7 +40,8 @@ import Stan.Info (ProjectInfo (..), StanEnv (..))
 import Stan.Inspection (Inspection (..))
 import Stan.Inspection.All (getInspectionById)
 import Stan.Observation (Observation (..))
-import Stan.Plinth.Payload (analyzeSchemaVersion, mkAnalyzePayload, mkCapabilitiesPayload)
+import Stan.Plinth.Payload (analyzeSchemaVersion, dedupeObservations, mkAnalyzePayload,
+                            mkCapabilitiesPayload)
 import Stan.Report (generateReport)
 import Stan.Report.Settings (OutputSettings (..), ToggleSolution (..), Verbosity (..))
 import Stan.Severity (Severity (..))
@@ -172,6 +173,7 @@ runAnalyze AnalyzeArgs{..} =
     analysis <- getAnalysis (stanArgs hieDir) notJson config filteredHieFiles
       >>= pure . filterAnalysisToContracts (Set.fromList $ map onchainModuleFile onchainModules)
       >>= pure . maybe id (limitAnalysisToTarget . onchainModuleFile) targetModule
+      >>= pure . dedupeAnalysisObservations
 
     let observations = analysisObservations analysis
     let usedInspections = sortOn inspectionId $ map getInspectionById (toList $ analysisInspections analysis)
@@ -571,6 +573,27 @@ limitAnalysisToTarget targetFile analysis = analysis
   { analysisObservations = Slist.filter ((== targetFile) . observationFile) (analysisObservations analysis)
   , analysisFileMap = Map.filterWithKey (\filePath _ -> filePath == targetFile) (analysisFileMap analysis)
   }
+
+{- | Collapse observations that report the identical (rule, span) more
+than once (see 'dedupeObservations'), across both the flat
+'analysisObservations' list and each file's 'fileInfoObservations'.
+Applied once, right after the analysis is assembled and filtered, so
+the pretty ('prettyShowAnalysis', which reads 'analysisFileMap') and
+JSON ('mkAnalyzePayload', which reads 'analysisObservations') output
+paths agree on the same deduped observation count instead of the JSON
+side silently deduping while the CLI text output still shows the
+inflated one.
+-}
+dedupeAnalysisObservations :: Analysis -> Analysis
+dedupeAnalysisObservations analysis = analysis
+  { analysisObservations = Slist.slist $ dedupeObservations $ toList $ analysisObservations analysis
+  , analysisFileMap = fmap dedupeFileInfo (analysisFileMap analysis)
+  }
+  where
+    dedupeFileInfo :: FileInfo -> FileInfo
+    dedupeFileInfo fi = fi
+      { fileInfoObservations = Slist.slist $ dedupeObservations $ toList $ fileInfoObservations fi
+      }
 
 generatePluStanReport
   :: AnalyzeArgs

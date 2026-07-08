@@ -63,6 +63,17 @@ payloadSpec = describe "Stan.Plinth.Payload" $ do
                 fp1 `shouldBe` observationFingerprint o1
                 fp2 `shouldBe` (fp1 <> "#2")
             _ -> expectationFailure "expected exactly two fingerprints"
+    it "dedupes observations that report the same rule at the exact same span" $ do
+        let content = BS8.pack "f x\n"
+        let o1 = mkPayloadObs 1 content
+        let o2 = o1 { observationId = Id "obs-1-again" }
+        let o3 = o1 { observationId = Id "obs-1-yet-again" }
+        let pairs = uniquifyFingerprints [o1, o2, o3]
+        case pairs of
+            [(o, fp)] -> do
+                o `shouldBe` o1
+                fp `shouldBe` observationFingerprint o1
+            _ -> expectationFailure ("expected exactly one deduped pair, got " <> show (length pairs))
     it "analyze payload is version 2 with top-level observations" $ do
         let payloadText = LBS8.unpack (encode (mkAnalyzePayload Nothing [] []))
         payloadText `shouldSatisfy` isInfixOf "\"version\":2"
