@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { AnalyzerClient, AnalyzerError, AnalyzeScope } from "../analyzer/client";
-import { InspectionV2, SchemaError } from "../core/schema";
+import { InspectionV2, ListOnchainPayload, SchemaError } from "../core/schema";
 import { initialSessionState, reduceSession, SessionState } from "../core/sessionState";
 import { PendingRun, RunCoalescer } from "../core/runCoalescer";
 import { DismissalsStore } from "./dismissalsStore";
@@ -26,6 +26,7 @@ export class ReviewController implements vscode.Disposable {
   // window must schedule TWO runs, not let B's reset cancel A's pending run.
   private readonly debounceTimers = new Map<string, NodeJS.Timeout>();
   private abort: AbortController | undefined;
+  private lastListing?: ListOnchainPayload;
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -49,6 +50,8 @@ export class ReviewController implements vscode.Disposable {
 
   get sessionState(): SessionState { return this.state; }
   get inspectionDocs(): Map<string, InspectionV2> { return this.inspections; }
+  /** The onchain module listing fetched by the most recent successful startReview(), if any. */
+  get onchainListing(): ListOnchainPayload | undefined { return this.lastListing; }
 
   restore(): void {
     const saved = this.workspaceState.get<PersistedSession>(SESSION_STORAGE_KEY);
@@ -71,6 +74,7 @@ export class ReviewController implements vscode.Disposable {
     try {
       await this.client.capabilities();
       const list = await this.client.listOnchain();
+      this.lastListing = list;
       moduleByFile = new Map(list.modules.map((m) => [m.file, m.moduleName]));
     } catch (error) {
       await this.explainStartFailure(error);
