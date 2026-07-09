@@ -4,9 +4,10 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 const GITHUB_API_LATEST = "https://api.github.com/repos/input-output-hk/plu-stan/releases/latest";
-// Map of GHC version -> { path, version } for binaries we've downloaded.
-// stan reads .hie files whose format is locked to the exact GHC version, so we
-// cache (and download) one binary per GHC rather than a single global one.
+// Map of GHC major.minor series -> { path, version } for binaries we've
+// downloaded. A plustan build reads every .hie file produced by its GHC series
+// (patch releases share the on-disk format), so we cache and download one
+// binary per series rather than per patch or a single global one.
 const CACHED_BINARIES_KEY = "plustan.cachedBinaries";
 
 type Platform = "linux-x64" | "darwin-arm64" | "windows-x64";
@@ -29,19 +30,31 @@ function platformExt(platform: Platform): string {
   return platform === "windows-x64" ? ".exe" : "";
 }
 
+/**
+ * The GHC major.minor series of a version string, e.g. "9.6.3" -> "9.6".
+ *
+ * A single plustan build reads every .hie file produced by its GHC series: GHC
+ * bumps the .hie format version on every patch release, but the on-disk format
+ * only changes across minor series. So binaries are shipped, matched and cached
+ * per series, not per patch.
+ */
+function ghcSeries(ghc: string): string {
+  return ghc.split(".").slice(0, 2).join(".");
+}
+
 function assetName(version: string, platform: Platform, ghc: string): string {
-  return `plustan-${version}-${platform}-ghc${ghc}${platformExt(platform)}`;
+  return `plustan-${version}-${platform}-ghc${ghcSeries(ghc)}${platformExt(platform)}`;
 }
 
 /**
  * Detect the GHC version a project's .hie files were built with.
  *
- * stan consumes .hie files, and their on-disk format is locked to the exact
- * GHC version that produced them — a binary built with a different GHC panics
- * with `readHieFile: hie file versions`. Every .hie file begins with a
- * plaintext header like `HIE9063\n9.6.3\n`, so we read the version straight
- * from the same artifact the binary will read. That is exactly the GHC the
- * downloaded binary must match.
+ * stan consumes .hie files, whose on-disk format is tied to the GHC major.minor
+ * series that produced them: patch releases within a series share a format, but
+ * a binary from a different series can't read them. Every .hie file begins with
+ * a plaintext header like `HIE9063\n9.6.3\n`, so we read the full version
+ * straight from the same artifact the binary will read; the binary is then
+ * matched by its series (see `ghcSeries`).
  */
 export function detectProjectGhc(hieDir: string, projectDir: string): string | null {
   const absHieDir = path.isAbsolute(hieDir) ? hieDir : path.join(projectDir, hieDir);
@@ -91,7 +104,7 @@ interface GitHubRelease {
   assets: Array<{ name: string; browser_download_url: string }>;
 }
 
-/** GHC versions a release ships a binary for on the given platform. */
+/** GHC minor series a release ships a binary for on the given platform. */
 function availableGhcsFor(release: GitHubRelease, platform: Platform): string[] {
   const ext = platformExt(platform).replace(".", "\\.");
   const re = new RegExp(`^plustan-.+-${platform}-ghc([0-9]+(?:\\.[0-9]+)+)${ext}$`);
@@ -165,7 +178,7 @@ export function getCachedBinaryPath(globalState: vscode.Memento, ghc: string | n
   if (!ghc) {
     return undefined;
   }
-  const entry = getCacheMap(globalState)[ghc];
+  const entry = getCacheMap(globalState)[ghcSeries(ghc)];
   if (entry && fs.existsSync(entry.path)) {
     return entry.path;
   }
@@ -233,11 +246,11 @@ export async function downloadLatest(
         if (!asset) {
           const available = availableGhcsFor(release, resolved);
           throw new Error(
-            `No prebuilt plustan for GHC ${ghc} on ${resolved} in release ${release.tag_name}. ` +
+            `No prebuilt plustan for GHC ${ghc} (series ${ghcSeries(ghc)}) on ${resolved} in release ${release.tag_name}. ` +
             (available.length
-              ? `That release ships binaries for GHC: ${available.join(", ")}. `
+              ? `That release ships binaries for GHC series: ${available.join(", ")}. `
               : `That release ships no ${resolved} binaries. `) +
-            `Rebuild your project with one of those GHC versions, or build plustan with GHC ${ghc} ` +
+            `Rebuild your project with a GHC from one of those series, or build plustan with GHC ${ghc} ` +
             `and point \`plustan.binaryPath\` at it.`
           );
         }
@@ -248,7 +261,7 @@ export async function downloadLatest(
         }
 
         const ext = platformExt(resolved);
-        const binaryPath = path.join(storageDir, `plustan-ghc${ghc}${ext}`);
+        const binaryPath = path.join(storageDir, `plustan-ghc${ghcSeries(ghc)}${ext}`);
 
         output.appendLine(`Plu-Stan: downloading ${name}...`);
         await downloadFile(asset.browser_download_url, binaryPath, token);
@@ -258,7 +271,7 @@ export async function downloadLatest(
         }
 
         const cache = getCacheMap(context.globalState);
-        cache[ghc] = { path: binaryPath, version };
+        cache[ghcSeries(ghc)] = { path: binaryPath, version };
         await context.globalState.update(CACHED_BINARIES_KEY, cache);
 
         output.appendLine(`Plu-Stan: ${version} (GHC ${ghc}) installed at ${binaryPath}`);
@@ -297,7 +310,7 @@ export async function checkForUpdates(
     output.appendLine(`Plu-Stan: checking for updates (GHC ${ghc})...`);
     const release = await fetchJson(GITHUB_API_LATEST) as GitHubRelease;
     const latestVersion = release.tag_name.replace(/^v/, "");
-    const cachedVersion = getCacheMap(context.globalState)[ghc]?.version;
+    const cachedVersion = getCacheMap(context.globalState)[ghcSeries(ghc)]?.version;
 
     if (cachedVersion === latestVersion) {
       vscode.window.showInformationMessage(`Plu-Stan: already up to date (${latestVersion}, GHC ${ghc}).`);

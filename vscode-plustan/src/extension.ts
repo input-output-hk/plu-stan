@@ -637,15 +637,15 @@ async function runPluStanJson<T>(
 /** Turn a no-JSON plustan run into an actionable, user-facing message. */
 function describePluStanFailure(stdout: string, stderr: string, exitCode: number): string {
   const haystack = `${stderr}\n${stdout}`;
-  const ghcMismatch = /hie file versions|readHieFile|built by a different ghc|different ghc/i.test(haystack);
+  const ghcMismatch = /hie file versions|readHieFile|cannot read the \.hie file|major\.minor series|built by a different ghc|different ghc/i.test(haystack);
   const panicked = /panic!|the 'impossible' happened/i.test(haystack);
 
   if (ghcMismatch) {
     return (
-      "Plu-Stan couldn't read your project's .hie files: they were built with a different GHC " +
-      "than the plustan binary. Rebuild your project with the GHC the binary targets, or run " +
-      "\"Plu-Stan: Check for Updates\" to fetch a binary matching your project's GHC. " +
-      "(Full output is in the Plu-Stan output channel.)"
+      "Plu-Stan couldn't read your project's .hie files: they were built with a GHC from a " +
+      "different major.minor series than the plustan binary. Rebuild your project with a GHC in " +
+      "the series the binary targets, or run \"Plu-Stan: Check for Updates\" to fetch a binary " +
+      "matching your project's GHC series. (Full output is in the Plu-Stan output channel.)"
     );
   }
 
