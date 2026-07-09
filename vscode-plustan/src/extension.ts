@@ -361,10 +361,15 @@ export function activate(context: vscode.ExtensionContext): void {
   })();
 
   if (folder) {
-    // Capture the resolved root once: `folder` is a const narrowed to defined
-    // here, but that narrowing is not carried into the hoisted openFinding
-    // function declaration below, so read the path eagerly.
-    const workspaceRoot = folder.uri.fsPath;
+    // Base for resolving findings' file paths. plu-stan emits them relative to
+    // the directory it runs in — the analyzer's cwd, i.e. settings.projectDir
+    // (e.g. `onchain/` in a monorepo) — NOT the VS Code workspace folder. So
+    // resolve against projectDir; otherwise the `onchain/` segment is dropped
+    // and click-to-open / inline diagnostics point at nonexistent files.
+    // projectDir defaults to the folder when unset, so single-package projects
+    // are unaffected. Captured once: the `folder` narrowing is not carried into
+    // the hoisted openFinding declaration below.
+    const analysisRoot = readSettings(folder).projectDir;
     const statusBar = new PluStanStatusBar();
     const findingsTree = new FindingsTreeProvider();
 
@@ -375,7 +380,7 @@ export function activate(context: vscode.ExtensionContext): void {
       context.workspaceState,
       (state, inspections) => {
         findingsTree.setData(state, inspections);
-        publishSessionDiagnostics(state, inspections, workspaceRoot, diagnostics);
+        publishSessionDiagnostics(state, inspections, analysisRoot, diagnostics);
       },
       output
     );
@@ -390,10 +395,10 @@ export function activate(context: vscode.ExtensionContext): void {
     controller.restore();
 
     async function openFinding(finding: SessionFinding): Promise<void> {
-      // Use the captured workspaceRoot (definite inside this block); re-deriving
+      // Use the captured analysisRoot (definite inside this block); re-deriving
       // via getWorkspaceFolder() could throw, and this runs void-ed from the
       // detail panel where a throw would become an unhandled rejection.
-      const filePath = path.isAbsolute(finding.file) ? finding.file : path.join(workspaceRoot, finding.file);
+      const filePath = path.isAbsolute(finding.file) ? finding.file : path.join(analysisRoot, finding.file);
       const doc = await vscode.workspace.openTextDocument(filePath);
       const editor = await vscode.window.showTextDocument(doc, { preserveFocus: false });
       const range = toRange(finding);
@@ -500,7 +505,9 @@ async function runOneShot(
     publishSessionDiagnostics(
       oneShot,
       new Map(payload.inspections.map((i) => [i.id, i])),
-      folder.uri.fsPath,
+      // Same base as the session path: plu-stan reports finding paths relative
+      // to its cwd (settings.projectDir), not the VS Code workspace folder.
+      readSettings(folder).projectDir,
       diagnostics
     );
 
