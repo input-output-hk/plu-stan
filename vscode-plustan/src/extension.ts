@@ -10,6 +10,7 @@ import { FindingDetailProvider } from "./ui/detailPanel";
 import { PluStanStatusBar } from "./ui/statusBar";
 import { DismissCodeActionProvider, publishSessionDiagnostics, toRange } from "./diagnostics";
 import { SessionFinding, initialSessionState, reduceSession } from "./core/sessionState";
+import { resolveFindingPath } from "./core/paths";
 
 // Throttle for the background "newer backend available?" check on activation.
 const LAST_AUTO_UPDATE_CHECK_KEY = "plustan.lastAutoUpdateCheck";
@@ -361,15 +362,19 @@ export function activate(context: vscode.ExtensionContext): void {
   })();
 
   if (folder) {
-    // Base for resolving findings' file paths. plu-stan emits them relative to
-    // the directory it runs in — the analyzer's cwd, i.e. settings.projectDir
-    // (e.g. `onchain/` in a monorepo) — NOT the VS Code workspace folder. So
-    // resolve against projectDir; otherwise the `onchain/` segment is dropped
-    // and click-to-open / inline diagnostics point at nonexistent files.
-    // projectDir defaults to the folder when unset, so single-package projects
-    // are unaffected. Captured once: the `folder` narrowing is not carried into
-    // the hoisted openFinding declaration below.
-    const analysisRoot = readSettings(folder).projectDir;
+    // plu-stan emits finding paths relative to the *package* directory. That is
+    // usually settings.projectDir, but in a monorepo a user may leave projectDir
+    // at the workspace root and only point hieDir at <package>/.hie — so we use a
+    // resolver that tries the likely package roots and picks the one that exists
+    // on disk (see resolveFindingPath). Captured once: the `folder` narrowing is
+    // not carried into the hoisted openFinding declaration below.
+    const findingSettings = readSettings(folder);
+    const findingCtx = {
+      projectDir: findingSettings.projectDir,
+      hieDir: findingSettings.hieDir,
+      workspaceRoot: folder.uri.fsPath
+    };
+    const resolveFile = (file: string): string => resolveFindingPath(file, findingCtx);
     const statusBar = new PluStanStatusBar();
     const findingsTree = new FindingsTreeProvider();
 
@@ -380,7 +385,7 @@ export function activate(context: vscode.ExtensionContext): void {
       context.workspaceState,
       (state, inspections) => {
         findingsTree.setData(state, inspections);
-        publishSessionDiagnostics(state, inspections, analysisRoot, diagnostics);
+        publishSessionDiagnostics(state, inspections, resolveFile, diagnostics);
       },
       output
     );
@@ -395,10 +400,10 @@ export function activate(context: vscode.ExtensionContext): void {
     controller.restore();
 
     async function openFinding(finding: SessionFinding): Promise<void> {
-      // Use the captured analysisRoot (definite inside this block); re-deriving
-      // via getWorkspaceFolder() could throw, and this runs void-ed from the
-      // detail panel where a throw would become an unhandled rejection.
-      const filePath = path.isAbsolute(finding.file) ? finding.file : path.join(analysisRoot, finding.file);
+      // Use the captured resolver (definite inside this block); re-deriving via
+      // getWorkspaceFolder() could throw, and this runs void-ed from the detail
+      // panel where a throw would become an unhandled rejection.
+      const filePath = resolveFile(finding.file);
       const doc = await vscode.workspace.openTextDocument(filePath);
       const editor = await vscode.window.showTextDocument(doc, { preserveFocus: false });
       const range = toRange(finding);
@@ -502,12 +507,16 @@ async function runOneShot(
       reduceSession(initialSessionState, { type: "sessionStarted", startedAt: new Date().toISOString() }),
       { type: "runCompleted", coveredFiles, observations: payload.observations, dismissedFingerprints: [] }
     );
+    const oneShotSettings = readSettings(folder);
     publishSessionDiagnostics(
       oneShot,
       new Map(payload.inspections.map((i) => [i.id, i])),
-      // Same base as the session path: plu-stan reports finding paths relative
-      // to its cwd (settings.projectDir), not the VS Code workspace folder.
-      readSettings(folder).projectDir,
+      // Same package-relative resolution as the session path (see paths.ts).
+      (file) => resolveFindingPath(file, {
+        projectDir: oneShotSettings.projectDir,
+        hieDir: oneShotSettings.hieDir,
+        workspaceRoot: folder.uri.fsPath
+      }),
       diagnostics
     );
 
