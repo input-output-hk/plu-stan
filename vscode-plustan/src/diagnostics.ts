@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import * as vscode from "vscode";
 import { InspectionV2 } from "./core/schema";
 import { SessionFinding, SessionState } from "./core/sessionState";
@@ -10,7 +11,7 @@ export interface PluStanDiagnostic extends vscode.Diagnostic {
 export function publishSessionDiagnostics(
   state: SessionState,
   inspections: Map<string, InspectionV2>,
-  resolveFile: (file: string) => string,
+  workspaceRoot: string,
   collection: vscode.DiagnosticCollection
 ): void {
   collection.clear();
@@ -21,7 +22,7 @@ export function publishSessionDiagnostics(
       continue;
     }
     const inspection = inspections.get(finding.inspectionId);
-    const filePath = resolveFile(finding.file);
+    const filePath = path.isAbsolute(finding.file) ? finding.file : path.join(workspaceRoot, finding.file);
     const stalePrefix = finding.status === "stale" ? "(stale) " : "";
     const summary = inspection ? `${inspection.name} — ${inspection.description}` : "";
     const diagnostic: PluStanDiagnostic = new vscode.Diagnostic(
