@@ -357,9 +357,9 @@ export async function checkForUpdates(
 
     if (cachedVersion === latestVersion) {
       if (!quiet) {
-        vscode.window.showInformationMessage(`Plu-Stan: already up to date (${latestVersion}, GHC ${ghc}).`);
+        vscode.window.showInformationMessage(`Plu-Stan CLI: already up to date (${latestVersion}, GHC ${ghc}).`);
       } else {
-        output.appendLine(`Plu-Stan: up to date (${latestVersion}, GHC ${ghc}).`);
+        output.appendLine(`Plu-Stan CLI: up to date (${latestVersion}, GHC ${ghc}).`);
       }
       return;
     }
@@ -375,9 +375,9 @@ export async function checkForUpdates(
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    output.appendLine(`Plu-Stan: update check failed: ${msg}`);
+    output.appendLine(`Plu-Stan CLI: update check failed: ${msg}`);
     if (!quiet) {
-      vscode.window.showErrorMessage(`Plu-Stan: update check failed — ${msg}`);
+      vscode.window.showErrorMessage(`Plu-Stan CLI: update check failed — ${msg}`);
     }
   }
 }
