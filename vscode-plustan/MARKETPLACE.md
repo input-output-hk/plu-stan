@@ -17,7 +17,7 @@
 
 - The `plustan` binary built from [input-output-hk/plu-stan](https://github.com/input-output-hk/plu-stan). Extension 0.3.x requires `plustan` >= 0.2.5.0; the extension checks this automatically via a `plustan capabilities` handshake and prompts you to update if there's a mismatch.
 - A Haskell workspace compiled with `.hie`/`.hi` artifacts (Plu-Stan will trigger a build automatically if needed)
-- A GHC the extension ships a prebuilt binary for. The `plustan` binary reads `.hie` files, whose format is locked to the **exact** GHC version that produced them, so the extension auto-downloads the binary matching your project's GHC. If your project uses a different GHC, build `plustan` with that GHC and set `plustan.binaryPath`.
+- A GHC the extension ships a prebuilt binary for. The `plustan` binary reads `.hie` files, whose on-disk format is tied to the GHC **major.minor series** that produced them — patch releases within a series share the format, so one binary handles any patch of its series (e.g. a 9.6 build reads any 9.6.x project). The extension fetches the binary matching your project's GHC. If your project's GHC series isn't shipped, build `plustan` with that GHC and set `plustan.binaryPath`.
 
 ## Getting Started
 
@@ -30,6 +30,8 @@
    ```
 3. In the **Findings** view, click **Start Review** (▶), pick the modules to review (or accept all), and work the findings tree: click through to each issue, read the explanation, fix it or dismiss it.
 4. Click **End Review** when you're done — it stops auto re-runs and logs a fixed/open/dismissed summary.
+
+> **Monorepo / multi-package projects:** if your on-chain package lives in a subdirectory (e.g. `onchain/`), point `plustan.hieDir` at that package's `.hie` directory (e.g. `onchain/.hie`), or set `plustan.projectDir` to the package. Plu-Stan resolves each finding against the package that produced it, so either works.
 
 ## Commands
 
@@ -54,8 +56,8 @@
 | Setting | Default | Description |
 |---|---|---|
 | `plustan.binaryPath` | `""` | Path to the `plustan` executable. Supports a leading `${workspaceFolder}` token. Leave empty to let the extension manage a downloaded binary |
-| `plustan.projectDir` | `""` | Project directory. Defaults to the active workspace folder |
-| `plustan.hieDir` | `".hie"` | Directory containing `.hie`/`.hi` files, relative to `projectDir` |
+| `plustan.projectDir` | `""` | Directory Plu-Stan runs the analyzer in. Defaults to the workspace folder; usually only needed to point at a package subdirectory in a monorepo |
+| `plustan.hieDir` | `".hie"` | Directory containing `.hie`/`.hi` files. Relative to `projectDir`, or an absolute path |
 | `plustan.extraArgs` | `[]` | Additional CLI arguments appended to `plustan analyze` runs |
 | `plustan.showOutputChannel` | `true` | Automatically show the output channel when running commands |
 
