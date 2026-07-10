@@ -2,7 +2,7 @@
   "name": "vscode-plustan",
   "displayName": "Plu-Stan",
   "description": "Security and performance static analysis for Cardano smart contracts written in Plinth.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "icon": "media/logo.png",
   "publisher": "IOG",
   "license": "MPL-2.0",
@@ -24,7 +24,6 @@
     "Linters",
     "Programming Languages"
   ],
-
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:haskell",
@@ -59,6 +58,35 @@
       {
         "command": "plustan.checkForUpdates",
         "title": "Plu-Stan: Check for Updates"
+      },
+      {
+        "command": "plustan.startReview",
+        "title": "Plu-Stan: Start Review",
+        "icon": "$(play)"
+      },
+      {
+        "command": "plustan.endReview",
+        "title": "Plu-Stan: End Review",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "plustan.toggleFindingsGrouping",
+        "title": "Plu-Stan: Toggle Findings Grouping",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "plustan.openFinding",
+        "title": "Plu-Stan: Open Finding"
+      },
+      {
+        "command": "plustan.dismissFinding",
+        "title": "Plu-Stan: Dismiss Finding",
+        "icon": "$(close)"
+      },
+      {
+        "command": "plustan.undismissFinding",
+        "title": "Plu-Stan: Restore Dismissed Finding",
+        "icon": "$(redo)"
       }
     ],
     "viewsContainers": {
@@ -73,17 +101,54 @@
     "views": {
       "plustan": [
         {
+          "id": "plustanFindings",
+          "name": "Findings"
+        },
+        {
+          "id": "plustanFindingDetail",
+          "name": "Finding Detail",
+          "type": "webview",
+          "visibility": "collapsed"
+        },
+        {
           "id": "plustanOnchainModules",
-          "name": "Plu-Stan Onchain Modules"
+          "name": "Onchain Modules"
         }
       ]
     },
     "menus": {
+      "view/title": [
+        {
+          "command": "plustan.startReview",
+          "when": "view == plustanFindings && plustan.sessionActive != true",
+          "group": "navigation@1"
+        },
+        {
+          "command": "plustan.endReview",
+          "when": "view == plustanFindings && plustan.sessionActive == true",
+          "group": "navigation@1"
+        },
+        {
+          "command": "plustan.toggleFindingsGrouping",
+          "when": "view == plustanFindings",
+          "group": "navigation@2"
+        }
+      ],
       "view/item/context": [
         {
           "command": "plustan.runModule",
           "when": "view == plustanOnchainModules && viewItem == plustanModule",
           "group": "inline@1"
+        },
+        {
+          "command": "plustan.dismissFinding",
+          "when": "view == plustanFindings && viewItem == plustanFinding",
+          "group": "inline"
+        },
+        {
+          "command": "plustan.undismissFinding",
+          "when": "view == plustanFindings && viewItem == plustanDismissedFinding",
+          "group": "inline"
         }
       ]
     },
@@ -124,11 +189,16 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "test:unit": "npm run compile && mocha \"out/core/**/*.test.js\" \"out/analyzer/**/*.test.js\"",
+    "test:integration": "npm run compile && node out/test/runTest.js",
     "package:vsix": "npx @vscode/vsce package --readme-path MARKETPLACE.md"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.14.10",
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^2.5.2",
+    "mocha": "^10.8.2",
     "typescript": "^5.5.4"
   }
 }

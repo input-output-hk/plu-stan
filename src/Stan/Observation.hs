@@ -16,6 +16,10 @@ module Stan.Observation
     , mkObservation
     , mkObservationId
 
+      -- * Fingerprinting
+    , observationFingerprint
+    , observationSpanText
+
     , ignoredObservations
 
       -- * Pretty print
@@ -274,6 +278,55 @@ mkObservationId insId moduleName srcSpan = Id $ Text.intercalate "-"
     , show (srcSpanStartLine srcSpan) <> ":" <> show (srcSpanStartCol srcSpan)
     ]
 
+{- | The source text of the flagged span, column-trimmed on the first
+and last line. GHC end columns are exclusive. Missing lines (file
+content shorter than the span) contribute @""@.
+-}
+observationSpanText :: Observation -> Text
+observationSpanText Observation{..} =
+    Text.intercalate "\n" (trimCols spanLines)
+  where
+    startL, endL, startC, endC :: Int
+    startL = srcSpanStartLine observationSrcSpan
+    endL   = srcSpanEndLine observationSrcSpan
+    startC = srcSpanStartCol observationSrcSpan
+    endC   = srcSpanEndCol observationSrcSpan
+
+    spanLines :: [Text]
+    spanLines =
+        [ maybe "" decodeUtf8 (BS.lines observationFileContent !!? (ln - 1))
+        | ln <- [startL .. endL]
+        ]
+
+    trimCols :: [Text] -> [Text]
+    trimCols [] = []
+    trimCols [single] =
+        [Text.take (endC - startC) (Text.drop (startC - 1) single)]
+    trimCols (firstLine : rest) =
+        Text.drop (startC - 1) firstLine : trimLast rest
+
+    trimLast :: [Text] -> [Text]
+    trimLast [] = []
+    trimLast [lastLine] = [Text.take (endC - 1) lastLine]
+    trimLast (l : ls) = l : trimLast ls
+
+{- | Position-independent identity for an 'Observation':
+
+@
+FPR-<INSPECTION-ID>-<module-hash-6>-<span-text-hash-10>
+@
+
+Stable under edits elsewhere in the file; changes when the flagged
+expression itself changes (which correctly forces re-triage).
+-}
+observationFingerprint :: Observation -> Text
+observationFingerprint o = Text.intercalate "-"
+    [ "FPR"
+    , unId (observationInspectionId o)
+    , hashModuleName (observationModuleName o)
+    , hashText 10 (observationSpanText o)
+    ]
+
 #if MIN_VERSION_base64(1,0,0)
 extractBase64 :: Data.Base64.Types.Base64 k a -> a
 extractBase64 = Data.Base64.Types.extractBase64
@@ -281,6 +334,15 @@ extractBase64 = Data.Base64.Types.extractBase64
 extractBase64 :: a -> a
 extractBase64 = id
 #endif
+
+-- | SHA1 + base64, truncated to @n@ characters.
+hashText :: Int -> Text -> Text
+hashText n =
+    Text.take n
+    . extractBase64
+    . Base64.encodeBase64
+    . SHA1.hash
+    . encodeUtf8
 
 {- | Hash module name to a short string of length @6@. Hashing
 algorithm is the following:
@@ -290,10 +352,4 @@ algorithm is the following:
 3. Last, take first @6@ characters.
 -}
 hashModuleName :: ModuleName -> Text
-hashModuleName =
-    Text.take 6
-    . extractBase64
-    . Base64.encodeBase64
-    . SHA1.hash
-    . encodeUtf8
-    . unModuleName
+hashModuleName = hashText 6 . unModuleName

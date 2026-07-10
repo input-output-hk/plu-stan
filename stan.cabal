@@ -1,6 +1,6 @@
 cabal-version:       2.4
 name:                stan
-version:             0.2.4.3
+version:             0.2.5.0
 synopsis:            Haskell STatic ANalyser
 description:
     Stan is a Haskell __ST__atic __AN__alysis CLI tool.
@@ -134,6 +134,8 @@ library
                            Stan.Pattern.Ast
                            Stan.Pattern.Edsl
                            Stan.Pattern.Type
+                         Stan.Plinth.Docs
+                         Stan.Plinth.Payload
                          Stan.Report
                            Stan.Report.Css
                            Stan.Report.Html
@@ -258,9 +260,11 @@ test-suite stan-test
                        Test.Stan.Gen
                        Test.Stan.Number
                        Test.Stan.Observation
+                       Test.Stan.Plinth
                        Test.Stan.Toml
 
   build-depends:       stan
+                     , bytestring
                      , containers
                      , directory
                      , filepath
@@ -268,6 +272,7 @@ test-suite stan-test
                      , hedgehog >= 1.0 && < 1.6
                      , hspec >= 2.7 && < 2.12
                      , hspec-hedgehog >= 0.0.1.2
+                     , microaeson ^>= 0.1.0.0
                      , optparse-applicative
                      , process
                      , text

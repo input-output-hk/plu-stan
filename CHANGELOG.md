@@ -3,6 +3,53 @@
 `stan` uses [PVP Versioning][1].
 The change log is available [on GitHub][2].
 
+## vscode-plustan 0.3.0
+
+* Add the review-session cockpit: **Start Review** analyzes the chosen
+  onchain modules (or the whole workspace) and opens a Findings tree grouped
+  by severity/rule (or by module), with a Finding Detail panel that renders
+  each rule's teaching docs — why it matters, a bad/good example pair, and a
+  fix suggestion.
+
+* Persist dismissals to `.plustan/dismissals.json` (with an optional note),
+  so a reviewer's "not applicable" calls survive restarts and can be shared
+  with the team by committing the file.
+
+* Track finding staleness: editing a file marks its open findings stale
+  immediately, and saving an onchain module auto re-runs analysis for it and
+  reconciles fixed / new / still-open findings. A status bar item shows the
+  live open/fixed counts for the session; **End Review** stops auto re-runs
+  and logs a summary.
+
+* Speak schema-v2 to the backend: a `plustan capabilities` handshake gates
+  the session on a compatible binary and offers "Check for Updates" on a
+  mismatch (extension 0.3.x requires `plustan` >= 0.2.5.0).
+
+* Guard the legacy one-shot `Run Workspace` / `Run Module` commands: they
+  are disabled while a review session is active, so they can no longer
+  clobber session diagnostics.
+
+* Expand a leading `${workspaceFolder}` token in `plustan.binaryPath`
+  (VS Code only expands it in `launch.json`/`tasks.json`, not arbitrary
+  settings, so the extension does it itself).
+
+## 0.2.5.0
+
+* Add a `plustan capabilities` subcommand: a machine-readable, project-free
+  JSON handshake reporting `schemaVersion`, `ghcVersion`, and the set of
+  supported `features`.
+
+* Bump the `plustan analyze --json` payload to schema v2:
+
+    * Each observation now carries a stable `fingerprint`.
+    * Inspections include documentation fields (`whyItMatters`,
+      `badExample`, `goodExample`, `docsAnchor`) when available.
+    * Observations are now a top-level `observations` array instead of
+      being nested inside an `analysis` field, which has been removed.
+
+* `plustan list-onchain --json` now reports the same schema version as
+  `analyze --json` instead of a hardcoded `1`.
+
 ## 0.2.1.0
 
 * Fix high memory usage in finding Cabal files

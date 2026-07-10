@@ -1,57 +1,19 @@
 import * as path from "node:path";
-import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 import { getCachedBinaryPath, offerDownload, checkForUpdates, detectProjectGhc } from "./downloadManager";
+import { SpawnAnalyzerClient, AnalyzerError } from "./analyzer/client";
+import { AnalyzePayloadV2, ListOnchainPayload, OnchainModule } from "./core/schema";
+import { ReviewController } from "./session/controller";
+import { DismissalsStore } from "./session/dismissalsStore";
+import { FindingsTreeProvider, FindingTreeItem } from "./ui/findingsTree";
+import { FindingDetailProvider } from "./ui/detailPanel";
+import { PluStanStatusBar } from "./ui/statusBar";
+import { DismissCodeActionProvider, publishSessionDiagnostics, toRange } from "./diagnostics";
+import { SessionFinding, initialSessionState, reduceSession } from "./core/sessionState";
 
 // Throttle for the background "newer backend available?" check on activation.
 const LAST_AUTO_UPDATE_CHECK_KEY = "plustan.lastAutoUpdateCheck";
 const AUTO_UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // once per day
-
-type AnnotationSource = "hi" | "source" | "both";
-type RunScope = "all" | "module";
-
-interface OnchainModule {
-  moduleName: string;
-  file: string;
-  annotationSource: AnnotationSource;
-}
-
-interface ListOnchainPayload {
-  version: number;
-  workspaceRoot: string;
-  hieDir: string;
-  modules: OnchainModule[];
-}
-
-interface Inspection {
-  id: string;
-  name: string;
-  severity: string;
-  description: string;
-}
-
-interface Observation {
-  id: string;
-  inspectionId: string;
-  file: string;
-  moduleName: string;
-  startLine: number;
-  startCol: number;
-  endLine: number;
-  endCol: number;
-}
-
-interface AnalysisSection {
-  observations: Observation[];
-}
-
-interface AnalyzePayload {
-  version: number;
-  runScope: RunScope;
-  targetModule: string | null;
-  inspections: Inspection[];
-  analysis: AnalysisSection;
-}
 
 interface PluStanSettings {
   binaryPath: string;
@@ -79,25 +41,6 @@ class OnchainModuleItem extends vscode.TreeItem {
   }
 }
 
-class ActionItem extends vscode.TreeItem {
-  constructor(
-    label: string,
-    description: string,
-    commandId: string,
-    title: string,
-    iconId: string
-  ) {
-    super(label, vscode.TreeItemCollapsibleState.None);
-    this.description = description;
-    this.contextValue = "plustanAction";
-    this.iconPath = new vscode.ThemeIcon(iconId);
-    this.command = {
-      command: commandId,
-      title
-    };
-  }
-}
-
 class MessageItem extends vscode.TreeItem {
   constructor(
     label: string,
@@ -115,7 +58,7 @@ class MessageItem extends vscode.TreeItem {
   }
 }
 
-type PluStanTreeItem = ActionItem | OnchainModuleItem | MessageItem;
+type PluStanTreeItem = OnchainModuleItem | MessageItem;
 
 class OnchainModulesProvider implements vscode.TreeDataProvider<PluStanTreeItem> {
   private modules: OnchainModule[] = [];
@@ -158,15 +101,10 @@ class OnchainModulesProvider implements vscode.TreeDataProvider<PluStanTreeItem>
       ]);
     }
 
-    const actionItems: ActionItem[] = [
-      new ActionItem("Run Workspace Analysis", "Run all onchain checks", "plustan.runWorkspace", "Run Workspace", "play-circle"),
-      new ActionItem("Refresh Onchain Modules", "Rescan module annotations", "plustan.refreshOnchainModules", "Refresh Onchain Modules", "refresh"),
-      new ActionItem("Clear Diagnostics", "Clear Problems panel entries", "plustan.clearDiagnostics", "Clear Diagnostics", "clear-all"),
-      new ActionItem("Show Plu-Stan Output", "Open extension output logs", "plustan.openOutput", "Show Output", "output")
-    ];
-
+    // Start/Run/Refresh/Clear now live in the Findings view title + command
+    // palette, so this view is just the discovered onchain modules.
     const moduleItems = this.modules.map((moduleInfo) => new OnchainModuleItem(moduleInfo, this.workspaceRoot));
-    return Promise.resolve([...actionItems, ...moduleItems]);
+    return Promise.resolve(moduleItems);
   }
 }
 
@@ -228,6 +166,30 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerTreeDataProvider("plustanOnchainModules", provider)
   );
 
+  // The analyzer client resolves its spawn config lazily (per call), so it is
+  // safe to construct even when no workspace folder is open — its getConfig
+  // throws only when actually invoked without a folder, and every command
+  // guards for that via getWorkspaceFolderOrNotify().
+  const client = new SpawnAnalyzerClient(
+    () => {
+      const f = getWorkspaceFolder();
+      const settings = resolveSettings(f);
+      return {
+        binaryPath: settings.binaryPath,
+        binaryPrefixArgs: [],
+        cwd: settings.projectDir,
+        hieDir: settings.hieDir,
+        extraArgs: settings.extraArgs
+      };
+    },
+    (line) => output.appendLine(line)
+  );
+
+  // Assigned below once a workspace folder is resolved (inside `if (folder)`).
+  // The legacy one-shot commands read it to detect an active review session so
+  // they don't clobber the session's diagnostics; stays undefined with no folder.
+  let activeController: ReviewController | undefined;
+
   context.subscriptions.push(
     vscode.commands.registerCommand("plustan.openSettings", async () => {
       await vscode.commands.executeCommand("workbench.action.openSettings", "plustan.binaryPath");
@@ -247,8 +209,8 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!settings) {
         return;
       }
-      await withUserProgress("Refreshing onchain modules", async (token) => {
-        const payload = await runListOnchain(settings, output, token);
+      await withUserProgress("Refreshing onchain modules", async () => {
+        const payload = await client.listOnchain();
         appendOnchainModulesSummary(payload, folder, output);
         provider.setData(payload.modules, payload.workspaceRoot);
         vscode.window.setStatusBarMessage(
@@ -259,8 +221,18 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
+  // Legacy one-shot analysis: run once, publish diagnostics via a throwaway
+  // SessionState, and stop. No review session is started and there is no
+  // auto-rerun on save (that is what "Start Review" is for now).
   context.subscriptions.push(
     vscode.commands.registerCommand("plustan.runWorkspace", async () => {
+      if (activeController?.sessionState.phase === "active") {
+        vscode.window.showInformationMessage(
+          "Plu-Stan: a review session is active — use the Findings view (or End Review first). " +
+          "Legacy one-shot analysis is disabled during a session."
+        );
+        return;
+      }
       if (!await saveWorkspaceBeforeRun()) {
         return;
       }
@@ -273,19 +245,20 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       await withUserProgress("Running Plu-Stan on workspace", async (token) => {
-        const payload = await runAnalyze(settings, output, token);
-        appendAnalyzeSummary(payload, folder, output);
-        publishDiagnostics(payload, folder, diagnostics);
-        vscode.window.setStatusBarMessage(
-          `Plu-Stan: ${payload.analysis.observations.length} observation(s)`,
-          3000
-        );
+        await runOneShot(client, { kind: "workspace" }, folder, diagnostics, output, token);
       });
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("plustan.runModule", async (item?: OnchainModuleItem) => {
+      if (activeController?.sessionState.phase === "active") {
+        vscode.window.showInformationMessage(
+          "Plu-Stan: a review session is active — use the Findings view (or End Review first). " +
+          "Legacy one-shot analysis is disabled during a session."
+        );
+        return;
+      }
       if (!await saveWorkspaceBeforeRun()) {
         return;
       }
@@ -298,17 +271,11 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       await withUserProgress("Running Plu-Stan on module", async (token) => {
-        const moduleName = item?.moduleInfo.moduleName ?? (await pickModuleName(provider, settings, folder, output, token));
+        const moduleName = item?.moduleInfo.moduleName ?? (await pickModuleName(client, provider, folder));
         if (!moduleName) {
           return;
         }
-        const payload = await runAnalyze(settings, output, token, moduleName);
-        appendAnalyzeSummary(payload, folder, output);
-        publishDiagnostics(payload, folder, diagnostics);
-        vscode.window.setStatusBarMessage(
-          `Plu-Stan: ${moduleName} -> ${payload.analysis.observations.length} observation(s)`,
-          3000
-        );
+        await runOneShot(client, { kind: "module", moduleName }, folder, diagnostics, output, token, moduleName);
       });
     })
   );
@@ -385,9 +352,108 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(maybeRevealOnchainView));
 
+  // The review cockpit needs a definite workspace folder (DismissalsStore
+  // persists into it). Constructing it eagerly with a bogus folder would crash
+  // activation in the no-folder / single-loose-file case, so gate it here. The
+  // analyzer client and the legacy commands above stay available regardless.
+  const folder = ((): vscode.WorkspaceFolder | undefined => {
+    try { return getWorkspaceFolder(); } catch { return undefined; }
+  })();
+
+  if (folder) {
+    // Capture the resolved root once: `folder` is a const narrowed to defined
+    // here, but that narrowing is not carried into the hoisted openFinding
+    // function declaration below, so read the path eagerly.
+    const workspaceRoot = folder.uri.fsPath;
+    const statusBar = new PluStanStatusBar();
+    const findingsTree = new FindingsTreeProvider();
+
+    const controller = new ReviewController(
+      client,
+      new DismissalsStore(folder),
+      statusBar,
+      context.workspaceState,
+      (state, inspections) => {
+        findingsTree.setData(state, inspections);
+        publishSessionDiagnostics(state, inspections, workspaceRoot, diagnostics);
+      },
+      output
+    );
+    // Expose to the legacy one-shot commands so they can defer while a session runs.
+    activeController = controller;
+
+    const detailPanel = new FindingDetailProvider(
+      (finding) => { void controller.dismiss(finding.fingerprint, finding.inspectionId); },
+      (finding) => { void openFinding(finding); }
+    );
+
+    controller.restore();
+
+    async function openFinding(finding: SessionFinding): Promise<void> {
+      // Use the captured workspaceRoot (definite inside this block); re-deriving
+      // via getWorkspaceFolder() could throw, and this runs void-ed from the
+      // detail panel where a throw would become an unhandled rejection.
+      const filePath = path.isAbsolute(finding.file) ? finding.file : path.join(workspaceRoot, finding.file);
+      const doc = await vscode.workspace.openTextDocument(filePath);
+      const editor = await vscode.window.showTextDocument(doc, { preserveFocus: false });
+      const range = toRange(finding);
+      editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+      editor.selection = new vscode.Selection(range.start, range.start);
+    }
+
+    context.subscriptions.push(
+      statusBar,
+      controller,
+      vscode.window.registerTreeDataProvider("plustanFindings", findingsTree),
+      vscode.window.registerWebviewViewProvider(FindingDetailProvider.viewId, detailPanel),
+      vscode.languages.registerCodeActionsProvider(
+        { language: "haskell", scheme: "file" },
+        new DismissCodeActionProvider(),
+        { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
+      ),
+      vscode.commands.registerCommand("plustan.startReview", async (scopeArg?: "all" | string[]) => {
+        if (!await saveWorkspaceBeforeRun()) { return; }
+        const f = getWorkspaceFolderOrNotify();
+        if (!f) { return; }
+        const settings = await ensureBinaryConfigured(f, provider, resolveSettings);
+        if (!settings) { return; }
+        await controller.startReview(scopeArg);
+        // Reuse the listing startReview() already fetched (captured before the
+        // module-scope picker, so it's the full set) — don't call listOnchain
+        // twice. Undefined only until a first successful handshake; once set it
+        // persists, so we populate the Onchain Modules view whenever we have it.
+        if (controller.onchainListing) {
+          provider.setData(controller.onchainListing.modules, controller.onchainListing.workspaceRoot);
+        }
+      }),
+      vscode.commands.registerCommand("plustan.endReview", () => controller.endReview()),
+      vscode.commands.registerCommand("plustan.toggleFindingsGrouping", () => findingsTree.toggleGrouping()),
+      vscode.commands.registerCommand("plustan.openFinding", async (item?: FindingTreeItem) => {
+        if (!item) { return; }
+        detailPanel.showFinding(item.finding, controller.inspectionDocs.get(item.finding.inspectionId));
+        await openFinding(item.finding);
+      }),
+      vscode.commands.registerCommand("plustan.dismissFinding",
+        async (arg?: FindingTreeItem | { fingerprint: string; inspectionId: string }) => {
+          const target = arg instanceof FindingTreeItem
+            ? { fingerprint: arg.finding.fingerprint, inspectionId: arg.finding.inspectionId }
+            : arg;
+          if (!target) { return; }
+          const note = await vscode.window.showInputBox({
+            prompt: "Optional note: why is this finding not applicable?",
+            placeHolder: "e.g. credential-only comparison is intentional here"
+          });
+          await controller.dismiss(target.fingerprint, target.inspectionId, note || undefined);
+        }),
+      vscode.commands.registerCommand("plustan.undismissFinding", async (item?: FindingTreeItem) => {
+        if (item) { await controller.undismiss(item.finding.fingerprint); }
+      })
+    );
+  }
+
   try {
-    const folder = getWorkspaceFolder();
-    const configured = isEffectivelyConfigured(folder);
+    const activeFolder = getWorkspaceFolder();
+    const configured = isEffectivelyConfigured(activeFolder);
     provider.setBinaryConfigured(configured);
     if (configured) {
       // Already have a binary — quietly see if a newer backend shipped.
@@ -406,16 +472,63 @@ export function deactivate(): void {
   // no-op
 }
 
-async function pickModuleName(
-  provider: OnchainModulesProvider,
-  settings: PluStanSettings,
+/**
+ * Run a single analysis and publish its observations as diagnostics through a
+ * throwaway SessionState. No review session is started; this is the legacy
+ * one-shot path used by the Run Workspace / Run Module commands.
+ */
+async function runOneShot(
+  client: SpawnAnalyzerClient,
+  scope: { kind: "workspace" } | { kind: "module"; moduleName: string },
   folder: vscode.WorkspaceFolder,
+  diagnostics: vscode.DiagnosticCollection,
   output: vscode.OutputChannel,
-  token: vscode.CancellationToken
+  token: vscode.CancellationToken,
+  label?: string
+): Promise<void> {
+  const abort = new AbortController();
+  const sub = token.onCancellationRequested(() => abort.abort());
+  try {
+    const payload = await client.analyze(scope, abort.signal);
+    appendAnalyzeSummary(payload, folder, output);
+
+    const coveredFiles = [...new Set(payload.observations.map((o) => o.file))];
+    const oneShot = reduceSession(
+      reduceSession(initialSessionState, { type: "sessionStarted", startedAt: new Date().toISOString() }),
+      { type: "runCompleted", coveredFiles, observations: payload.observations, dismissedFingerprints: [] }
+    );
+    publishSessionDiagnostics(
+      oneShot,
+      new Map(payload.inspections.map((i) => [i.id, i])),
+      folder.uri.fsPath,
+      diagnostics
+    );
+
+    const prefix = label ? `${label} -> ` : "";
+    vscode.window.setStatusBarMessage(
+      `Plu-Stan: ${prefix}${payload.observations.length} observation(s)`,
+      3000
+    );
+  } catch (error) {
+    // A user-cancelled run is not a failure; withUserProgress would otherwise
+    // surface the AnalyzerError("cancelled") message as an error toast.
+    if (error instanceof AnalyzerError && error.kind === "cancelled") {
+      return;
+    }
+    throw error;
+  } finally {
+    sub.dispose();
+  }
+}
+
+async function pickModuleName(
+  client: SpawnAnalyzerClient,
+  provider: OnchainModulesProvider,
+  folder: vscode.WorkspaceFolder
 ): Promise<string | undefined> {
   let modules = provider.getData();
   if (modules.length === 0) {
-    const payload = await runListOnchain(settings, output, token);
+    const payload = await client.listOnchain();
     provider.setData(payload.modules, payload.workspaceRoot);
     modules = payload.modules;
   }
@@ -437,111 +550,6 @@ async function pickModuleName(
   );
 
   return pick?.label;
-}
-
-async function runListOnchain(
-  settings: PluStanSettings,
-  output: vscode.OutputChannel,
-  token: vscode.CancellationToken
-): Promise<ListOnchainPayload> {
-  const payload = await runPluStanJson<ListOnchainPayload>(
-    ["list-onchain", "--json", "--hiedir", settings.hieDir],
-    settings,
-    output,
-    token
-  );
-
-  if (!Array.isArray(payload.modules)) {
-    throw new Error("Invalid list-onchain payload: missing modules array");
-  }
-
-  return payload;
-}
-
-async function runAnalyze(
-  settings: PluStanSettings,
-  output: vscode.OutputChannel,
-  token: vscode.CancellationToken,
-  moduleName?: string
-): Promise<AnalyzePayload> {
-  const args = ["analyze", "--json", "--hiedir", settings.hieDir, ...settings.extraArgs];
-  if (moduleName) {
-    args.push("--module", moduleName);
-  }
-
-  const payload = await runPluStanJson<AnalyzePayload>(args, settings, output, token);
-  if (!payload.analysis || !Array.isArray(payload.analysis.observations)) {
-    throw new Error("Invalid analyze payload: missing analysis observations");
-  }
-
-  return payload;
-}
-
-function publishDiagnostics(
-  payload: AnalyzePayload,
-  folder: vscode.WorkspaceFolder,
-  diagnostics: vscode.DiagnosticCollection
-): void {
-  diagnostics.clear();
-
-  const inspections = new Map(payload.inspections.map((inspection) => [inspection.id, inspection]));
-  const diagnosticsByFile = new Map<string, vscode.Diagnostic[]>();
-
-  for (const observation of payload.analysis.observations) {
-    const inspection = inspections.get(observation.inspectionId);
-    const filePath = path.isAbsolute(observation.file)
-      ? observation.file
-      : path.join(folder.uri.fsPath, observation.file);
-
-    const message = inspection
-      ? `[${observation.inspectionId}] ${inspection.name}`
-      : `[${observation.inspectionId}]`;
-
-    const diagnostic = new vscode.Diagnostic(
-      toRange(observation),
-      message,
-      mapSeverity(inspection?.severity)
-    );
-    diagnostic.source = "plu-stan";
-    diagnostic.code = observation.inspectionId;
-
-    const fileDiagnostics = diagnosticsByFile.get(filePath) ?? [];
-    fileDiagnostics.push(diagnostic);
-    diagnosticsByFile.set(filePath, fileDiagnostics);
-  }
-
-  diagnostics.set(
-    [...diagnosticsByFile.entries()].map(([filePath, fileDiagnostics]) => [
-      vscode.Uri.file(filePath),
-      fileDiagnostics
-    ])
-  );
-}
-
-function toRange(observation: Observation): vscode.Range {
-  const startLine = Math.max(0, observation.startLine - 1);
-  const startCharacter = Math.max(0, observation.startCol - 1);
-  const endLine = Math.max(startLine, observation.endLine - 1);
-
-  const rawEndCharacter = Math.max(0, observation.endCol - 1);
-  const endCharacter = endLine === startLine
-    ? Math.max(startCharacter + 1, rawEndCharacter)
-    : rawEndCharacter;
-
-  return new vscode.Range(startLine, startCharacter, endLine, endCharacter);
-}
-
-function mapSeverity(severity: string | undefined): vscode.DiagnosticSeverity {
-  switch (severity) {
-    case "Error":
-      return vscode.DiagnosticSeverity.Error;
-    case "Warning":
-    case "PotentialBug":
-    case "Performance":
-      return vscode.DiagnosticSeverity.Warning;
-    default:
-      return vscode.DiagnosticSeverity.Information;
-  }
 }
 
 function getWorkspaceFolder(): vscode.WorkspaceFolder {
@@ -594,7 +602,10 @@ function getWorkspaceFolderOrNotify(): vscode.WorkspaceFolder | undefined {
 function readSettings(folder: vscode.WorkspaceFolder): PluStanSettings {
   const config = vscode.workspace.getConfiguration("plustan", folder.uri);
 
-  const binaryPath = config.get<string>("binaryPath", "").trim();
+  // VS Code does NOT expand `${workspaceFolder}` in arbitrary string settings
+  // (only in launch.json/tasks.json), so the extension expands it itself.
+  const rawBinaryPath = config.get<string>("binaryPath", "").trim();
+  const binaryPath = rawBinaryPath.replace("${workspaceFolder}", folder.uri.fsPath);
   const configuredProjectDir = config.get<string>("projectDir", "").trim();
   const projectDir = configuredProjectDir
     ? resolveAgainst(folder.uri.fsPath, configuredProjectDir)
@@ -665,108 +676,6 @@ function toRelativePath(workspaceRoot: string, targetPath: string): string {
   return path.relative(workspaceRoot, absoluteTarget) || targetPath;
 }
 
-
-async function runPluStanJson<T>(
-  args: string[],
-  settings: PluStanSettings,
-  output: vscode.OutputChannel,
-  token: vscode.CancellationToken
-): Promise<T> {
-  if (settings.showOutputChannel) {
-    output.show(true);
-  }
-  output.appendLine(`$ ${settings.binaryPath} ${args.join(" ")}`);
-  output.appendLine(`cwd: ${settings.projectDir}`);
-
-  let stdout = "";
-  let stderr = "";
-  let exitCode = 0;
-  try {
-    const result = await spawnCommand(settings.binaryPath, args, settings.projectDir, output, token);
-    stdout = result.stdout;
-    stderr = result.stderr;
-    exitCode = result.exitCode;
-  } catch (error) {
-    if (isEnoentError(error)) {
-      throw new Error(
-        `Plu-Stan binary not found: ${settings.binaryPath}. ` +
-        "Set `plustan.binaryPath` to an existing executable."
-      );
-    }
-    throw error;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = parseJsonFromOutput(stdout);
-  } catch (error) {
-    // The binary produced no usable JSON. Before showing the raw parser error
-    // (which surfaces as the cryptic "Unexpected end of JSON input"), classify
-    // the failure so the message tells the user what to actually do. The most
-    // common cause is a GHC mismatch: stan reads .hie files whose format is
-    // locked to the exact GHC that built them, so a binary built with a
-    // different GHC panics and emits nothing on stdout.
-    output.appendLine(`Plu-Stan: stdout had no parseable JSON (exit ${exitCode}). Parser said: ${formatError(error)}`);
-    throw new Error(describePluStanFailure(stdout, stderr, exitCode));
-  }
-
-  if (exitCode !== 0) {
-    output.appendLine(`Plu-Stan exited with code ${exitCode}; using emitted JSON payload.`);
-  }
-
-  return parsed as T;
-}
-
-/** Turn a no-JSON plustan run into an actionable, user-facing message. */
-function describePluStanFailure(stdout: string, stderr: string, exitCode: number): string {
-  const haystack = `${stderr}\n${stdout}`;
-  const ghcMismatch = /hie file versions|readHieFile|built by a different ghc|different ghc/i.test(haystack);
-  const panicked = /panic!|the 'impossible' happened/i.test(haystack);
-
-  if (ghcMismatch) {
-    return (
-      "Plu-Stan couldn't read your project's .hie files: they were built with a different GHC " +
-      "than the plustan binary. Rebuild your project with the GHC the binary targets, or run " +
-      "\"Plu-Stan: Check for Updates\" to fetch a binary matching your project's GHC. " +
-      "(Full output is in the Plu-Stan output channel.)"
-    );
-  }
-
-  if (panicked) {
-    return (
-      `Plu-Stan crashed (exit ${exitCode}) and produced no analysis. ` +
-      "See the Plu-Stan output channel for the full crash log."
-    );
-  }
-
-  const noOutput = stdout.trim().length === 0;
-  return (
-    `Plu-Stan produced no JSON output (exit ${exitCode}). ` +
-    (noOutput
-      ? "The binary wrote nothing to stdout — it likely failed before analysis (e.g. an outdated or incompatible binary, or a build error). "
-      : "The output wasn't valid JSON. ") +
-    "See the Plu-Stan output channel for details; try \"Plu-Stan: Check for Updates\" if the binary may be outdated."
-  );
-}
-
-function parseJsonFromOutput(stdout: string): unknown {
-  const lines = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    try {
-      return JSON.parse(line);
-    } catch {
-      // Continue scanning earlier lines.
-    }
-  }
-
-  return JSON.parse(stdout);
-}
-
 function appendOnchainModulesSummary(
   payload: ListOnchainPayload,
   folder: vscode.WorkspaceFolder,
@@ -784,11 +693,11 @@ function appendOnchainModulesSummary(
 }
 
 function appendAnalyzeSummary(
-  payload: AnalyzePayload,
+  payload: AnalyzePayloadV2,
   folder: vscode.WorkspaceFolder,
   output: vscode.OutputChannel
 ): void {
-  const observations = payload.analysis.observations;
+  const observations = payload.observations;
   output.appendLine(
     `Plu-Stan analysis: runScope=${payload.runScope}, observations=${observations.length}`
   );
@@ -816,61 +725,6 @@ function appendAnalyzeSummary(
       `... truncated ${observations.length - maxLines} additional observation(s). See Problems panel for full list.`
     );
   }
-}
-
-function isEnoentError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const maybeCode = (error as { code?: unknown }).code;
-  return maybeCode === "ENOENT";
-}
-
-function spawnCommand(
-  command: string,
-  args: string[],
-  cwd: string,
-  output: vscode.OutputChannel,
-  token: vscode.CancellationToken
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      env: process.env
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    const cancelSub = token.onCancellationRequested(() => {
-      child.kill("SIGTERM");
-    });
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-    });
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString("utf8");
-      stderr += text;
-      output.append(text);
-    });
-
-    child.on("error", (error) => {
-      cancelSub.dispose();
-      const wrapped = new Error(`Failed to start plustan: ${formatError(error)}`) as Error & { code?: string };
-      const errorCode = (error as NodeJS.ErrnoException).code;
-      if (errorCode) {
-        wrapped.code = errorCode;
-      }
-      reject(wrapped);
-    });
-
-    child.on("close", (code) => {
-      cancelSub.dispose();
-      resolve({ stdout, stderr, exitCode: code ?? 1 });
-    });
-  });
 }
 
 async function withUserProgress(
