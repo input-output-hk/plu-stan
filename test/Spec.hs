@@ -1,10 +1,9 @@
 module Main (main) where
 
 import Stan.Hie.Compat (HieFile (..))
-import System.Directory (doesFileExist, getModificationTime)
+import System.Directory (doesFileExist, findExecutable, getModificationTime)
 import System.FilePath ((</>))
 import System.Process (callProcess)
-import System.Directory (findExecutable)
 import System.Info (compilerVersion)
 import Test.Hspec (hspec)
 
@@ -50,7 +49,7 @@ ensureHieFiles hieDir = do
     needsRebuild <- hieFilesStale hieDir
     when needsRebuild $ do
         let ghcVer = "ghc-" <> showVersion compilerVersion
-        ghc <- maybe "ghc" id <$> findExecutable ghcVer
+        ghc <- fromMaybe "ghc" <$> findExecutable ghcVer
         putStrLn "Rebuilding to generate fresh .hie files for tests..."
         callProcess "cabal"
             [ "build"

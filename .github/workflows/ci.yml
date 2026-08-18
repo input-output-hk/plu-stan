@@ -72,9 +72,24 @@ jobs:
     # configuring *after* freezing seemed to mean that the cache got
     # stuck in some bad state where it couldn't find a build plan.  We
     # should revisit this decision later.
-    - name: Configure
+    #
+    # This matrix is plutus-free, exactly like the release build (see
+    # release.yml). Only the `target` test fixtures pull in plutus-tx /
+    # plutus-ledger-api -> plutus-core -> cardano-crypto-class, which needs the
+    # libsodium/secp256k1/blst system libraries. With fixtures ON and those libs
+    # absent, the solver dead-ends on every single leg:
+    #   "rejecting: cardano-crypto-class-2.2.3.0 (conflict: pkg-config package
+    #    libsodium-any, not found in the pkg-config database)"
+    # and 2.2.2.0 is then excluded by plutus-core's ^>=2.2.3 -- so there is no
+    # build plan at all. `-f-fixtures` drops `target` from the solve, so this
+    # matrix stays a broad "does it compile + dogfood on every GHC/OS" check
+    # with no system libraries installed anywhere.
+    #
+    # The fixtures themselves are exercised by the `test` job below, which is
+    # the only place that installs the Cardano system libraries.
+    - name: Configure (plutus-free; skip target fixtures)
       run: |
-        cabal configure --enable-tests --enable-benchmarks --test-show-details=direct
+        cabal configure --flags="-fixtures" --enable-tests --enable-benchmarks --test-show-details=direct
         # Generate dist-newstyle/cache/plan.json for the cache key.
         cabal build --dry-run
 
@@ -82,15 +97,14 @@ jobs:
       name: Cache ~/.cabal/store
       with:
         path: ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
-        key: ${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+        key: ${{ runner.os }}-${{ matrix.ghc }}-nofixtures-${{ hashFiles('dist-newstyle/cache/plan.json') }}
 
+    # Builds lib:stan, exe:stan, exe:plustan and test:stan-test (the test-suite
+    # does not depend on lib:target, so it still compiles here -- we just don't
+    # *run* it, because Spec.hs needs the target/ .hie files. See the `test` job.
     - name: Build
       run: |
         cabal build all
-
-    - name: Test
-      run: |
-        cabal test stan-test
 
     - if: matrix.os == 'windows-latest'
       name: Dogfooding on Windows
@@ -102,6 +116,72 @@ jobs:
       run: |
         cabal run stan
 
+  # The one job that builds the plutus test fixtures and actually runs the test
+  # suite. It is deliberately a single Linux job rather than part of the matrix
+  # above:
+  #
+  #   * test/Spec.hs exits early ("FAILED: target/ files are not found") unless
+  #     lib:target has been built, so the tests genuinely need fixtures ON;
+  #   * fixtures require libsodium (the IntersectMBO VRF fork), secp256k1 and
+  #     blst, and scripts/install-system-deps.sh only supports Linux and macOS
+  #     -- it cannot install them on the windows-latest runners; and
+  #   * building those three libraries from source costs a few minutes, which is
+  #     worth paying once, not on all 32 legs.
+  #
+  # GHC 9.6.7: the 9.6 series is what plutus projects commonly pin and what the
+  # release ships. A fixtures-ON solve was verified locally on 9.6.3 (same
+  # series). Avoid 9.12.2 here -- per release.yml it dead-ends on plutus-core
+  # 1.54 (nothunks ^>=0.2 caps time <1.13, but 9.12.2 ships boot time 1.14).
+  test:
+    name: test / ghc 9.6.7
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: haskell-actions/setup@v2
+      id: setup-haskell-cabal
+      name: Setup Haskell
+      with:
+        ghc-version: "9.6.7"
+        cabal-version: "3.10"
+        cabal-update: true
+
+    # Installs the VRF fork of libsodium (stock libsodium satisfies
+    # `pkg-config --exists libsodium` but lacks the crypto_vrf_* API that
+    # cardano-crypto-class links against), plus secp256k1 and blst. The script
+    # is idempotent and reconciles pkg-config discoverability itself.
+    #
+    # If this step fails, it is an *install* failure, not a cabal one: the
+    # script's final verify() gate is stricter than the solver, which only
+    # checks `pkg-config --exists`. A failure here means ensure_pc_discoverable
+    # did not manage to link the .pc files onto pkg-config's default search
+    # path. The script's own hint ("run 'make system-deps'") is developer-facing
+    # advice and does not apply in CI -- set PKG_CONFIG_PATH here instead.
+    - name: Install native crypto libraries
+      run: bash scripts/install-system-deps.sh
+
+    - name: Configure (fixtures ON)
+      run: |
+        cabal configure --enable-tests --test-show-details=direct
+        cabal build --dry-run
+
+    - uses: actions/cache@v4
+      name: Cache ~/.cabal/store
+      with:
+        path: ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
+        key: ${{ runner.os }}-9.6.7-fixtures-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+
+    # common-options carries -fwrite-ide-info -hiedir=.hie, so building
+    # lib:target here is what produces the target/ .hie files Spec.hs reads.
+    - name: Build (including target fixtures)
+      run: |
+        cabal build all
+
+    - name: Test
+      run: |
+        cabal test stan-test
+
   # As at 2025-07-14, the GitHub-hosted runner for ubuntu-latest comes with
   # Stack 3.7.1 and GHC 9.12.2.
   stack:
@@ -110,7 +190,8 @@ jobs:
     strategy:
       matrix:
         ghc: ["9.10.2"] # The version specified in the stack.yaml file
-        cache-bust: ["2025-07-14"]
+        # Bumped 2026-08-18: the build command changed to -f-fixtures.
+        cache-bust: ["2026-08-18"]
 
     steps:
     - name: Clone project
@@ -122,17 +203,22 @@ jobs:
         path: ~/.stack
         key: ${{ runner.os }}-${{ hashFiles('stack.yaml') }}-${{ matrix.cache-bust }}
 
-    - name: Build everything
+    # Build-only, and plutus-free. Two independent reasons this job cannot run
+    # the tests:
+    #
+    #   * plutus-tx / plutus-ledger-api live on CHaP, which is not a Stackage
+    #     source, so with fixtures ON stack cannot even construct a build plan
+    #     ("plutus-ledger-api must match >=1.54, but no version is in the Stack
+    #     configuration"). Fixing that would mean pinning the whole transitive
+    #     CHaP closure as extra-deps and keeping it current.
+    #   * `-f-fixtures` makes the plan resolve, but then `stack test` hits the
+    #     same test/Spec.hs early exit as everything else without target/.
+    #
+    # So this stays a smoke test that the package still builds under a Stackage
+    # snapshot. The real test coverage lives in the `test` job above.
+    - name: Build everything (plutus-free)
       run: |
-        stack build --test --bench --no-run-tests --no-run-benchmarks
-
-    - name: Run test-suites
-      run: |
-        stack test
-
-    - name: Apply built stan to stan
-      run: |
-        stack exec -- stan --cabal-file-path stan.cabal
+        stack build --flag stan:-fixtures --test --bench --no-run-tests --no-run-benchmarks
 
   hlint:
     name: hlint

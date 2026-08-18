@@ -256,8 +256,8 @@ analyseNonStrictLetMultiUse insId hie curNode =
             any isBindingCtx identInfo'
 
         isBindingCtx :: ContextInfo -> Bool
-        isBindingCtx (ValBind _ _ _) = True
-        isBindingCtx (PatternBind _ _ _) = True
+        isBindingCtx (ValBind {}) = True
+        isBindingCtx (PatternBind {}) = True
         isBindingCtx _ = False
 
     bangPatAnnotation :: NodeAnnotation
@@ -277,7 +277,7 @@ analyseNonStrictLetMultiUse insId hie curNode =
             in col > 0 && (line BS8.!? (col - 1) == Just '!')
 
     lineAt :: Int -> Maybe BS8.ByteString
-    lineAt n = (BS8.lines $ hie_hs_src hie) !!? (n - 1)
+    lineAt n = BS8.lines (hie_hs_src hie) !!? (n - 1)
 
     matchLocalFunArgMultiUse :: HieAST TypeIndex -> Slist RealSrcSpan
     matchLocalFunArgMultiUse funNode = memptyIfFalse (hieMatchPatternAst hie funNode fun) $
@@ -300,7 +300,7 @@ analyseNonStrictLetMultiUse insId hie curNode =
                 | otherwise -> go (x:acc) xs
 
     isLocalFun :: [HieAST TypeIndex] -> Bool
-    isLocalFun patNodes = any (not . isExternalName) (collectValBindNames patNodes)
+    isLocalFun patNodes = not (all isExternalName (collectValBindNames patNodes))
 
     collectValBindNames :: [HieAST TypeIndex] -> Set Name
     collectValBindNames = foldMap go
@@ -317,7 +317,7 @@ analyseNonStrictLetMultiUse insId hie curNode =
 
         isValBindCtx :: ContextInfo -> Bool
         isValBindCtx = \case
-            ValBind _ _ _ -> True
+            ValBind {} -> True
             MatchBind -> True
             _ -> False
 
@@ -352,7 +352,7 @@ analyseNonStrictLetMultiUse insId hie curNode =
         isArgBindingCtx :: ContextInfo -> Bool
         isArgBindingCtx = \case
             MatchBind -> True
-            PatternBind _ _ _ -> True
+            PatternBind {} -> True
             _ -> False
 
     countNameUses :: Name -> HieAST TypeIndex -> Int
@@ -563,8 +563,8 @@ analyseValueOfInComparison insId hie curNode =
             any isBindingCtx identInfo'
 
         isBindingCtx :: ContextInfo -> Bool
-        isBindingCtx (ValBind _ _ _) = True
-        isBindingCtx (PatternBind _ _ _) = True
+        isBindingCtx (ValBind {}) = True
+        isBindingCtx (PatternBind {}) = True
         isBindingCtx _ = False
 
 
@@ -834,11 +834,10 @@ analyseCurrencySymbolValueOfOnMintedValue insId hie curNode = do
             go rootNode
           where
             go n@Node{nodeSpan = nodeSpan', nodeChildren = children} =
-                if not (spanOverlaps rhsSpan nodeSpan')
-                    then False
-                    else
-                        (rhsSpan `spanContainsOrEq` nodeSpan' && nodeHasTxInfoMint n)
+                spanOverlaps rhsSpan nodeSpan'
+                    && ( (rhsSpan `spanContainsOrEq` nodeSpan' && nodeHasTxInfoMint n)
                             || any go children
+                       )
 
         spanContainsOrEq :: RealSrcSpan -> RealSrcSpan -> Bool
         spanContainsOrEq outer inner =
@@ -902,8 +901,8 @@ analyseCurrencySymbolValueOfOnMintedValue insId hie curNode = do
                     _ -> acc
 
             isBindingCtx :: ContextInfo -> Bool
-            isBindingCtx (ValBind _ _ _) = True
-            isBindingCtx (PatternBind _ _ _) = True
+            isBindingCtx (ValBind {}) = True
+            isBindingCtx (PatternBind {}) = True
             isBindingCtx _ = False
 
     collectFunctionParamMap :: ByteString -> Set ByteString -> Map ByteString [ByteString]
@@ -1044,7 +1043,7 @@ analyseCurrencySymbolValueOfOnMintedValue insId hie curNode = do
         spanMentionsOccs :: Set ByteString -> RealSrcSpan -> Bool
         spanMentionsOccs occs spanToCheck = fromMaybe False $ do
             src <- slice spanToCheck (hie_hs_src hie)
-            pure $ any (\occ -> occ `isWordInBS` src) (Set.toList occs)
+            pure $ any (`isWordInBS` src) (Set.toList occs)
 
     isWordInBS :: ByteString -> ByteString -> Bool
     isWordInBS word src = case BS8.breakSubstring word src of
@@ -1123,9 +1122,7 @@ analyseValidityIntervalMisuse insId hie curNode = do
         let isCoveredBy spanSet spanToCheck =
                 any (`spanContains` spanToCheck) (Set.toList spanSet)
         in Set.filter
-            (\spanToCheck ->
-                not (isCoveredBy finiteCheckSpanSet spanToCheck)
-            )
+            (not . isCoveredBy finiteCheckSpanSet)
             checkedRangeSpanSet
 
     matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
@@ -1148,10 +1145,10 @@ analyseValidityIntervalMisuse insId hie curNode = do
     appCheckCall node = do
         guard $ nodeHasAnnotation hsAppAnnotation node
         let (headNode, args) = appSpine node
-        contains <- pure $ nodeHasAnyNameMeta containsNameMetas headNode
-        member <- pure $ nodeHasAnyNameMeta memberNameMetas headNode
-        before <- pure $ nodeHasAnyNameMeta beforeNameMetas headNode
-        after <- pure $ nodeHasAnyNameMeta afterNameMetas headNode
+        let contains = nodeHasAnyNameMeta containsNameMetas headNode
+            member = nodeHasAnyNameMeta memberNameMetas headNode
+            before = nodeHasAnyNameMeta beforeNameMetas headNode
+            after = nodeHasAnyNameMeta afterNameMetas headNode
         if contains then pure ("contains", args)
         else if member then pure ("member", args)
         else if before then pure ("before", args)
@@ -1162,10 +1159,10 @@ analyseValidityIntervalMisuse insId hie curNode = do
     opCheckCall node = do
         guard $ nodeHasAnnotation opAppAnnotation node
         lhsNode:opNode:rhsNode:_ <- Just $ nodeChildren node
-        contains <- pure $ nodeHasAnyNameMeta containsNameMetas opNode
-        member <- pure $ nodeHasAnyNameMeta memberNameMetas opNode
-        before <- pure $ nodeHasAnyNameMeta beforeNameMetas opNode
-        after <- pure $ nodeHasAnyNameMeta afterNameMetas opNode
+        let contains = nodeHasAnyNameMeta containsNameMetas opNode
+            member = nodeHasAnyNameMeta memberNameMetas opNode
+            before = nodeHasAnyNameMeta beforeNameMetas opNode
+            after = nodeHasAnyNameMeta afterNameMetas opNode
         if contains then pure ("contains", [lhsNode, rhsNode])
         else if member then pure ("member", [lhsNode, rhsNode])
         else if before then pure ("before", [lhsNode, rhsNode])
@@ -1184,10 +1181,7 @@ analyseValidityIntervalMisuse insId hie curNode = do
     collectFiniteCheckSpans = go
       where
         go node =
-            let here =
-                    if isFiniteCheckNode node
-                        then [nodeSpan node]
-                        else []
+            let here = [nodeSpan node | isFiniteCheckNode node]
             in here <> concatMap go (nodeChildren node)
 
         isFiniteCheckNode :: HieAST TypeIndex -> Bool
@@ -1257,7 +1251,7 @@ analyseValidityIntervalMisuse insId hie curNode = do
 
     finiteConstructorNameMetas :: [NameMeta]
     finiteConstructorNameMetas =
-        concatMap intervalNameMetas ["Finite"]
+        intervalNameMetas "Finite"
 
     intervalNameMetas :: Text -> [NameMeta]
     intervalNameMetas name =
@@ -1347,9 +1341,8 @@ analysePrecisionLossDivisionBeforeMultiply insId hie curNode =
                 -> Set Name
             insertBinding fallbackSpan acc (ident, details) = case ident of
                 Right name ->
-                    let fromBindingSpan = case getBindingSpan details of
-                            Just rhsSpan -> spanContainsDivision rhsSpan
-                            Nothing -> False
+                    let fromBindingSpan =
+                            maybe False spanContainsDivision (getBindingSpan details)
                         fromFallbackSpan =
                             isBindingDetails details && spanContainsDivision fallbackSpan
                         fromSourceSearch = bindingRhsContainsDivision name
@@ -1445,8 +1438,8 @@ analysePrecisionLossDivisionBeforeMultiply insId hie curNode =
         isBindingDetails IdentifierDetails{identInfo = identInfo'} =
             any isBindingCtx identInfo'
           where
-            isBindingCtx (ValBind _ _ _) = True
-            isBindingCtx (PatternBind _ _ _) = True
+            isBindingCtx (ValBind {}) = True
+            isBindingCtx (PatternBind {}) = True
             isBindingCtx _ = False
 
     precisionLossPattern :: PatternAst
@@ -1711,7 +1704,7 @@ analyseUnsafeFromBuiltinDataInHashComparison insId hie curNode =
     spanMentionsUnsafeBinding :: RealSrcSpan -> Bool
     spanMentionsUnsafeBinding spanToCheck = fromMaybe False $ do
         src <- slice spanToCheck (hie_hs_src hie)
-        pure $ any (\occ -> occ `isWordInBS` src) (Set.toList unsafeBindingOccs)
+        pure $ any (`isWordInBS` src) (Set.toList unsafeBindingOccs)
 
     isWordInBS :: ByteString -> ByteString -> Bool
     isWordInBS word src = case BS8.breakSubstring word src of
@@ -1729,7 +1722,7 @@ analyseUnsafeFromBuiltinDataInHashComparison insId hie curNode =
     collectUnsafeComparisonLines :: ByteString -> Set ByteString -> Set Int
     collectUnsafeComparisonLines srcBytes occs =
         let lines' = BS8.lines srcBytes
-            hasUnsafeOcc line = any (\occ -> occ `isWordInBS` line) (Set.toList occs)
+            hasUnsafeOcc line = any (`isWordInBS` line) (Set.toList occs)
             isEqLine line =
                 "==" `BS8.isInfixOf` line && not ("/=" `BS8.isInfixOf` line)
         in Set.fromList
@@ -1775,9 +1768,8 @@ analyseUnsafeFromBuiltinDataInHashComparison insId hie curNode =
                 Right name ->
                     -- Try all strategies to check if this binding involves unsafeFromBuiltinData
                     let -- Strategy 1: Use binding span from HIE (works well for PatternBind)
-                        fromBindingSpan = case getBindingSpan details of
-                            Just rhsSpan -> spanContainsUnsafe rhsSpan
-                            Nothing -> False
+                        fromBindingSpan =
+                            maybe False spanContainsUnsafe (getBindingSpan details)
                         -- Strategy 2: Check if node span contains unsafeFromBuiltinData
                         fromFallbackSpan = isBindingDetails details && spanContainsUnsafe fallbackSpan
                         -- Strategy 3: Search source for "name = ... unsafeFromBuiltinData" pattern
@@ -1897,8 +1889,8 @@ analyseUnsafeFromBuiltinDataInHashComparison insId hie curNode =
         isBindingDetails IdentifierDetails{identInfo = identInfo'} =
             any isBindingCtx identInfo'
           where
-            isBindingCtx (ValBind _ _ _) = True
-            isBindingCtx (PatternBind _ _ _) = True
+            isBindingCtx (ValBind {}) = True
+            isBindingCtx (PatternBind {}) = True
             isBindingCtx MatchBind = True
             isBindingCtx _ = False
 
@@ -1928,7 +1920,7 @@ analyseUnsafeFromBuiltinDataInHashComparison insId hie curNode =
                     (_, rest) ->
                         let afterEq = BS8.drop 1 rest
                             name = BS8.takeWhile isIdentChar $ BS8.dropWhile isSpace afterEq
-                        in (if BS8.null name then [] else [name]) <> extractNamesAfterEquals (BS8.drop 1 rest)
+                        in [name | not (BS8.null name)] <> extractNamesAfterEquals (BS8.drop 1 rest)
             isIdentChar c = isAlphaNum c || c == '_' || c == '\''
             addLine acc (prevLine, line, nextLine) =
                 let unsafeNearby = any (BS8.isInfixOf "unsafeFromBuiltinData") [prevLine, line, nextLine]
@@ -2174,7 +2166,7 @@ analyseRedeemerSuppliedIndicesUniqueness insId hie curNode =
 
         isValBindCtx :: ContextInfo -> Bool
         isValBindCtx = \case
-            ValBind _ _ _ -> True
+            ValBind {} -> True
             MatchBind -> True
             _ -> False
 
@@ -2265,7 +2257,7 @@ analyseRedeemerSuppliedIndicesUniqueness insId hie curNode =
     lineHasMarker n
         | n <= 0 = False
         | otherwise =
-            case (BS8.lines $ hie_hs_src hie) !!? (n - 1) of
+            case BS8.lines (hie_hs_src hie) !!? (n - 1) of
                 Nothing -> False
                 Just line -> normalizedContainsMarker (normalizeMarkerLine line)
 
@@ -2411,8 +2403,8 @@ analyseRedeemerSuppliedIndicesUniqueness insId hie curNode =
         isBindingDetails IdentifierDetails{identInfo = identInfo'} =
             any isBindingCtx identInfo'
           where
-            isBindingCtx (ValBind _ _ _) = True
-            isBindingCtx (PatternBind _ _ _) = True
+            isBindingCtx (ValBind {}) = True
+            isBindingCtx (PatternBind {}) = True
             isBindingCtx MatchBind = True
             isBindingCtx _ = False
 
@@ -2625,7 +2617,7 @@ analyseLazyAndInOnChainCode insId hie curNode =
 
         isValBindCtx :: ContextInfo -> Bool
         isValBindCtx = \case
-            ValBind _ _ _ -> True
+            ValBind {} -> True
             MatchBind -> True
             _ -> False
 
@@ -3061,8 +3053,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
     fieldKeyReference = "reference"
 
     lookupFieldAliasOccs :: String -> Map String (Set String) -> Set String
-    lookupFieldAliasOccs fieldKey aliases =
-        Map.findWithDefault Set.empty fieldKey aliases
+    lookupFieldAliasOccs = Map.findWithDefault Set.empty
 
     mergeFieldAliasMaps :: Map String (Set String) -> Map String (Set String) -> Map String (Set String)
     mergeFieldAliasMaps = Map.unionWith (<>)
@@ -3124,7 +3115,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
             (\acc segment -> case parseRecordFieldAliasSegment segment of
                 Nothing -> acc
                 Just (fieldKey, aliasOcc) ->
-                    Map.insertWith (<>) fieldKey (Set.singleton aliasOcc) acc
+                    Map.insertWith (<>) fieldKey (one aliasOcc) acc
             )
             Map.empty
             (BS8.split ',' line)
@@ -3178,11 +3169,11 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
       where
         adjacency :: Map Name (Set Name)
         adjacency = Map.fromListWith (<>)
-            [ (a, Set.singleton b)
+            [ (a, one b)
             | (a, b) <- edges
             ]
             <> Map.fromListWith (<>)
-            [ (b, Set.singleton a)
+            [ (b, one a)
             | (a, b) <- edges
             ]
 
@@ -3257,7 +3248,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
 
         lineLooksLikeAddressOperandToken :: ByteString -> Bool
         lineLooksLikeAddressOperandToken line =
-            parseBindingLhs line == Nothing
+            isNothing (parseBindingLhs line)
                 && containsWordBS "txOutAddress" (lineCodePart line)
 
     subtreeHasEqName :: HieAST TypeIndex -> Bool
@@ -3297,7 +3288,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
 
     srcLineAt :: Int -> Maybe ByteString
     srcLineAt lineNumber =
-        (BS8.lines $ hie_hs_src hie) !!? (lineNumber - 1)
+        BS8.lines (hie_hs_src hie) !!? (lineNumber - 1)
 
     subtreeHasAnyTxOutFieldToken :: [String] -> HieAST TypeIndex -> Bool
     subtreeHasAnyTxOutFieldToken targets = go
@@ -3475,7 +3466,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
 
     lineLooksLikeAddressOperand :: String -> ByteString -> Bool
     lineLooksLikeAddressOperand varOcc line =
-        parseBindingLhs line == Nothing
+        isNothing (parseBindingLhs line)
             && lineMentionsFieldTokenForVar ["txOutAddress"] varOcc line
 
     lineMentionsAddressEqForOccAdjacent :: String -> Maybe ByteString -> ByteString -> Maybe ByteString -> Bool
@@ -3502,24 +3493,24 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
 
     lineLooksLikeAddressAliasOperand :: String -> ByteString -> Bool
     lineLooksLikeAddressAliasOperand occ line =
-        parseBindingLhs line == Nothing
+        isNothing (parseBindingLhs line)
             && lineMentionsVarOcc occ line
 
     lineMentionsFieldTokenForVarAdjacent :: [String] -> String -> Maybe ByteString -> ByteString -> Maybe ByteString -> Bool
     lineMentionsFieldTokenForVarAdjacent tokens varOcc prevLine line nextLine =
         lineMentionsFieldTokenForVar tokens varOcc line
             || (lineHasAnyFieldToken tokens line
-                && parseBindingLhs line == Nothing
+                && isNothing (parseBindingLhs line)
                 && maybe False (lineMentionsVarOcc varOcc) nextLine
                )
             || (lineMentionsVarOcc varOcc line
                 && maybe False
-                    (\prev -> parseBindingLhs prev == Nothing && lineHasAnyFieldToken tokens prev)
+                    (\prev -> isNothing (parseBindingLhs prev) && lineHasAnyFieldToken tokens prev)
                     prevLine
                )
             || (lineLooksLikeCaseScrutinee varOcc line
                 && maybe False
-                    (\next -> parseBindingLhs next == Nothing && lineHasAnyFieldToken tokens next)
+                    (\next -> isNothing (parseBindingLhs next) && lineHasAnyFieldToken tokens next)
                     nextLine
                )
 
@@ -3530,7 +3521,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
     lineLooksLikeCaseScrutinee :: String -> ByteString -> Bool
     lineLooksLikeCaseScrutinee varOcc line =
         let code = lineCodePart line
-        in parseBindingLhs line == Nothing
+        in isNothing (parseBindingLhs line)
             && containsWordBS "case" code
             && containsWordBS "of" code
             && containsWordBS (BS8.pack varOcc) code
@@ -3613,9 +3604,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
                         afterCh = bs BS8.!? (idx + BS8.length needle)
                         beforeOk = maybe True (not . isIdentifierChar) beforeCh
                         afterOk = maybe True (not . isIdentifierChar) afterCh
-                    in if beforeOk && afterOk
-                        then True
-                        else go (BS8.drop 1 after)
+                    in (beforeOk && afterOk) || go (BS8.drop 1 after)
 
     identTypeContainsTyConName :: String -> IdentifierDetails TypeIndex -> Bool
     identTypeContainsTyConName needle IdentifierDetails{identType = identType'} = case identType' of

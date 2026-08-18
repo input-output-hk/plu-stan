@@ -60,7 +60,7 @@ observationSpec = describe "Observation" $ do
     editedContent  = BS8.pack "x = 1\nbad EXPR here\ny = 2\n"
 
     mkObs :: Int -> Int -> Int -> ByteString -> Observation
-    mkObs line startC endC = mkObs2 line startC line endC
+    mkObs line startC = mkObs2 line startC line
 
     mkObs2 :: Int -> Int -> Int -> Int -> ByteString -> Observation
     mkObs2 startL startC endL endC content = Observation

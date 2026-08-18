@@ -69,3 +69,4 @@ output.txt
 
 # other
 .DS_Store
+/.claude/worktrees
