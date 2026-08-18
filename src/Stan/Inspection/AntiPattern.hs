@@ -67,6 +67,8 @@ module Stan.Inspection.AntiPattern
     , plustan17
     , plustan18
     , plustan19
+    , plustan20
+    , plustan21
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -133,6 +135,8 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan17
     , plustan18
     , plustan19
+    , plustan20
+    , plustan21
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -823,6 +827,30 @@ plustan19 = mkAntiPatternInspection (Id "PLU-STAN-19") "TxOut validation misses 
     & solutionL .~
         [ "Validate datum shape and critical datum fields for security-sensitive outputs"
         , "If datum is intentionally unconstrained, document this and suppress the warning"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan20 :: Inspection
+plustan20 = mkAntiPatternInspection (Id "PLU-STAN-20") "Minting logic without burning logic"
+    MissingBurningLogic
+    & descriptionL .~ "Minting policy logic validates positive mint amounts but does not validate negative amounts for burning."
+    & solutionL .~
+        [ "When protocol behaviour requires burning, add explicit negative-amount checks for the same mint context"
+        , "For valueOf checks, pair mint (>0 or == positive) with burn (<0 or == negative) validation"
+        , "For flattenValue checks, validate both positive and negative amount branches"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan21 :: Inspection
+plustan21 = mkAntiPatternInspection (Id "PLU-STAN-21") "Immutable credentials baked into validators"
+    ImmutableCredential
+    & descriptionL .~ "Validator-reachable top-level PubKeyHash/Credential/StakingCredential/Address/ScriptHash bindings, and credential-like values specialized into compiled validator code via applyCode/unsafeApplyCode, cannot be rotated on-chain when governance, signer sets, or recovery requirements change."
+    & solutionL .~
+        [ "Store mutable credentials in datum/state that validators can update under explicit authorization"
+        , "Avoid baking credential-like values into compiled code via applyCode/unsafeApplyCode unless immutability is intentional and documented"
+        , "If the credential is intentionally immutable, suppress the warning locally and document the operational trade-off"
         ]
     & withPlutusCategory
     & severityL .~ Warning
