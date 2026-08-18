@@ -24,6 +24,8 @@ module Test.Stan.Analysis.PlutusTx (
   plustan22Spec,
   plustan23Spec,
   plustan24Spec,
+  plustan25Spec,
+  plustan26Spec,
 ) where
 
 import Test.Hspec (Spec, describe, it)
@@ -59,6 +61,8 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   plustan22Spec analysis
   plustan23Spec analysis
   plustan24Spec analysis
+  plustan25Spec analysis
+  plustan26Spec analysis
 
 plustan01Spec :: Analysis -> Spec
 plustan01Spec analysis = describe "PLU-STAN-01" $ do
@@ -639,3 +643,26 @@ plustan24Spec analysis = describe "PLU-STAN-24" $ do
 
   it "does not flag validation that only reads outputs" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan24 1511
+
+plustan25Spec :: Analysis -> Spec
+plustan25Spec analysis = describe "PLU-STAN-25" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags zip with no length comparison" $
+    checkObservation AntiPattern.plustan25 1518 1 23
+
+  it "does not flag zip guarded by a length comparison" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1523
+
+plustan26Spec :: Analysis -> Spec
+plustan26Spec analysis = describe "PLU-STAN-26" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags an input spent only to be recreated identically" $
+    checkObservation AntiPattern.plustan26 1533 1 27
+
+  it "does not flag a partial field comparison" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan26 1542
+
+  it "does not flag a validator that already reads reference inputs" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan26 1550

@@ -148,6 +148,10 @@ data InspectionAnalysis
     | HardcodedCredentialConstant
     -- | Validation depends on other script inputs without checking a redeemer.
     | ScriptInputDependencyWithoutRedeemer
+    -- | 'zip' used without comparing the lengths of both lists.
+    | ZipWithoutLengthCheck
+    -- | An input is spent only to be recreated identically.
+    | SpendAndRecreateInsteadOfReferenceInput
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

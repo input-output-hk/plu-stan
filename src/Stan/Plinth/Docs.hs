@@ -641,4 +641,56 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
+    , ( Id "PLU-STAN-25"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "\'zip\' stops at the shorter list. If a redeemer supplies one of the two"
+              , "lists, an attacker sends a short one and every element of the longer list"
+              , "past that point is dropped before your per-pair check ever sees it -- the"
+              , "validation loop runs, passes, and silently covers a subset of the data. The"
+              , "fix is to reject a length mismatch outright rather than let truncation"
+              , "decide how much gets validated."
+              ]
+          , docsBadExample = unlines
+              [ "-- a short `sigs` means most `owners` are never checked"
+              , "allSigned owners sigs ="
+              , "  all (uncurry checkSig) (zip owners sigs)"
+              ]
+          , docsGoodExample = unlines
+              [ "-- a mismatch is rejected instead of silently truncating"
+              , "allSigned owners sigs ="
+              , "  length owners == length sigs"
+              , "    && all (uncurry checkSig) (zip owners sigs)"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-26"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "If a validator only checks that an output puts the spent UTxO back exactly"
+              , "as it was -- same address, value, datum and reference script -- then the"
+              , "spend achieved nothing except cost. Spending pays the full validator"
+              , "execution budget and, worse, consumes the UTxO: two transactions that both"
+              , "want to read it now contend for it, and one fails. A reference input reads"
+              , "the same data without consuming it, so concurrent readers no longer"
+              , "conflict."
+              ]
+          , docsBadExample = unlines
+              [ "-- spends the oracle UTxO just to put it back untouched"
+              , "okSpend i out ="
+              , "  txOutAddress (txInInfoResolved i) == txOutAddress out"
+              , "    && txOutValue (txInInfoResolved i) == txOutValue out"
+              , "    && txOutDatum (txInInfoResolved i) == txOutDatum out"
+              ]
+          , docsGoodExample = unlines
+              [ "-- reads the oracle without spending it: no contention, no recreation"
+              , "oracleRate info ="
+              , "  case txInfoReferenceInputs info of"
+              , "    [i] -> rateFromDatum (txOutDatum (txInInfoResolved i))"
+              , "    _   -> traceError \"expected one reference input\""
+              ]
+          , docsAnchor = ""
+          }
+      )
     ]

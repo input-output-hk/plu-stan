@@ -1509,3 +1509,47 @@ plutStan24OutputsOnlyShouldPass :: ScriptContext -> Bool
 -- PLU-STAN-24 (should NOT trigger): no dependency on other script inputs.
 plutStan24OutputsOnlyShouldPass ctx =
   length (txInfoOutputs (scriptContextTxInfo ctx)) == 1
+
+-- Fixtures for PLU-STAN-25 (zip without a length check)
+
+plutStan25ZipUnchecked :: [Integer] -> [Integer] -> [Integer]
+-- PLU-STAN-25 (should trigger): zip truncates to the shorter list, so trailing
+-- elements of the longer one are never validated.
+plutStan25ZipUnchecked xs ys =
+  map (\(a, b) -> a + b) (zip xs ys)
+
+plutStan25ZipCheckedShouldPass :: [Integer] -> [Integer] -> [Integer]
+-- PLU-STAN-25 (should NOT trigger): the lengths are compared before zipping.
+plutStan25ZipCheckedShouldPass xs ys =
+  if length xs == length ys
+    then map (\(a, b) -> a + b) (zip xs ys)
+    else []
+
+-- Fixtures for PLU-STAN-26 (spend-and-recreate instead of a reference input)
+
+plutStan26SpendAndRecreate :: TxInInfo -> TxOut -> Bool
+-- PLU-STAN-26 (should trigger): the input is spent only to be recreated
+-- identically, so a reference input would do the same job without the spend.
+plutStan26SpendAndRecreate i out =
+  txOutAddress (txInInfoResolved i) == txOutAddress out
+    && txOutValue (txInInfoResolved i) == txOutValue out
+    && txOutDatum (txInInfoResolved i) == txOutDatum out
+    && txOutReferenceScript (txInInfoResolved i) == txOutReferenceScript out
+
+plutStan26PartialCheckShouldPass :: TxInInfo -> TxOut -> Bool
+-- PLU-STAN-26 (should NOT trigger): only address and value are compared, so the
+-- output is not an identical recreation of the input.
+plutStan26PartialCheckShouldPass i out =
+  txOutAddress (txInInfoResolved i) == txOutAddress out
+    && txOutValue (txInInfoResolved i) == txOutValue out
+
+plutStan26WithReferenceInputShouldPass :: ScriptContext -> TxInInfo -> TxOut -> Bool
+-- PLU-STAN-26 (should NOT trigger): all four fields are compared, but the
+-- validator already reads reference inputs, so this is not the spend-and-recreate
+-- anti-pattern the rule targets.
+plutStan26WithReferenceInputShouldPass ctx i out =
+  length (txInfoReferenceInputs (scriptContextTxInfo ctx)) == 1
+    && txOutAddress (txInInfoResolved i) == txOutAddress out
+    && txOutValue (txInInfoResolved i) == txOutValue out
+    && txOutDatum (txInInfoResolved i) == txOutDatum out
+    && txOutReferenceScript (txInInfoResolved i) == txOutReferenceScript out

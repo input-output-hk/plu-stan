@@ -72,6 +72,8 @@ module Stan.Inspection.AntiPattern
     , plustan22
     , plustan23
     , plustan24
+    , plustan25
+    , plustan26
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -143,6 +145,8 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan22
     , plustan23
     , plustan24
+    , plustan25
+    , plustan26
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -907,3 +911,25 @@ plustan24 = mkAntiPatternInspection (Id "PLU-STAN-24") "Script-input dependency 
         ]
     & withPlutusCategory
     & severityL .~ Warning
+
+plustan25 :: Inspection
+plustan25 = mkAntiPatternInspection (Id "PLU-STAN-25") "zip without a length check"
+    ZipWithoutLengthCheck
+    & descriptionL .~ "'zip' truncates to the shorter of its two lists, so when the lengths are not compared first any trailing elements of the longer list are silently dropped and never validated."
+    & solutionL .~
+        [ "Compare the lengths of both lists before zipping and reject a mismatch"
+        , "Or use a zip that fails on unequal lengths rather than truncating"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan26 :: Inspection
+plustan26 = mkAntiPatternInspection (Id "PLU-STAN-26") "Input spent only to be recreated identically"
+    SpendAndRecreateInsteadOfReferenceInput
+    & descriptionL .~ "Validation asserts that an output reproduces a spent input's address, value, datum and reference script -- that is, the UTxO is spent only to be recreated unchanged. A reference input reads it without spending it."
+    & solutionL .~
+        [ "Read the UTxO with a reference input instead of spending and recreating it"
+        , "Spending costs execution budget and serialises access to the UTxO for no benefit"
+        ]
+    & withPlutusCategory
+    & severityL .~ Performance
