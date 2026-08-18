@@ -2214,8 +2214,9 @@ plutStan20FlattenConsPatternMintOnlyShouldTrigger ctx =
 plutStan20FlattenLetPatternMintOnlyShouldTrigger :: ScriptContext -> Bool
 -- PLU-STAN-20 (should trigger): let-pattern flattenValue bindings still need burn-side validation.
 plutStan20FlattenLetPatternMintOnlyShouldTrigger ctx =
-  let [(_, _, !amount)] = Value.flattenValue (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx)
-  in amount > 0
+  case Value.flattenValue (Value.Value $ MintValue.mintValueToMap $ txInfoMint $ scriptContextTxInfo ctx) of
+    [(_, _, !amount)] -> amount > 0
+    _ -> False
 
 plutStan20FlattenLaterBranchPatternShouldTrigger :: ScriptContext -> Bool
 -- PLU-STAN-20 (should trigger): a later multiline flattenValue branch must not inherit an earlier branch's burn-side binder/sign evidence.
