@@ -23,6 +23,7 @@ module Test.Stan.Analysis.PlutusTx (
   plustan21Spec,
   plustan22Spec,
   plustan23Spec,
+  plustan24Spec,
 ) where
 
 import Test.Hspec (Spec, describe, it)
@@ -57,6 +58,7 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   plustan21Spec analysis
   plustan22Spec analysis
   plustan23Spec analysis
+  plustan24Spec analysis
 
 plustan01Spec :: Analysis -> Spec
 plustan01Spec analysis = describe "PLU-STAN-01" $ do
@@ -624,3 +626,16 @@ plustan23Spec analysis = describe "PLU-STAN-23" $ do
 
   it "does not flag a credential bound locally in a where clause" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan23 94
+
+plustan24Spec :: Analysis -> Spec
+plustan24Spec analysis = describe "PLU-STAN-24" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags a script-input dependency with no redeemer check" $
+    checkObservation AntiPattern.plustan24 1484 1 33
+
+  it "does not flag when the redeemer is inspected too" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan24 1504
+
+  it "does not flag validation that only reads outputs" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan24 1511

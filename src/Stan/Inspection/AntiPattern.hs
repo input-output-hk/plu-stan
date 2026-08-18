@@ -71,6 +71,7 @@ module Stan.Inspection.AntiPattern
     , plustan21
     , plustan22
     , plustan23
+    , plustan24
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -141,6 +142,7 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan21
     , plustan22
     , plustan23
+    , plustan24
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -891,6 +893,17 @@ plustan23 = mkAntiPatternInspection (Id "PLU-STAN-23") "Credential hardcoded as 
     & solutionL .~
         [ "Carry the credential in the datum so it can be rotated by a governance action"
         , "If the credential genuinely must be immutable, document why and suppress the warning"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan24 :: Inspection
+plustan24 = mkAntiPatternInspection (Id "PLU-STAN-24") "Script-input dependency without a redeemer check"
+    ScriptInputDependencyWithoutRedeemer
+    & descriptionL .~ "Validation reads the transaction's other script inputs but never inspects a redeemer, so it cannot tell which operation those inputs were spent for and can be satisfied by an unrelated transaction."
+    & solutionL .~
+        [ "Inspect the redeemer of the script inputs the validation depends on"
+        , "Require the expected redeemer constructor before trusting a co-spent script input"
         ]
     & withPlutusCategory
     & severityL .~ Warning

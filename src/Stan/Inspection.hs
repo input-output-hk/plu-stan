@@ -146,6 +146,8 @@ data InspectionAnalysis
     | UnstableMakeIsDataUsage
     -- | Credential hardcoded as a top-level constant.
     | HardcodedCredentialConstant
+    -- | Validation depends on other script inputs without checking a redeemer.
+    | ScriptInputDependencyWithoutRedeemer
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

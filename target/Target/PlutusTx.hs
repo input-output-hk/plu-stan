@@ -29,7 +29,7 @@ import PlutusLedgerApi.V3 (
   Datum (..),
   OutputDatum (..),
   ScriptContext (..),
-  TxInfo (..),
+  TxInfo (..), TxInInfo (..),
   TxOut (..),
   txOutAddress, getRedeemer,
   )
@@ -1474,3 +1474,38 @@ plutStan23SignerFromDatumShouldPass :: PubKeyHash -> PubKeyHash -> Bool
 -- PLU-STAN-23 (should NOT trigger): the credential arrives as a parameter (from
 -- the datum), so a *function* type mentioning a credential must not match.
 plutStan23SignerFromDatumShouldPass admin signer = admin == signer
+
+-- Fixtures for PLU-STAN-24 (script-input dependency without redeemer checks)
+
+plutStan24ScriptInputsNoRedeemer :: ScriptContext -> Bool
+-- PLU-STAN-24 (should trigger): validation depends on the *other* script inputs
+-- of the transaction but never inspects a redeemer, so it cannot tell which
+-- operation those inputs belong to.
+plutStan24ScriptInputsNoRedeemer ctx =
+  let info = scriptContextTxInfo ctx
+      scriptIns =
+        filter
+          (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+                   ScriptCredential _ -> True
+                   _ -> False)
+          (txInfoInputs info)
+  in length scriptIns == 2
+
+plutStan24ScriptInputsWithRedeemerShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-24 (should NOT trigger): the redeemer is inspected alongside the
+-- script-input dependency.
+plutStan24ScriptInputsWithRedeemerShouldPass ctx =
+  let info = scriptContextTxInfo ctx
+      scriptIns =
+        filter
+          (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+                   ScriptCredential _ -> True
+                   _ -> False)
+          (txInfoInputs info)
+      op = BI.unsafeDataAsI (getRedeemer (scriptContextRedeemer ctx))
+  in length scriptIns == 2 && op == 1
+
+plutStan24OutputsOnlyShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-24 (should NOT trigger): no dependency on other script inputs.
+plutStan24OutputsOnlyShouldPass ctx =
+  length (txInfoOutputs (scriptContextTxInfo ctx)) == 1

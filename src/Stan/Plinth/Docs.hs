@@ -615,4 +615,30 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
+    , ( Id "PLU-STAN-24"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "A validator that reads the transaction's *other* script inputs is trusting"
+              , "work it did not do. Without checking those inputs' redeemers it cannot tell"
+              , "which operation they were spent for, so an attacker composes one"
+              , "transaction that spends your UTxO alongside an unrelated script input that"
+              , "happens to satisfy your shape test -- your validator sees the evidence it"
+              , "wanted and approves. Requiring the expected redeemer on the input you"
+              , "depend on ties the two spends to the same intended operation."
+              ]
+          , docsBadExample = unlines
+              [ "-- \"some other script input exists\" is not a statement about *why*"
+              , "okSpend info ="
+              , "  length (filter isScriptInput (txInfoInputs info)) == 2"
+              ]
+          , docsGoodExample = unlines
+              [ "-- the co-spent input must carry the redeemer this operation expects"
+              , "okSpend info ="
+              , "  case findScriptInput info of"
+              , "    Just i  -> redeemerOf info i == toBuiltinData Settle"
+              , "    Nothing -> False"
+              ]
+          , docsAnchor = ""
+          }
+      )
     ]

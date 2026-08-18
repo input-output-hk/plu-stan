@@ -93,6 +93,7 @@ createVisitor hie exts inspections = Visitor $ \node ->
         MissingTxOutAddressCheck -> analyseMissingTxOutAddressCheck inspectionId hie node
         UnstableMakeIsDataUsage -> analyseUnstableMakeIsDataUsage inspectionId hie node
         HardcodedCredentialConstant -> analyseHardcodedCredentialConstant inspectionId hie node
+        ScriptInputDependencyWithoutRedeemer -> analyseScriptInputDependencyWithoutRedeemer inspectionId hie node
 
 {- | Check for big tuples (size >= 4) in the following places:
 
@@ -2849,6 +2850,140 @@ analyseMissingTxOutAddressCheck
     -> State VisitorState ()
 analyseMissingTxOutAddressCheck =
     analyseMissingTxOutFieldCheck MissingAddress
+
+{- | PLU-STAN-24: validation reads the transaction's other script inputs but
+never inspects a redeemer.
+
+Shape: a node whose subtree both reaches for @txInfoInputs@ /and/ discriminates
+script inputs (@ScriptCredential@ and friends), while mentioning nothing that
+looks like reading a redeemer.
+
+The reported span is the @txInfoInputs@ occurrence *inside* the subtree, not the
+current node's own span. That matters: the visitor calls this for every node, so
+each qualifying ancestor would otherwise report a differently-sized span for the
+same defect. Anchoring on the inner occurrence makes every ancestor produce an
+identical span, which 'dedupObservations' then collapses to one observation --
+the same trick the TxOut analysers use by reporting field-token spans. See NOTE
+[Observation dedup backstop].
+
+An ancestor that /does/ contain a redeemer check somewhere in its subtree simply
+does not fire, so wrapping the validation in a function that also reads the
+redeemer suppresses it, which is the intended behaviour.
+-}
+analyseScriptInputDependencyWithoutRedeemer
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseScriptInputDependencyWithoutRedeemer insId hie curNode =
+    addObservations $ mkObservation insId hie <$> matchNode curNode
+  where
+    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchNode node
+        | isTopLevelDefinitionSite node
+        , let defLines = definitionLines (srcSpanStartLine (nodeSpan node))
+        , textHasAny inputsTokens defLines
+        , textHasAny scriptInputTokens defLines
+        , not (textHasAny redeemerTokens defLines)
+        = S.one (nodeSpan node)
+        | otherwise = mempty
+
+    {- The absence half of this rule has to be judged over a whole definition,
+    not an arbitrary subtree: a redeemer check commonly sits in a *sibling* let
+    binding, so the node wrapping just the input filter genuinely lacks it.
+
+    Getting "the whole definition" from the HIE is harder than it looks. The node
+    carrying a top-level binding identifier is a leaf -- it does not contain the
+    body as children -- so its subtree is no use. Nor does it carry a span for the
+    definition: only 'ValBind' has one (which is how PLU-STAN-08 finds RHS spans)
+    and a *function* binding like @f x = ...@ is a 'MatchBind', which has none.
+
+    So the extent is recovered from Haskell layout instead: a top-level
+    definition begins in column 1 and continues through every following line that
+    is blank or indented. That is exactly the boundary the rule cares about, and
+    it takes in sibling let/where bindings that a subtree walk would miss.
+    -}
+    isTopLevelDefinitionSite :: HieAST TypeIndex -> Bool
+    isTopLevelDefinitionSite node =
+        srcSpanStartCol (nodeSpan node) == 1
+            && any isExternalBinding (Map.assocs (nodeIdentifiers (nodeInfo node)))
+      where
+        isExternalBinding :: (Identifier, IdentifierDetails TypeIndex) -> Bool
+        isExternalBinding (ident, IdentifierDetails{identInfo = info}) =
+            case ident of
+                Right name -> isExternalName name && any isBindingContext (toList info)
+                Left _ -> False
+
+        isBindingContext :: ContextInfo -> Bool
+        isBindingContext = \case
+            ValBind {} -> True
+            MatchBind -> True
+            _ -> False
+
+    definitionLines :: Int -> [ByteString]
+    definitionLines startLine =
+        case drop (startLine - 1) (BS8.lines (hie_hs_src hie)) of
+            [] -> []
+            firstLine : rest -> firstLine : takeWhile isContinuation rest
+      where
+        -- Blank, or indented: still inside the definition. A new top-level
+        -- declaration (or its comment) starts hard against column 1.
+        isContinuation :: ByteString -> Bool
+        isContinuation l = case BS8.uncons l of
+            Nothing -> True
+            Just (c, _) -> c == ' ' || c == '\t'
+
+    {- Matching is word-boundary aware, not raw @isInfixOf@. Plain substring
+    matching reads the "Redeemer" token out of an identifier that merely
+    *contains* it -- a validator named @checkInputsNoRedeemer@ would look as
+    though it inspected a redeemer and silently suppress the rule. -}
+    textHasAny :: [String] -> [ByteString] -> Bool
+    textHasAny targets =
+        any (\l -> any (\t -> containsWord (BS8.pack t) l) targets)
+
+    containsWord :: ByteString -> ByteString -> Bool
+    containsWord needle haystack
+        | BS8.null needle = False
+        | otherwise = go haystack
+      where
+        go :: ByteString -> Bool
+        go bs =
+            let (before, after) = BS8.breakSubstring needle bs
+            in not (BS8.null after)
+                && ( let beforeCh = if BS8.null before then Nothing else Just (BS8.last before)
+                         afterCh = fst <$> BS8.uncons (BS8.drop (BS8.length needle) after)
+                         boundaryOk = maybe True (not . isIdentifierChar') beforeCh
+                             && maybe True (not . isIdentifierChar') afterCh
+                     in boundaryOk || go (BS8.drop 1 after)
+                   )
+
+    isIdentifierChar' :: Char -> Bool
+    isIdentifierChar' c = isAlphaNum c || c == '_' || c == '\''
+
+    inputsTokens, scriptInputTokens, redeemerTokens :: [String]
+    inputsTokens =
+        [ "txInfoInputs"
+        , "txInfoReferenceInputs"
+        ]
+
+    -- How on-chain code tells a script input apart from a pubkey one. The
+    -- helper names are included for the common case where that test has been
+    -- factored out, mirroring how the TxOut token lists carry helper names.
+    scriptInputTokens =
+        [ "ScriptCredential"
+        , "addressCredential"
+        , "isScriptInput"
+        , "isScriptAddress"
+        ]
+
+    redeemerTokens =
+        [ "getRedeemer"
+        , "scriptContextRedeemer"
+        , "txInfoRedeemers"
+        , "Redeemer"
+        , "findOwnRedeemer"
+        ]
+
 
 {- | PLU-STAN-23: flag credentials bound as top-level constants.
 
