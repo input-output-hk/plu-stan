@@ -1,3 +1,7 @@
+# Keep the [[remove]] / [[check]] entries in sync with .stan-windows.toml,
+# which is the same config with backslash path separators (used by the CI
+# "Dogfooding on Windows" step).
+
 #[[remove]]
 #directory = "target/"
 

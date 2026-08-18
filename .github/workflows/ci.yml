@@ -21,16 +21,15 @@ jobs:
       matrix:
         os: [ubuntu-latest, macOS-latest, windows-latest]
         cabal: ["3.10"]
+        # 9.4.7 is the floor. exe:plustan reads .hi interface annotations
+        # straight through the modern GHC API, which does not exist in that
+        # shape any earlier: 8.8/8.10 predate the GHC.* module layout wholesale
+        # (no GHC.Iface.Binary, GHC.Platform.Profile, GHC.Types.Name.Cache, ...)
+        # and 9.0/9.2 have incompatible signatures (readBinIface runs in TcRnIf,
+        # initNameCache is pure and takes a UniqSupply). See the note on
+        # exe:plustan in stan.cabal. The release matrix ships 9.6.7 and 9.12.2,
+        # so nothing below 9.4 was ever shipped to users either.
         ghc:
-          - "8.8.4"
-          - "8.10.7"
-          - "9.0.1"
-          - "9.0.2"
-          # 9.2 series from .4 onwards don't seem to work
-          - "9.2.3"
-          # 9.4 series from don't work with Cabal-syntax-3.14.0.0
-          #
-          # See https://github.com/haskell/cabal/issues/10397
           - "9.4.7"
           - "9.4.8"
           # 9.6.3 is in the release matrix (plutus projects commonly pin it),
@@ -40,22 +39,6 @@ jobs:
           - "9.8.4"
           - "9.10.2"
           - "9.12.2"
-
-        exclude:
-          - os: macOS-latest
-            ghc: 8.8.4
-          - os: macOS-latest
-            ghc: 8.10.7
-          - os: macOS-latest
-            ghc: 9.0.1
-          - os: macOS-latest
-            ghc: 9.0.2
-          - os: macOS-latest
-            ghc: 9.2.3
-          - os: macOS-latest
-            ghc: 9.4.1
-          - os: windows-latest
-            ghc: 8.8.4
     steps:
     - uses: actions/checkout@v4
 

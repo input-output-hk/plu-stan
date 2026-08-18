@@ -66,6 +66,18 @@ BLST_VERSION="0.3.11"
 
 WORKDIR="${TMPDIR:-/tmp}/plu-stan-syslibs"
 
+# libsodium's autogen.sh ends by curl-ing fresh config.guess/config.sub from
+# git.savannah.gnu.org over the perfectly good copies its repo already ships.
+# `curl -sL` is silent *and* ignores HTTP status, so when savannah is down the
+# error page itself lands in build-aux/config.sub and configure dies with
+#   configure: error: cannot run /bin/bash ./build-aux/config.sub
+# -- a third-party outage failing our build (savannah was returning 502 on
+# 2026-08-18). autogen.sh honours this variable to skip the refresh, so we
+# always use the committed, pinned scripts. Exported rather than set per-call so
+# any autotools dep added later inherits it; secp256k1's autogen.sh is a plain
+# `autoreconf -if` and simply ignores it.
+export DO_NOT_UPDATE_CONFIG_SCRIPTS=1
+
 # ----------------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------------
@@ -291,7 +303,8 @@ build_libsodium() {
   clone_ref "$LIBSODIUM_REPO" "$LIBSODIUM_REF" "$dir"
   (
     cd "$dir"
-    ./autogen.sh -s
+    # No -s: autogen.sh takes no arguments, so the flag was always a no-op.
+    ./autogen.sh
     ./configure --prefix="$PREFIX"
     make -j"$JOBS"
     maybe_sudo make install
