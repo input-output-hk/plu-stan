@@ -2858,8 +2858,14 @@ analyseMissingTxOutAddressCheck =
 Deliberately not marker-based. 'zip' appears in ordinary code, so a rule that
 fired on every call and relied on a suppression comment would tax every project
 on every call site; the length comparison is real counter-evidence, so it is
-checked for. Scoped to the definition, since the guard is usually a separate
-@if@ or @where@ binding rather than part of the zip expression.
+checked for.
+
+Scoped to the definition, since the guard is usually a separate @if@ or @where@
+binding rather than part of the zip expression -- but /not/ merely "does this
+definition mention length anywhere". That would let a guard on some unrelated
+list (@length outs == 1@) exempt the zip, which fails in the direction that
+matters: a missed detection rather than noise. The zipped lists are identified by
+name and each must carry its own length check.
 -}
 analyseZipWithoutLengthCheck
     :: Id Inspection
@@ -2867,9 +2873,17 @@ analyseZipWithoutLengthCheck
     -> HieAST TypeIndex
     -> State VisitorState ()
 analyseZipWithoutLengthCheck insId hie curNode =
-    addObservations $ mkObservation insId hie
-        <$> definitionScopedMatch hie [zipTokens] lengthTokens curNode
+    addObservations $ mkObservation insId hie <$> matchNode curNode
   where
+    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchNode node
+        | isTopLevelDefinitionSite node
+        , let defLines = topLevelDefinitionLines hie (srcSpanStartLine (nodeSpan node))
+        , linesContainWord zipTokens defLines
+        , zipIsUnguarded defLines
+        = S.one (nodeSpan node)
+        | otherwise = mempty
+
     zipTokens, lengthTokens :: [String]
     zipTokens =
         [ "zip"
@@ -2881,6 +2895,35 @@ analyseZipWithoutLengthCheck insId hie curNode =
         [ "length"
         , "lengthOfByteString"
         ]
+
+    zipIsUnguarded :: [ByteString] -> Bool
+    zipIsUnguarded defLines = case zippedListNames defLines of
+        -- Arguments could not be read off positionally (e.g. 'zipWith', which
+        -- takes a function first): fall back to the coarse test rather than
+        -- silently passing.
+        [] -> not (linesContainWord lengthTokens defLines)
+        names -> not (all hasLengthCheck names)
+      where
+        hasLengthCheck :: ByteString -> Bool
+        hasLengthCheck name =
+            any (containsWordBoundary ("length " <> name)) defLines
+
+    -- The identifiers passed to a plain 'zip'/'zip3', read positionally.
+    zippedListNames :: [ByteString] -> [ByteString]
+    zippedListNames = concatMap fromLine
+      where
+        fromLine :: ByteString -> [ByteString]
+        fromLine = go . identTokens
+
+        go :: [ByteString] -> [ByteString]
+        go = \case
+            [] -> []
+            t : rest
+                | t == "zip" || t == "zip3" -> take 2 rest <> go rest
+                | otherwise -> go rest
+
+        identTokens :: ByteString -> [ByteString]
+        identTokens = filter (not . BS8.null) . BS8.splitWith (not . isIdentPartChar)
 
 {- | PLU-STAN-26: an input is spent only to be recreated identically.
 

@@ -644,6 +644,9 @@ plustan24Spec analysis = describe "PLU-STAN-24" $ do
   it "does not flag validation that only reads outputs" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan24 1511
 
+  it "does not flag when the redeemer check lives in a where clause" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan24 1570
+
 plustan25Spec :: Analysis -> Spec
 plustan25Spec analysis = describe "PLU-STAN-25" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
@@ -653,6 +656,9 @@ plustan25Spec analysis = describe "PLU-STAN-25" $ do
 
   it "does not flag zip guarded by a length comparison" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1523
+
+  it "flags zip when the length check is on an unrelated list" $
+    checkObservation AntiPattern.plustan25 1560 1 38
 
 plustan26Spec :: Analysis -> Spec
 plustan26Spec analysis = describe "PLU-STAN-26" $ do

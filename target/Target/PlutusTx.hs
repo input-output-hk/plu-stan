@@ -1553,3 +1553,29 @@ plutStan26WithReferenceInputShouldPass ctx i out =
     && txOutValue (txInInfoResolved i) == txOutValue out
     && txOutDatum (txInInfoResolved i) == txOutDatum out
     && txOutReferenceScript (txInInfoResolved i) == txOutReferenceScript out
+
+plutStan25ZipWithUnrelatedLengthCheck :: [Integer] -> [Integer] -> [TxOut] -> [Integer]
+-- PLU-STAN-25 (should trigger): a length check exists, but on an unrelated list.
+-- The zipped lists are still unguarded.
+plutStan25ZipWithUnrelatedLengthCheck xs ys outs =
+  if length outs == 1
+    then map (\(a, b) -> a + b) (zip xs ys)
+    else []
+
+-- Fixture for the definition-scope heuristic: counter-evidence in a where clause
+
+plutStan24ScriptInputsRedeemerInWhereShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-24 (should NOT trigger): the redeemer check lives in a where-bound
+-- helper, which the layout-based definition scope still covers.
+plutStan24ScriptInputsRedeemerInWhereShouldPass ctx =
+  scriptInputCount == 2 && opIsSettle
+  where
+    info = scriptContextTxInfo ctx
+    scriptInputCount =
+      length
+        (filter
+          (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+                   ScriptCredential _ -> True
+                   _ -> False)
+          (txInfoInputs info))
+    opIsSettle = BI.unsafeDataAsI (getRedeemer (scriptContextRedeemer ctx)) == 1
