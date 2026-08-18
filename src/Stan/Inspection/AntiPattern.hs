@@ -70,6 +70,7 @@ module Stan.Inspection.AntiPattern
     , plustan20
     , plustan21
     , plustan22
+    , plustan23
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -139,6 +140,7 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan20
     , plustan21
     , plustan22
+    , plustan23
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -881,3 +883,14 @@ plustan22 = mkAntiPatternInspection (Id "PLU-STAN-22") "Empty string used to det
         , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Value"
         , nameMetaPackage    = "plutus-ledger-api"
         }
+
+plustan23 :: Inspection
+plustan23 = mkAntiPatternInspection (Id "PLU-STAN-23") "Credential hardcoded as a top-level constant"
+    HardcodedCredentialConstant
+    & descriptionL .~ "A PubKeyHash, ScriptHash, Credential, StakingCredential or Address is bound as a top-level constant, so the authority it encodes is fixed for the lifetime of the script and cannot be rotated without redeploying."
+    & solutionL .~
+        [ "Carry the credential in the datum so it can be rotated by a governance action"
+        , "If the credential genuinely must be immutable, document why and suppress the warning"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning

@@ -1458,3 +1458,19 @@ plutStan22AdaHelpersShouldPass :: Value.TokenName -> Value.CurrencySymbol -> Boo
 -- PLU-STAN-22 (should NOT trigger): the dedicated ADA helpers are used.
 plutStan22AdaHelpersShouldPass tn cs =
   tn == Value.adaToken && cs == Value.adaSymbol
+
+-- Fixtures for PLU-STAN-23 (hardcoded credential constants)
+
+plutStan23AdminKey :: PubKeyHash
+-- PLU-STAN-23 (should trigger): the admin credential is baked into the script,
+-- so rotating a compromised key means redeploying and re-locking every UTxO.
+plutStan23AdminKey = PubKeyHash (BI.stringToBuiltinByteStringHex "deadbeef")
+
+plutStan23OwnerAddress :: Address
+-- PLU-STAN-23 (should trigger): a hardcoded payout destination.
+plutStan23OwnerAddress = Address (PubKeyCredential plutStan23AdminKey) Nothing
+
+plutStan23SignerFromDatumShouldPass :: PubKeyHash -> PubKeyHash -> Bool
+-- PLU-STAN-23 (should NOT trigger): the credential arrives as a parameter (from
+-- the datum), so a *function* type mentioning a credential must not match.
+plutStan23SignerFromDatumShouldPass admin signer = admin == signer

@@ -144,6 +144,8 @@ data InspectionAnalysis
     | MissingTxOutAddressCheck
     -- | 'unstableMakeIsData' used instead of 'makeIsDataIndexed'.
     | UnstableMakeIsDataUsage
+    -- | Credential hardcoded as a top-level constant.
+    | HardcodedCredentialConstant
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

@@ -22,6 +22,7 @@ module Test.Stan.Analysis.PlutusTx (
   plustan20Spec,
   plustan21Spec,
   plustan22Spec,
+  plustan23Spec,
 ) where
 
 import Test.Hspec (Spec, describe, it)
@@ -55,6 +56,7 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   plustan20Spec analysis
   plustan21Spec analysis
   plustan22Spec analysis
+  plustan23Spec analysis
 
 plustan01Spec :: Analysis -> Spec
 plustan01Spec analysis = describe "PLU-STAN-01" $ do
@@ -606,3 +608,19 @@ plustan22Spec analysis = describe "PLU-STAN-22" $ do
 
   it "does not flag the dedicated adaToken/adaSymbol helpers" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan22 1460
+
+plustan23Spec :: Analysis -> Spec
+plustan23Spec analysis = describe "PLU-STAN-23" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags a hardcoded PubKeyHash constant" $
+    checkObservation AntiPattern.plustan23 1467 1 19
+
+  it "flags a hardcoded Address constant" $
+    checkObservation AntiPattern.plustan23 1471 1 23
+
+  it "does not flag a function that merely takes a credential" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan23 1476
+
+  it "does not flag a credential bound locally in a where clause" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan23 94

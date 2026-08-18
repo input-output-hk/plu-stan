@@ -590,4 +590,29 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
+    , ( Id "PLU-STAN-23"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "A credential compiled into the script is a key you can never rotate. If the"
+              , "hardcoded admin key is lost, every UTxO guarded by it is frozen; if it is"
+              , "compromised, the attacker keeps that authority until you deploy a new script"
+              , "*and* migrate every locked UTxO to it -- a script's address is derived from"
+              , "its hash, so changing the constant changes the address. Carrying the"
+              , "credential in the datum instead lets a governance action replace it in one"
+              , "transaction, with no redeploy and no migration."
+              ]
+          , docsBadExample = unlines
+              [ "-- baked in: rotating this key means a new script and a full migration"
+              , "adminKey :: PubKeyHash"
+              , "adminKey = PubKeyHash \"a1b2c3...\""
+              ]
+          , docsGoodExample = unlines
+              [ "-- the authority lives in the datum and can be rotated in place"
+              , "data VaultDatum = VaultDatum { vaultAdmin :: PubKeyHash }"
+              , ""
+              , "signedByAdmin d info = vaultAdmin d `elem` txInfoSignatories info"
+              ]
+          , docsAnchor = ""
+          }
+      )
     ]
