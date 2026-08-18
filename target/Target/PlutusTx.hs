@@ -1443,3 +1443,18 @@ data PlutStan21Datum = PlutStan21Datum
 -- PLU-STAN-21 (should trigger): constructor indices are assigned positionally,
 -- so adding or reordering a constructor silently changes the on-chain encoding.
 Tx.unstableMakeIsData ''PlutStan21Datum
+
+-- Fixtures for PLU-STAN-22 (empty string used to detect ADA)
+
+plutStan22EmptyTokenNameLiteral :: Value.TokenName -> Bool
+-- PLU-STAN-22 (should trigger): an empty-string literal stands in for adaToken.
+plutStan22EmptyTokenNameLiteral tn = tn == Value.tokenName ""
+
+plutStan22EmptyCurrencySymbolLiteral :: Value.CurrencySymbol -> Bool
+-- PLU-STAN-22 (should trigger): an empty-string literal stands in for adaSymbol.
+plutStan22EmptyCurrencySymbolLiteral cs = cs == Value.currencySymbol ""
+
+plutStan22AdaHelpersShouldPass :: Value.TokenName -> Value.CurrencySymbol -> Bool
+-- PLU-STAN-22 (should NOT trigger): the dedicated ADA helpers are used.
+plutStan22AdaHelpersShouldPass tn cs =
+  tn == Value.adaToken && cs == Value.adaSymbol

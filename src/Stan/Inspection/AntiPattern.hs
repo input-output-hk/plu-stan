@@ -69,6 +69,7 @@ module Stan.Inspection.AntiPattern
     , plustan19
     , plustan20
     , plustan21
+    , plustan22
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -137,6 +138,7 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan19
     , plustan20
     , plustan21
+    , plustan22
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -852,3 +854,30 @@ plustan21 = mkAntiPatternInspection (Id "PLU-STAN-21") "unstableMakeIsData assig
         ]
     & withPlutusCategory
     & severityL .~ Warning
+
+plustan22 :: Inspection
+plustan22 = mkAntiPatternInspection (Id "PLU-STAN-22") "Empty string used to detect ADA"
+    (FindAst emptyAdaPat)
+    & descriptionL .~ "An empty string literal is used to build a TokenName or CurrencySymbol, standing in for ADA instead of the dedicated 'adaToken' / 'adaSymbol' helpers."
+    & solutionL .~
+        [ "Use 'adaSymbol' and 'adaToken' from PlutusLedgerApi.V1.Value"
+        , "Reserve string literals for genuinely user-defined asset names"
+        ]
+    & withPlutusCategory
+    & severityL .~ Style
+  where
+    emptyAdaPat :: PatternAst
+    emptyAdaPat = app
+        (anyNamesToPatternAst $ tokenNameMeta :| [currencySymbolMeta])
+        (PatternAstConstant (ExactStr "\"\""))
+
+    tokenNameMeta, currencySymbolMeta :: NameMeta
+    tokenNameMeta = ledgerValueName "tokenName"
+    currencySymbolMeta = ledgerValueName "currencySymbol"
+
+    ledgerValueName :: Text -> NameMeta
+    ledgerValueName name = NameMeta
+        { nameMetaName       = name
+        , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Value"
+        , nameMetaPackage    = "plutus-ledger-api"
+        }

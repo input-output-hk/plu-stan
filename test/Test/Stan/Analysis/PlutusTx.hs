@@ -21,6 +21,7 @@ module Test.Stan.Analysis.PlutusTx (
   plustan19Spec,
   plustan20Spec,
   plustan21Spec,
+  plustan22Spec,
 ) where
 
 import Test.Hspec (Spec, describe, it)
@@ -53,6 +54,7 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   plustan19Spec analysis
   plustan20Spec analysis
   plustan21Spec analysis
+  plustan22Spec analysis
 
 plustan01Spec :: Analysis -> Spec
 plustan01Spec analysis = describe "PLU-STAN-01" $ do
@@ -591,3 +593,16 @@ plustan21Spec analysis = describe "PLU-STAN-21" $ do
 
   it "does not flag makeIsDataIndexed, which pins constructor indices" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan21 250
+
+plustan22Spec :: Analysis -> Spec
+plustan22Spec analysis = describe "PLU-STAN-22" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags an empty-string TokenName standing in for adaToken" $
+    checkObservation AntiPattern.plustan22 1451 44 62
+
+  it "flags an empty-string CurrencySymbol standing in for adaSymbol" $
+    checkObservation AntiPattern.plustan22 1455 49 72
+
+  it "does not flag the dedicated adaToken/adaSymbol helpers" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan22 1460

@@ -568,4 +568,26 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
+    , ( Id "PLU-STAN-22"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "ADA is the asset whose currency symbol and token name are both the empty"
+              , "bytestring, so `tokenName \"\"` does technically denote it. But written that"
+              , "way the intent is invisible: a reader cannot tell whether the empty string"
+              , "means \"ADA\", \"unset\", or \"a token whose name I forgot to fill in\", and the"
+              , "same literal is easy to copy into a position where it silently matches the"
+              , "wrong asset. 'adaSymbol' and 'adaToken' say exactly what is meant and cannot"
+              , "be confused with an unfilled placeholder."
+              ]
+          , docsBadExample = unlines
+              [ "-- is this ADA, or an unset field? the literal does not say"
+              , "isAda cs tn = cs == currencySymbol \"\" && tn == tokenName \"\""
+              ]
+          , docsGoodExample = unlines
+              [ "-- the intent is explicit"
+              , "isAda cs tn = cs == adaSymbol && tn == adaToken"
+              ]
+          , docsAnchor = ""
+          }
+      )
     ]
