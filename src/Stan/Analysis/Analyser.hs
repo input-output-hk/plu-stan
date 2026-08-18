@@ -7539,7 +7539,6 @@ analyseMissingBurningLogic insId hie = go
         _ -> (node, [])
 
 -- | Returns source spans of matched AST nodes.
--- | Returns source spans of matched AST nodes.
 createMatch
     :: PatternAst
     -> HieFile
