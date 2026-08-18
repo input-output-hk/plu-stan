@@ -517,4 +517,55 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
+    , ( Id "PLU-STAN-20"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "Validating what an output *contains* while never checking where it *goes*"
+              , "is a payment-redirection bug. If the validator pins down the value, datum"
+              , "and reference script of a continuing output but leaves its address"
+              , "unconstrained, the transaction builder simply points that output at their"
+              , "own wallet: every field-level assertion still passes and the funds leave"
+              , "the contract. The address is what makes the other checks meaningful, so"
+              , "assert the payment credential -- and the staking credential with it."
+              ]
+          , docsBadExample = unlines
+              [ "okOutput out ="
+              , "  txOutValue out == expectedValue"
+              , "    && txOutDatum out == OutputDatum (Datum (toBuiltinData newState))"
+              , "    -- address unconstrained: the output can be paid anywhere"
+              ]
+          , docsGoodExample = unlines
+              [ "okOutput out ="
+              , "  txOutAddress out == vaultAddr"
+              , "    && txOutValue out == expectedValue"
+              , "    && txOutDatum out == OutputDatum (Datum (toBuiltinData newState))"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-21"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "'unstableMakeIsData' numbers your constructors by the order they happen to"
+              , "appear in the source. Add a constructor, or move one, and every index after"
+              , "it shifts -- so a datum written by the old script decodes as a *different*"
+              , "constructor under the new one. Funds already locked at the old encoding"
+              , "become unspendable, or worse, spendable under the wrong branch. The"
+              , "encoding is a permanent on-chain contract, so pin it explicitly and never"
+              , "renumber an index that has already shipped."
+              ]
+          , docsBadExample = unlines
+              [ "-- indices are positional: inserting a constructor silently renumbers them"
+              , "PlutusTx.unstableMakeIsData ''MyDatum"
+              ]
+          , docsGoodExample = unlines
+              [ "-- indices are pinned and stay valid as the type grows"
+              , "PlutusTx.makeIsDataIndexed ''MyDatum"
+              , "  [ ('Borrow', 0)"
+              , "  , ('Repay',  1)"
+              , "  ]"
+              ]
+          , docsAnchor = ""
+          }
+      )
     ]

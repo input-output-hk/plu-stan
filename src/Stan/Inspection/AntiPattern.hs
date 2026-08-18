@@ -67,6 +67,8 @@ module Stan.Inspection.AntiPattern
     , plustan17
     , plustan18
     , plustan19
+    , plustan20
+    , plustan21
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -133,6 +135,8 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan17
     , plustan18
     , plustan19
+    , plustan20
+    , plustan21
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -823,6 +827,28 @@ plustan19 = mkAntiPatternInspection (Id "PLU-STAN-19") "TxOut validation misses 
     & solutionL .~
         [ "Validate datum shape and critical datum fields for security-sensitive outputs"
         , "If datum is intentionally unconstrained, document this and suppress the warning"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan20 :: Inspection
+plustan20 = mkAntiPatternInspection (Id "PLU-STAN-20") "TxOut validation misses address checks"
+    MissingTxOutAddressCheck
+    & descriptionL .~ "Validation logic over TxOut/TxOutAsData checks multiple output fields but never constrains the output address, so the validated output can be paid to an arbitrary destination."
+    & solutionL .~
+        [ "Assert the destination address (payment and staking credentials) of the validated output"
+        , "If the destination is intentionally unconstrained, document this and suppress the warning"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan21 :: Inspection
+plustan21 = mkAntiPatternInspection (Id "PLU-STAN-21") "unstableMakeIsData assigns unstable constructor indices"
+    UnstableMakeIsDataUsage
+    & descriptionL .~ "'unstableMakeIsData' derives constructor indices positionally, so adding or reordering a constructor silently changes the on-chain data encoding and breaks every UTxO already locked under the old layout."
+    & solutionL .~
+        [ "Use 'makeIsDataIndexed' and pin each constructor to an explicit index"
+        , "Never renumber an index that has already been used on chain"
         ]
     & withPlutusCategory
     & severityL .~ Warning

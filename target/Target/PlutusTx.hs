@@ -1405,3 +1405,41 @@ plutStan14RecordDestructureAddressEqShouldPass out ownAddress =
            OutputDatum _ -> True
            _ -> False
       && referenceScript == Nothing
+
+-- Fixtures for PLU-STAN-20 (TxOut validation misses address checks)
+
+plutStan20MissingAddressCheck :: TxOut -> Bool
+-- PLU-STAN-20 (should trigger): validates staking, value, datum and reference
+-- script but never constrains the output address, so the validated output can
+-- be paid anywhere.
+plutStan20MissingAddressCheck out =
+  hasStakingCredential out
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript out
+
+plutStan20AddressCheckedShouldPass :: TxOut -> Bool
+-- PLU-STAN-20 (should NOT trigger): the address is constrained alongside the
+-- other fields.
+plutStan20AddressCheckedShouldPass out =
+  hasOutputAddress out
+    && hasOutputValue out
+    && hasOutputDatum out
+    && hasReferenceScript out
+
+plutStan20TwoFieldsOnlyShouldPass :: TxOut -> Bool
+-- PLU-STAN-20 (should NOT trigger): fewer than three fields are validated, so
+-- this is not recognisable output validation.
+plutStan20TwoFieldsOnlyShouldPass out =
+  hasOutputValue out
+    && hasOutputDatum out
+
+-- Fixtures for PLU-STAN-21 (unstableMakeIsData)
+
+data PlutStan21Datum = PlutStan21Datum
+  { plutStan21Amount :: Integer
+  }
+
+-- PLU-STAN-21 (should trigger): constructor indices are assigned positionally,
+-- so adding or reordering a constructor silently changes the on-chain encoding.
+Tx.unstableMakeIsData ''PlutStan21Datum

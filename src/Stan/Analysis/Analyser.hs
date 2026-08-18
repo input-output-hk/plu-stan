@@ -21,7 +21,8 @@ import Stan.Core.Id (Id)
 import Stan.Core.List (nonRepeatingPairs)
 import Stan.Core.ModuleName (ModuleName (..))
 import Stan.FileInfo (isExtensionDisabled)
-import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, nameOccName, occNameString, srcSpanEndCol,
+import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, mkFastString, mkRealSrcLoc, mkRealSrcSpan,
+                        nameOccName, occNameString, srcSpanEndCol,
                         srcSpanEndLine, srcSpanStartCol, srcSpanStartLine, isExternalName,
                         IfaceTyCon (..))
 import Stan.Hie (eqAst, slice)
@@ -89,6 +90,8 @@ createVisitor hie exts inspections = Visitor $ \node ->
         MissingTxOutStakingCredentialCheck -> analyseMissingTxOutStakingCredentialCheck inspectionId hie node
         MissingTxOutValueCheck -> analyseMissingTxOutValueCheck inspectionId hie node
         MissingTxOutDatumCheck -> analyseMissingTxOutDatumCheck inspectionId hie node
+        MissingTxOutAddressCheck -> analyseMissingTxOutAddressCheck inspectionId hie node
+        UnstableMakeIsDataUsage -> analyseUnstableMakeIsDataUsage inspectionId hie node
 
 {- | Check for big tuples (size >= 4) in the following places:
 
@@ -2820,12 +2823,14 @@ data MissingTxOutField
     | MissingStakingCredential
     | MissingValue
     | MissingDatum
+    | MissingAddress
 
 instance Eq MissingTxOutField where
     MissingReferenceScript == MissingReferenceScript = True
     MissingStakingCredential == MissingStakingCredential = True
     MissingValue == MissingValue = True
     MissingDatum == MissingDatum = True
+    MissingAddress == MissingAddress = True
     _ == _ = False
 
 data TxOutFieldUsage = TxOutFieldUsage
@@ -2835,6 +2840,71 @@ data TxOutFieldUsage = TxOutFieldUsage
     , txOutFieldDatumChecked :: !Bool
     , txOutFieldReferenceChecked :: !Bool
     }
+
+analyseMissingTxOutAddressCheck
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseMissingTxOutAddressCheck =
+    analyseMissingTxOutFieldCheck MissingAddress
+
+{- | PLU-STAN-21: flag 'unstableMakeIsData', which assigns constructor indices
+positionally.
+
+This one cannot use a 'NameMeta' / 'FindAst' pattern the way PLU-STAN-02 does.
+'unstableMakeIsData' is a Template Haskell /declaration splice/: by the time the
+@.hie@ file is written the splice has been expanded, and the file references
+@PlutusTx.IsData.Class@ (from the generated instances) but never
+@PlutusTx.IsData.TH@, so there is no resolved name occurrence to match on.
+
+So we read the module source instead -- the same technique PLU-STAN-17 uses to
+find its suppression marker. The scan is anchored to the current node's start
+line, which keeps it O(1) per visited node rather than rescanning the file;
+repeated emissions for several nodes on the same line are collapsed by
+'dedupObservations'. See NOTE [Observation dedup backstop].
+-}
+analyseUnstableMakeIsDataUsage
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseUnstableMakeIsDataUsage insId hie curNode =
+    addObservations $ mkObservation insId hie <$> S.slist spans
+  where
+    needle :: ByteString
+    needle = "unstableMakeIsData"
+
+    curLine :: Int
+    curLine = srcSpanStartLine (nodeSpan curNode)
+
+    spans :: [RealSrcSpan]
+    spans =
+        [ mkSpan curLine col
+        | Just line <- [BS8.lines (hie_hs_src hie) !!? (curLine - 1)]
+        , col <- occurrenceCols line
+        ]
+
+    -- 1-based columns at which `needle` occurs in the line.
+    occurrenceCols :: ByteString -> [Int]
+    occurrenceCols = go 0
+      where
+        go :: Int -> ByteString -> [Int]
+        go offset bs =
+            let (before, after) = BS8.breakSubstring needle bs
+            in if BS8.null after
+                then []
+                else
+                    let idx = offset + BS8.length before
+                    in (idx + 1)
+                        : go (idx + BS8.length needle) (BS8.drop (BS8.length needle) after)
+
+    mkSpan :: Int -> Int -> RealSrcSpan
+    mkSpan lineNo col = mkRealSrcSpan
+        (mkRealSrcLoc filePath lineNo col)
+        (mkRealSrcLoc filePath lineNo (col + BS8.length needle))
+      where
+        filePath = mkFastString (hie_hs_file hie)
 
 analyseMissingTxOutReferenceScriptCheck
     :: Id Inspection
@@ -3627,6 +3697,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
         TxOutFieldUsage{txOutFieldStakingChecked = False} | missing == MissingStakingCredential -> True
         TxOutFieldUsage{txOutFieldValueChecked = False} | missing == MissingValue -> True
         TxOutFieldUsage{txOutFieldDatumChecked = False} | missing == MissingDatum -> True
+        TxOutFieldUsage{txOutFieldAddressChecked = False} | missing == MissingAddress -> True
         _ -> False
 
     hasTxOutEvidence :: HieAST TypeIndex -> Bool

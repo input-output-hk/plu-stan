@@ -140,6 +140,10 @@ data InspectionAnalysis
     | MissingTxOutValueCheck
     -- | TxOut validation misses datum checks.
     | MissingTxOutDatumCheck
+    -- | TxOut validation misses address checks.
+    | MissingTxOutAddressCheck
+    -- | 'unstableMakeIsData' used instead of 'makeIsDataIndexed'.
+    | UnstableMakeIsDataUsage
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

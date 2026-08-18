@@ -19,6 +19,8 @@ module Test.Stan.Analysis.PlutusTx (
   plustan17Spec,
   plustan18Spec,
   plustan19Spec,
+  plustan20Spec,
+  plustan21Spec,
 ) where
 
 import Test.Hspec (Spec, describe, it)
@@ -49,6 +51,8 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   plustan17Spec analysis
   plustan18Spec analysis
   plustan19Spec analysis
+  plustan20Spec analysis
+  plustan21Spec analysis
 
 plustan01Spec :: Analysis -> Spec
 plustan01Spec analysis = describe "PLU-STAN-01" $ do
@@ -564,3 +568,26 @@ plustan19Spec analysis = describe "PLU-STAN-19" $ do
 
   it "does not flag when all TxOut fields are checked" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan19 1010
+
+plustan20Spec :: Analysis -> Spec
+plustan20Spec analysis = describe "PLU-STAN-20" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags output validation that omits address checks" $
+    checkObservation AntiPattern.plustan20 1416 3 23
+
+  it "does not flag when the output address is checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1425
+
+  it "does not flag when only two output fields are checked" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan20 1434
+
+plustan21Spec :: Analysis -> Spec
+plustan21Spec analysis = describe "PLU-STAN-21" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+
+  it "flags unstableMakeIsData splices" $
+    checkObservation AntiPattern.plustan21 1445 4 22
+
+  it "does not flag makeIsDataIndexed, which pins constructor indices" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan21 250
