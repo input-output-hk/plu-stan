@@ -187,12 +187,71 @@ def main():
         w.writeheader()
         w.writerows(rows)
 
+    render_readme(rows, insp)
+
     from collections import Counter
     counts = Counter(r["coverage"] for r in rows)
     covered = sum(1 for r in rows if r["rule_name"] and r["coverage"] != "none")
     print(f"wrote {out.relative_to(ROOT)}: {len(rows)} rows")
     print(f"rules covered: {covered}/{len(MAPPING)}")
     print("  " + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+
+
+BEGIN = "<!-- BEGIN TRACEABILITY -->"
+END = "<!-- END TRACEABILITY -->"
+
+# Order the matrix by how much of the rule is actually covered.
+TIER_ORDER = {"direct": 0, "narrower": 1, "adjacent": 2, "none": 3}
+
+
+def render_readme(rows, insp):
+    """Write the matrix into README.md between the markers, and refuse to
+    finish if the README's own inspection table has drifted from the code."""
+    readme_path = ROOT / "README.md"
+    readme = readme_path.read_text()
+
+    rule_rows = [r for r in rows if r["rule_name"]]
+    rule_rows.sort(key=lambda r: (TIER_ORDER[r["coverage"]], r["rule_name"]))
+
+    lines = [
+        BEGIN,
+        "",
+        "| Research rule | Category | Coverage | Inspection(s) |",
+        "|---|---|---|---|",
+    ]
+    for r in rule_rows:
+        link = f'[{r["rule_name"]}]({r["rule_source"]})'
+        cats = r["rule_categories"].replace(";", ", ").title().replace("Code-Quality", "Code quality")
+        ids = ", ".join(f"`{i}`" for i in r["inspection_ids"].split(";") if i) or "—"
+        lines.append(f'| {link} | {cats} | **{r["coverage"]}** | {ids} |')
+
+    tool_only = [r for r in rows if r["coverage"] == "tool-only"]
+    if tool_only:
+        ids = ", ".join(f'`{r["inspection_ids"]}`' for r in tool_only)
+        lines += [
+            "",
+            f"{len(tool_only)} inspections have no counterpart in the research rule set "
+            f"(mostly UPLC efficiency, where the research rules skew towards security): {ids}.",
+        ]
+    lines += ["", END]
+
+    start, end = readme.index(BEGIN), readme.index(END) + len(END)
+    readme_path.write_text(readme[:start] + "\n".join(lines) + readme[end:])
+    print(f"wrote README.md matrix: {len(rule_rows)} rules, {len(tool_only)} tool-only")
+
+    # Drift guard: every registered inspection must have a row in the README's
+    # hand-maintained Rules table. Checked with the table's row pattern
+    # ("| PLU-STAN-NN |") rather than a bare substring search -- the ids also
+    # appear inside the matrix rendered just above, which would make a plain
+    # "is it mentioned anywhere" check satisfy itself.
+    table = readme_path.read_text().split(BEGIN)[0]
+    missing = sorted(pid for pid in insp if f"| {pid} |" not in table)
+    if missing:
+        sys.exit(
+            "README.md's Rules table is missing rows for: "
+            + ", ".join(missing)
+            + "\nAdd them by hand -- the descriptions there are prose, not generated."
+        )
 
 
 if __name__ == "__main__":
