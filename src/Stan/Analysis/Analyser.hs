@@ -68,7 +68,12 @@ createVisitor
     -> ExtensionsResult
     -> [Inspection]
     -> Visitor
-createVisitor hie exts inspections = Visitor $ \node ->
+createVisitor hie exts inspections =
+    -- Bound outside the per-node lambda so it is computed at most once per
+    -- file, and lazily: a module with no ImmutableCredential inspection
+    -- enabled never forces it. See 'immutableCredentialSpans'.
+    let credentialSpans = immutableCredentialSpans hie
+    in Visitor $ \node ->
     forM_ inspections $ \Inspection{..} -> case inspectionAnalysis of
         FindAst patAst -> matchAst inspectionId patAst hie node
         Infix -> analyseInfix hie node
@@ -86,7 +91,7 @@ createVisitor hie exts inspections = Visitor $ \node ->
         PrecisionLossDivisionBeforeMultiply -> analysePrecisionLossDivisionBeforeMultiply inspectionId hie node
         RedeemerSuppliedIndicesUniqueness -> analyseRedeemerSuppliedIndicesUniqueness inspectionId hie node
         LazyAndInOnChainCode -> analyseLazyAndInOnChainCode inspectionId hie node
-        ImmutableCredential -> analyseImmutableCredential inspectionId hie node
+        ImmutableCredential -> analyseImmutableCredential credentialSpans inspectionId hie node
         MissingTxOutReferenceScriptCheck -> analyseMissingTxOutReferenceScriptCheck inspectionId hie node
         MissingTxOutStakingCredentialCheck -> analyseMissingTxOutStakingCredentialCheck inspectionId hie node
         MissingTxOutValueCheck -> analyseMissingTxOutValueCheck inspectionId hie node
@@ -1514,13 +1519,26 @@ analysePrecisionLossDivisionBeforeMultiply insId hie curNode =
     isIdentChar :: Char -> Bool
     isIdentChar c = isAlphaNum c || c == '_' || c == '\''
 
-analyseImmutableCredential
-    :: Id Inspection
-    -> HieFile
-    -> HieAST TypeIndex
-    -> State VisitorState ()
-analyseImmutableCredential insId hie curNode =
-    addObservations $ mkObservation insId hie <$> matchNode curNode
+{- | File-level state for PLU-STAN-21: the spans of every credential-like
+binding a validator can reach, plus every site that bakes one into compiled
+code.
+
+Computed once per 'HieFile' rather than per node. It depends only on @hie@ --
+it walks the whole forest and iterates several fixpoints -- while the per-node
+step is just a set-membership test. The visitor calls the analyser for every
+node in the module, so while this lived in the analyser's @where@ block it was
+rebuilt on each visit. 'createVisitor' now binds it once per file, and lazily,
+so a module that never reaches this inspection pays nothing.
+
+On measured cost: the per-node version was not in fact slow at the scales
+tried -- about 100ms across 60 modules / 15k LOC, under 1% of the run. This is
+a structural fix rather than a demonstrated speed-up; it is cheap insurance for
+modules much larger than anything in this repo, not a fix for an observed
+problem.
+-}
+immutableCredentialSpans :: HieFile -> Set RealSrcSpan
+immutableCredentialSpans hie =
+    topLevelReachableCredentialSpans <> appliedCredentialSpans
   where
     allHieAsts :: [HieAST TypeIndex]
     allHieAsts = Map.elems $ getAsts $ hie_asts hie
@@ -1628,13 +1646,6 @@ analyseImmutableCredential insId hie curNode =
             , Set.member name credentialLikeBindings
             , Set.member name validatorReachableCredentialBindings
             ]
-
-    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
-    matchNode node
-        | nodeSpan node `Set.member` topLevelReachableCredentialSpans
-            || nodeSpan node `Set.member` appliedCredentialSpans =
-            S.one $ nodeSpan node
-        | otherwise = mempty
 
     collectAppliedCredentialSites :: HieAST TypeIndex -> [(RealSrcSpan, Set Name)]
     collectAppliedCredentialSites node =
@@ -2100,6 +2111,22 @@ analyseUnsafeFromBuiltinDataInHashComparison
     -> HieFile
     -> HieAST TypeIndex
     -> State VisitorState ()
+
+-- | PLU-STAN-21: report any node whose span is a known baked-in credential
+-- site. All the work lives in 'immutableCredentialSpans'.
+analyseImmutableCredential
+    :: Set RealSrcSpan
+    -> Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseImmutableCredential credentialSpans insId hie curNode =
+    addObservations $ mkObservation insId hie <$> matchNode curNode
+  where
+    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchNode node
+        | nodeSpan node `Set.member` credentialSpans = S.one $ nodeSpan node
+        | otherwise = mempty
 analyseUnsafeFromBuiltinDataInHashComparison insId hie curNode =
     addObservations $ mkObservation insId hie <$> matchNode curNode
   where
