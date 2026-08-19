@@ -1406,82 +1406,66 @@ plutStan14RecordDestructureAddressEqShouldPass out ownAddress =
            _ -> False
       && referenceScript == Nothing
 
--- Fixtures for PLU-STAN-20 (TxOut validation misses address checks)
+-- Fixtures for PLU-STAN-22 (TxOut validation misses address checks)
 
-plutStan20MissingAddressCheck :: TxOut -> Bool
--- PLU-STAN-20 (should trigger): validates staking, value, datum and reference
+plutStan22MissingAddressCheck :: TxOut -> Bool
+-- PLU-STAN-22 (should trigger): validates staking, value, datum and reference
 -- script but never constrains the output address, so the validated output can
 -- be paid anywhere.
-plutStan20MissingAddressCheck out =
+plutStan22MissingAddressCheck out =
   hasStakingCredential out
     && hasOutputValue out
     && hasOutputDatum out
     && hasReferenceScript out
 
-plutStan20AddressCheckedShouldPass :: TxOut -> Bool
--- PLU-STAN-20 (should NOT trigger): the address is constrained alongside the
+plutStan22AddressCheckedShouldPass :: TxOut -> Bool
+-- PLU-STAN-22 (should NOT trigger): the address is constrained alongside the
 -- other fields.
-plutStan20AddressCheckedShouldPass out =
+plutStan22AddressCheckedShouldPass out =
   hasOutputAddress out
     && hasOutputValue out
     && hasOutputDatum out
     && hasReferenceScript out
 
-plutStan20TwoFieldsOnlyShouldPass :: TxOut -> Bool
--- PLU-STAN-20 (should NOT trigger): fewer than three fields are validated, so
+plutStan22TwoFieldsOnlyShouldPass :: TxOut -> Bool
+-- PLU-STAN-22 (should NOT trigger): fewer than three fields are validated, so
 -- this is not recognisable output validation.
-plutStan20TwoFieldsOnlyShouldPass out =
+plutStan22TwoFieldsOnlyShouldPass out =
   hasOutputValue out
     && hasOutputDatum out
 
--- Fixtures for PLU-STAN-21 (unstableMakeIsData)
+-- Fixtures for PLU-STAN-23 (unstableMakeIsData)
 
 data PlutStan21Datum = PlutStan21Datum
-  { plutStan21Amount :: Integer
+  { plutStan23Amount :: Integer
   }
 
--- PLU-STAN-21 (should trigger): constructor indices are assigned positionally,
+-- PLU-STAN-23 (should trigger): constructor indices are assigned positionally,
 -- so adding or reordering a constructor silently changes the on-chain encoding.
 Tx.unstableMakeIsData ''PlutStan21Datum
 
--- Fixtures for PLU-STAN-22 (empty string used to detect ADA)
+-- Fixtures for PLU-STAN-24 (empty string used to detect ADA)
 
-plutStan22EmptyTokenNameLiteral :: Value.TokenName -> Bool
--- PLU-STAN-22 (should trigger): an empty-string literal stands in for adaToken.
-plutStan22EmptyTokenNameLiteral tn = tn == Value.tokenName ""
+plutStan24EmptyTokenNameLiteral :: Value.TokenName -> Bool
+-- PLU-STAN-24 (should trigger): an empty-string literal stands in for adaToken.
+plutStan24EmptyTokenNameLiteral tn = tn == Value.tokenName ""
 
-plutStan22EmptyCurrencySymbolLiteral :: Value.CurrencySymbol -> Bool
--- PLU-STAN-22 (should trigger): an empty-string literal stands in for adaSymbol.
-plutStan22EmptyCurrencySymbolLiteral cs = cs == Value.currencySymbol ""
+plutStan24EmptyCurrencySymbolLiteral :: Value.CurrencySymbol -> Bool
+-- PLU-STAN-24 (should trigger): an empty-string literal stands in for adaSymbol.
+plutStan24EmptyCurrencySymbolLiteral cs = cs == Value.currencySymbol ""
 
-plutStan22AdaHelpersShouldPass :: Value.TokenName -> Value.CurrencySymbol -> Bool
--- PLU-STAN-22 (should NOT trigger): the dedicated ADA helpers are used.
-plutStan22AdaHelpersShouldPass tn cs =
+plutStan24AdaHelpersShouldPass :: Value.TokenName -> Value.CurrencySymbol -> Bool
+-- PLU-STAN-24 (should NOT trigger): the dedicated ADA helpers are used.
+plutStan24AdaHelpersShouldPass tn cs =
   tn == Value.adaToken && cs == Value.adaSymbol
 
--- Fixtures for PLU-STAN-23 (hardcoded credential constants)
+-- Fixtures for PLU-STAN-25 (script-input dependency without redeemer checks)
 
-plutStan23AdminKey :: PubKeyHash
--- PLU-STAN-23 (should trigger): the admin credential is baked into the script,
--- so rotating a compromised key means redeploying and re-locking every UTxO.
-plutStan23AdminKey = PubKeyHash (BI.stringToBuiltinByteStringHex "deadbeef")
-
-plutStan23OwnerAddress :: Address
--- PLU-STAN-23 (should trigger): a hardcoded payout destination.
-plutStan23OwnerAddress = Address (PubKeyCredential plutStan23AdminKey) Nothing
-
-plutStan23SignerFromDatumShouldPass :: PubKeyHash -> PubKeyHash -> Bool
--- PLU-STAN-23 (should NOT trigger): the credential arrives as a parameter (from
--- the datum), so a *function* type mentioning a credential must not match.
-plutStan23SignerFromDatumShouldPass admin signer = admin == signer
-
--- Fixtures for PLU-STAN-24 (script-input dependency without redeemer checks)
-
-plutStan24ScriptInputsNoRedeemer :: ScriptContext -> Bool
--- PLU-STAN-24 (should trigger): validation depends on the *other* script inputs
+plutStan25ScriptInputsNoRedeemer :: ScriptContext -> Bool
+-- PLU-STAN-25 (should trigger): validation depends on the *other* script inputs
 -- of the transaction but never inspects a redeemer, so it cannot tell which
 -- operation those inputs belong to.
-plutStan24ScriptInputsNoRedeemer ctx =
+plutStan25ScriptInputsNoRedeemer ctx =
   let info = scriptContextTxInfo ctx
       scriptIns =
         filter
@@ -1491,10 +1475,10 @@ plutStan24ScriptInputsNoRedeemer ctx =
           (txInfoInputs info)
   in length scriptIns == 2
 
-plutStan24ScriptInputsWithRedeemerShouldPass :: ScriptContext -> Bool
--- PLU-STAN-24 (should NOT trigger): the redeemer is inspected alongside the
+plutStan25ScriptInputsWithRedeemerShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-25 (should NOT trigger): the redeemer is inspected alongside the
 -- script-input dependency.
-plutStan24ScriptInputsWithRedeemerShouldPass ctx =
+plutStan25ScriptInputsWithRedeemerShouldPass ctx =
   let info = scriptContextTxInfo ctx
       scriptIns =
         filter
@@ -1505,69 +1489,69 @@ plutStan24ScriptInputsWithRedeemerShouldPass ctx =
       op = BI.unsafeDataAsI (getRedeemer (scriptContextRedeemer ctx))
   in length scriptIns == 2 && op == 1
 
-plutStan24OutputsOnlyShouldPass :: ScriptContext -> Bool
--- PLU-STAN-24 (should NOT trigger): no dependency on other script inputs.
-plutStan24OutputsOnlyShouldPass ctx =
+plutStan25OutputsOnlyShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-25 (should NOT trigger): no dependency on other script inputs.
+plutStan25OutputsOnlyShouldPass ctx =
   length (txInfoOutputs (scriptContextTxInfo ctx)) == 1
 
--- Fixtures for PLU-STAN-25 (zip without a length check)
+-- Fixtures for PLU-STAN-26 (zip without a length check)
 
-plutStan25ZipUnchecked :: [Integer] -> [Integer] -> [Integer]
--- PLU-STAN-25 (should trigger): zip truncates to the shorter list, so trailing
+plutStan26ZipUnchecked :: [Integer] -> [Integer] -> [Integer]
+-- PLU-STAN-26 (should trigger): zip truncates to the shorter list, so trailing
 -- elements of the longer one are never validated.
-plutStan25ZipUnchecked xs ys =
+plutStan26ZipUnchecked xs ys =
   map (\(a, b) -> a + b) (zip xs ys)
 
-plutStan25ZipCheckedShouldPass :: [Integer] -> [Integer] -> [Integer]
--- PLU-STAN-25 (should NOT trigger): the lengths are compared before zipping.
-plutStan25ZipCheckedShouldPass xs ys =
+plutStan26ZipCheckedShouldPass :: [Integer] -> [Integer] -> [Integer]
+-- PLU-STAN-26 (should NOT trigger): the lengths are compared before zipping.
+plutStan26ZipCheckedShouldPass xs ys =
   if length xs == length ys
     then map (\(a, b) -> a + b) (zip xs ys)
     else []
 
--- Fixtures for PLU-STAN-26 (spend-and-recreate instead of a reference input)
+-- Fixtures for PLU-STAN-27 (spend-and-recreate instead of a reference input)
 
-plutStan26SpendAndRecreate :: TxInInfo -> TxOut -> Bool
--- PLU-STAN-26 (should trigger): the input is spent only to be recreated
+plutStan27SpendAndRecreate :: TxInInfo -> TxOut -> Bool
+-- PLU-STAN-27 (should trigger): the input is spent only to be recreated
 -- identically, so a reference input would do the same job without the spend.
-plutStan26SpendAndRecreate i out =
+plutStan27SpendAndRecreate i out =
   txOutAddress (txInInfoResolved i) == txOutAddress out
     && txOutValue (txInInfoResolved i) == txOutValue out
     && txOutDatum (txInInfoResolved i) == txOutDatum out
     && txOutReferenceScript (txInInfoResolved i) == txOutReferenceScript out
 
-plutStan26PartialCheckShouldPass :: TxInInfo -> TxOut -> Bool
--- PLU-STAN-26 (should NOT trigger): only address and value are compared, so the
+plutStan27PartialCheckShouldPass :: TxInInfo -> TxOut -> Bool
+-- PLU-STAN-27 (should NOT trigger): only address and value are compared, so the
 -- output is not an identical recreation of the input.
-plutStan26PartialCheckShouldPass i out =
+plutStan27PartialCheckShouldPass i out =
   txOutAddress (txInInfoResolved i) == txOutAddress out
     && txOutValue (txInInfoResolved i) == txOutValue out
 
-plutStan26WithReferenceInputShouldPass :: ScriptContext -> TxInInfo -> TxOut -> Bool
--- PLU-STAN-26 (should NOT trigger): all four fields are compared, but the
+plutStan27WithReferenceInputShouldPass :: ScriptContext -> TxInInfo -> TxOut -> Bool
+-- PLU-STAN-27 (should NOT trigger): all four fields are compared, but the
 -- validator already reads reference inputs, so this is not the spend-and-recreate
 -- anti-pattern the rule targets.
-plutStan26WithReferenceInputShouldPass ctx i out =
+plutStan27WithReferenceInputShouldPass ctx i out =
   length (txInfoReferenceInputs (scriptContextTxInfo ctx)) == 1
     && txOutAddress (txInInfoResolved i) == txOutAddress out
     && txOutValue (txInInfoResolved i) == txOutValue out
     && txOutDatum (txInInfoResolved i) == txOutDatum out
     && txOutReferenceScript (txInInfoResolved i) == txOutReferenceScript out
 
-plutStan25ZipWithUnrelatedLengthCheck :: [Integer] -> [Integer] -> [TxOut] -> [Integer]
--- PLU-STAN-25 (should trigger): a length check exists, but on an unrelated list.
+plutStan26ZipWithUnrelatedLengthCheck :: [Integer] -> [Integer] -> [TxOut] -> [Integer]
+-- PLU-STAN-26 (should trigger): a length check exists, but on an unrelated list.
 -- The zipped lists are still unguarded.
-plutStan25ZipWithUnrelatedLengthCheck xs ys outs =
+plutStan26ZipWithUnrelatedLengthCheck xs ys outs =
   if length outs == 1
     then map (\(a, b) -> a + b) (zip xs ys)
     else []
 
 -- Fixture for the definition-scope heuristic: counter-evidence in a where clause
 
-plutStan24ScriptInputsRedeemerInWhereShouldPass :: ScriptContext -> Bool
--- PLU-STAN-24 (should NOT trigger): the redeemer check lives in a where-bound
+plutStan25ScriptInputsRedeemerInWhereShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-25 (should NOT trigger): the redeemer check lives in a where-bound
 -- helper, which the layout-based definition scope still covers.
-plutStan24ScriptInputsRedeemerInWhereShouldPass ctx =
+plutStan25ScriptInputsRedeemerInWhereShouldPass ctx =
   scriptInputCount == 2 && opIsSettle
   where
     info = scriptContextTxInfo ctx

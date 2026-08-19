@@ -144,8 +144,6 @@ data InspectionAnalysis
     | MissingTxOutAddressCheck
     -- | 'unstableMakeIsData' used instead of 'makeIsDataIndexed'.
     | UnstableMakeIsDataUsage
-    -- | Credential hardcoded as a top-level constant.
-    | HardcodedCredentialConstant
     -- | Validation depends on other script inputs without checking a redeemer.
     | ScriptInputDependencyWithoutRedeemer
     -- | 'zip' used without comparing the lengths of both lists.

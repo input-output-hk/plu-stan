@@ -92,7 +92,6 @@ createVisitor hie exts inspections = Visitor $ \node ->
         MissingTxOutDatumCheck -> analyseMissingTxOutDatumCheck inspectionId hie node
         MissingTxOutAddressCheck -> analyseMissingTxOutAddressCheck inspectionId hie node
         UnstableMakeIsDataUsage -> analyseUnstableMakeIsDataUsage inspectionId hie node
-        HardcodedCredentialConstant -> analyseHardcodedCredentialConstant inspectionId hie node
         ScriptInputDependencyWithoutRedeemer -> analyseScriptInputDependencyWithoutRedeemer inspectionId hie node
         ZipWithoutLengthCheck -> analyseZipWithoutLengthCheck inspectionId hie node
         SpendAndRecreateInsteadOfReferenceInput -> analyseSpendAndRecreateInsteadOfReferenceInput inspectionId hie node
@@ -2853,7 +2852,7 @@ analyseMissingTxOutAddressCheck
 analyseMissingTxOutAddressCheck =
     analyseMissingTxOutFieldCheck MissingAddress
 
-{- | PLU-STAN-25: 'zip' used without comparing the two lists' lengths.
+{- | PLU-STAN-26: 'zip' used without comparing the two lists' lengths.
 
 Deliberately not marker-based. 'zip' appears in ordinary code, so a rule that
 fired on every call and relied on a suppression comment would tax every project
@@ -2925,7 +2924,7 @@ analyseZipWithoutLengthCheck insId hie curNode =
         identTokens :: ByteString -> [ByteString]
         identTokens = filter (not . BS8.null) . BS8.splitWith (not . isIdentPartChar)
 
-{- | PLU-STAN-26: an input is spent only to be recreated identically.
+{- | PLU-STAN-27: an input is spent only to be recreated identically.
 
 Asserting that an output reproduces a spent input's address, value, datum /and/
 reference script says the UTxO was spent purely to be put back unchanged -- work
@@ -2956,8 +2955,8 @@ analyseSpendAndRecreateInsteadOfReferenceInput insId hie curNode =
         [ "txInfoReferenceInputs"
         ]
 
-{- | Shared machinery for the definition-scoped Plinth rules (PLU-STAN-24, -25
-and -26).
+{- | Shared machinery for the definition-scoped Plinth rules (PLU-STAN-25, -26
+and -27).
 
 Each of those rules is of the shape "this definition does X but not Y", and the
 absence half has to be judged over a whole top-level definition. That is harder
@@ -3029,7 +3028,7 @@ topLevelDefinitionLines hie startLine =
 Word boundaries are load-bearing rather than cosmetic: with a plain
 'BS8.isInfixOf' a token is read out of any identifier that merely contains it,
 so a validator named @checkInputsNoRedeemer@ would look as though it inspected a
-redeemer and would silently suppress PLU-STAN-24.
+redeemer and would silently suppress PLU-STAN-25.
 -}
 linesContainWord :: [String] -> [ByteString] -> Bool
 linesContainWord targets =
@@ -3054,7 +3053,7 @@ containsWordBoundary needle haystack
 isIdentPartChar :: Char -> Bool
 isIdentPartChar c = isAlphaNum c || c == '_' || c == '\''
 
-{- | PLU-STAN-24: validation reads the transaction's other script inputs but
+{- | PLU-STAN-25: validation reads the transaction's other script inputs but
 never inspects a redeemer, so it cannot tell which operation they belong to.
 -}
 analyseScriptInputDependencyWithoutRedeemer
@@ -3091,85 +3090,7 @@ analyseScriptInputDependencyWithoutRedeemer insId hie curNode =
         ]
 
 
-{- | PLU-STAN-23: flag credentials bound as top-level constants.
-
-This is Pattern 1 of the ImmutableCredential rule. A top-level binding is told
-apart from a local one by 'isExternalName' -- top-level names carry a defining
-module, local ones do not. PLU-STAN-08 uses the same discriminator to spot local
-functions.
-
-The type test deliberately does /not/ descend into function types. A validator
-that merely *takes* a 'PubKeyHash' is the mutable-datum shape the rule asks for,
-so only a binding whose own type is a credential counts; otherwise every
-function mentioning a credential anywhere in its signature would be flagged.
-
-Pattern 2 of the rule (credentials applied to a compiled validator via
-'applyCode' / 'liftCode') is out of scope: it needs reasoning across the build
-pipeline, not a single module's HIE.
--}
-analyseHardcodedCredentialConstant
-    :: Id Inspection
-    -> HieFile
-    -> HieAST TypeIndex
-    -> State VisitorState ()
-analyseHardcodedCredentialConstant insId hie curNode =
-    addObservations $ mkObservation insId hie <$> matchNode curNode
-  where
-    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
-    matchNode node
-        | isTopLevelBinding node && nodeTypeIsCredential node = S.one (nodeSpan node)
-        | otherwise = mempty
-
-    isTopLevelBinding :: HieAST TypeIndex -> Bool
-    isTopLevelBinding node =
-        any isExternalBinding $ Map.assocs $ nodeIdentifiers $ nodeInfo node
-      where
-        isExternalBinding
-            :: (Identifier, IdentifierDetails TypeIndex) -> Bool
-        isExternalBinding (ident, IdentifierDetails{identInfo = info}) =
-            case ident of
-                Right name -> isExternalName name && any isBindingContext (toList info)
-                Left _ -> False
-
-        isBindingContext :: ContextInfo -> Bool
-        isBindingContext = \case
-            ValBind {} -> True
-            MatchBind -> True
-            _ -> False
-
-    credentialTyCons :: [String]
-    credentialTyCons =
-        [ "PubKeyHash"
-        , "ScriptHash"
-        , "ValidatorHash"
-        , "Credential"
-        , "StakingCredential"
-        , "Address"
-        ]
-
-    nodeTypeIsCredential :: HieAST TypeIndex -> Bool
-    nodeTypeIsCredential node =
-        any (hieTypeIsCredential . (hie_types hie Arr.!)) (nodeTypeIndices node)
-
-    nodeTypeIndices :: HieAST TypeIndex -> [TypeIndex]
-    nodeTypeIndices node =
-        let NodeInfo{nodeType = nodeTypes, nodeIdentifiers = idents} = nodeInfo node
-            identTypes =
-                [ ty
-                | (_ident, IdentifierDetails{identType = Just ty}) <- Map.assocs idents
-                ]
-        in nodeTypes <> identTypes
-
-    -- Note: no 'HFunTy' case on purpose -- see the haddock above.
-    hieTypeIsCredential :: HieTypeFlat -> Bool
-    hieTypeIsCredential ty = case ty of
-        HTyConApp IfaceTyCon{ifaceTyConName = tyConName} _ ->
-            occNameString (nameOccName tyConName) `elem` credentialTyCons
-        HForAllTy _ inner -> hieTypeIsCredential (hie_types hie Arr.! inner)
-        HQualTy _ inner -> hieTypeIsCredential (hie_types hie Arr.! inner)
-        _ -> False
-
-{- | PLU-STAN-21: flag 'unstableMakeIsData', which assigns constructor indices
+{- | PLU-STAN-23: flag 'unstableMakeIsData', which assigns constructor indices
 positionally.
 
 This one cannot use a 'NameMeta' / 'FindAst' pattern the way PLU-STAN-02 does.

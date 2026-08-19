@@ -517,7 +517,7 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
-    , ( Id "PLU-STAN-20"
+    , ( Id "PLU-STAN-22"
       , InspectionDocs
           { docsWhyItMatters = unlines
               [ "Validating what an output *contains* while never checking where it *goes*"
@@ -543,7 +543,7 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
-    , ( Id "PLU-STAN-21"
+    , ( Id "PLU-STAN-23"
       , InspectionDocs
           { docsWhyItMatters = unlines
               [ "'unstableMakeIsData' numbers your constructors by the order they happen to"
@@ -568,7 +568,7 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
-    , ( Id "PLU-STAN-22"
+    , ( Id "PLU-STAN-24"
       , InspectionDocs
           { docsWhyItMatters = unlines
               [ "ADA is the asset whose currency symbol and token name are both the empty"
@@ -590,32 +590,7 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
-    , ( Id "PLU-STAN-23"
-      , InspectionDocs
-          { docsWhyItMatters = unlines
-              [ "A credential compiled into the script is a key you can never rotate. If the"
-              , "hardcoded admin key is lost, every UTxO guarded by it is frozen; if it is"
-              , "compromised, the attacker keeps that authority until you deploy a new script"
-              , "*and* migrate every locked UTxO to it -- a script's address is derived from"
-              , "its hash, so changing the constant changes the address. Carrying the"
-              , "credential in the datum instead lets a governance action replace it in one"
-              , "transaction, with no redeploy and no migration."
-              ]
-          , docsBadExample = unlines
-              [ "-- baked in: rotating this key means a new script and a full migration"
-              , "adminKey :: PubKeyHash"
-              , "adminKey = PubKeyHash \"a1b2c3...\""
-              ]
-          , docsGoodExample = unlines
-              [ "-- the authority lives in the datum and can be rotated in place"
-              , "data VaultDatum = VaultDatum { vaultAdmin :: PubKeyHash }"
-              , ""
-              , "signedByAdmin d info = vaultAdmin d `elem` txInfoSignatories info"
-              ]
-          , docsAnchor = ""
-          }
-      )
-    , ( Id "PLU-STAN-24"
+    , ( Id "PLU-STAN-25"
       , InspectionDocs
           { docsWhyItMatters = unlines
               [ "A validator that reads the transaction's *other* script inputs is trusting"
@@ -641,7 +616,7 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
-    , ( Id "PLU-STAN-25"
+    , ( Id "PLU-STAN-26"
       , InspectionDocs
           { docsWhyItMatters = unlines
               [ "\'zip\' stops at the shorter list. If a redeemer supplies one of the two"
@@ -665,7 +640,7 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
-    , ( Id "PLU-STAN-26"
+    , ( Id "PLU-STAN-27"
       , InspectionDocs
           { docsWhyItMatters = unlines
               [ "If a validator only checks that an output puts the spent UTxO back exactly"
