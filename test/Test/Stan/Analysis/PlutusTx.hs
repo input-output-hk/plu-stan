@@ -574,16 +574,16 @@ plustan21Spec analysis = describe "PLU-STAN-21" $ do
       checkNoObservation = noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan21
 
   it "flags validator-reachable top-level PubKeyHash constants" $
-    checkObservationMulti AntiPattern.plustan21 1411 1 2553 58
+    checkObservationMulti AntiPattern.plustan21 1411 1 1412 58
 
   it "flags validator-reachable top-level StakingCredential constants" $
-    checkObservationMulti AntiPattern.plustan21 1416 1 2558 61
+    checkObservationMulti AntiPattern.plustan21 1416 1 1417 61
 
   it "flags validator-reachable top-level Address constants" $
-    checkObservationMulti AntiPattern.plustan21 1421 1 2563 99
+    checkObservationMulti AntiPattern.plustan21 1421 1 1422 99
 
   it "does not flag top-level credentials that are never specialized" $
-    checkNoObservation 2567
+    checkNoObservation 1426
 
   it "flags locally scoped applyCode credentials in isolation" $
     checkObservation AntiPattern.plustan21 1437 68 81
@@ -592,25 +592,25 @@ plustan21Spec analysis = describe "PLU-STAN-21" $ do
     checkObservation AntiPattern.plustan21 1446 41 67
 
   it "flags top-level Credential bindings without explicit signatures" $
-    checkObservationMulti AntiPattern.plustan21 1449 1 2591 47
+    checkObservationMulti AntiPattern.plustan21 1449 1 1450 47
 
   it "flags helper-flow baked credentials passed via lifted helper bindings" $
     checkObservation AntiPattern.plustan21 1461 29 45
 
   it "flags validator-reachable top-level ScriptHash constants" $
-    checkObservationMulti AntiPattern.plustan21 1465 1 2607 58
+    checkObservationMulti AntiPattern.plustan21 1465 1 1466 58
 
   it "flags multiline ScriptHash specializations" $
     checkObservation AntiPattern.plustan21 1477 9 38
 
   it "does not flag non-credential lifted arguments" $
-    checkNoObservation 2626
+    checkNoObservation 1485
 
   it "flags MatchBind helper functions that lift credentials" $
     checkObservation AntiPattern.plustan21 1497 29 45
 
   it "does not flag mixed lifted bindings when only a non-credential projection is applied" $
-    checkNoObservation 2642
+    checkNoObservation 1501
 
   it "flags mixed lifted bindings when the credential projection is specialized" $
     checkObservation AntiPattern.plustan21 1527 29 47

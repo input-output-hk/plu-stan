@@ -1713,22 +1713,22 @@ analyseImmutableCredential insId hie curNode =
 
     bindingIsCredentialLike :: Name -> Bool
     bindingIsCredentialLike name =
-        fromMaybe False
-            (any typeIndexMatchesCredentialLike . Set.toList <$> Map.lookup name bindingTypeIndices)
-            || fromMaybe False (nodeTypeMatchesCredentialLike <$> Map.lookup name bindingNodes)
+        maybe False (any typeIndexMatchesCredentialLike . Set.toList)
+            (Map.lookup name bindingTypeIndices)
+            || maybe False nodeTypeMatchesCredentialLike (Map.lookup name bindingNodes)
 
     bindingProducesCompiledCode :: Name -> Bool
     bindingProducesCompiledCode name =
-        fromMaybe False
-            (any typeIndexReturnsCompiledCode . Set.toList <$> Map.lookup name bindingTypeIndices)
-            || fromMaybe False (nodeReturnsCompiledCode <$> Map.lookup name bindingNodes)
+        maybe False (any typeIndexReturnsCompiledCode . Set.toList)
+            (Map.lookup name bindingTypeIndices)
+            || maybe False nodeReturnsCompiledCode (Map.lookup name bindingNodes)
             || bindingSignatureContainsCompiledCode name
 
     bindingCarriesCompiledCredentialLike :: Name -> Bool
     bindingCarriesCompiledCredentialLike name =
-        fromMaybe False
-            (any typeIndexContainsCompiledCredentialLike . Set.toList <$> Map.lookup name bindingTypeIndices)
-            || fromMaybe False (nodeCarriesCompiledCredentialLike <$> Map.lookup name bindingNodes)
+        maybe False (any typeIndexContainsCompiledCredentialLike . Set.toList)
+            (Map.lookup name bindingTypeIndices)
+            || maybe False nodeCarriesCompiledCredentialLike (Map.lookup name bindingNodes)
             || bindingSignatureContainsCompiledCredentialLike name
 
     nodeReturnsCompiledCode :: HieAST TypeIndex -> Bool
@@ -1820,7 +1820,7 @@ analyseImmutableCredential insId hie curNode =
         insertBindingType acc (ident, IdentifierDetails{identInfo = identInfo', identType = Just ty}) =
             case ident of
                 Right name | any isTrackedBindingCtx identInfo' ->
-                    Map.insertWith (<>) name (Set.singleton ty) acc
+                    Map.insertWith (<>) name (one ty) acc
                 _ -> acc
         insertBindingType acc _ = acc
 
@@ -1934,9 +1934,7 @@ analyseImmutableCredential insId hie curNode =
                         afterCh = bs BS8.!? (idx + BS8.length needle)
                         beforeOk = maybe True (not . isIdentifierChar) beforeCh
                         afterOk = maybe True (not . isIdentifierChar) afterCh
-                    in if beforeOk && afterOk
-                        then True
-                        else go (BS8.drop 1 after)
+                    in (beforeOk && afterOk) || go (BS8.drop 1 after)
     usedBoundNamesInNode :: HieAST TypeIndex -> Set Name
     usedBoundNamesInNode node =
         Set.intersection trackedBindingNames (usedNamesInSubtree node)
@@ -1969,8 +1967,8 @@ analyseImmutableCredential insId hie curNode =
 
     isTrackedBindingCtx :: ContextInfo -> Bool
     isTrackedBindingCtx = \case
-        ValBind _ _ _ -> True
-        PatternBind _ _ _ -> True
+        ValBind {} -> True
+        PatternBind {} -> True
         MatchBind -> True
         _ -> False
 

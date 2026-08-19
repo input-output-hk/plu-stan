@@ -517,4 +517,33 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
+    , ( Id "PLU-STAN-21"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "A credential compiled into a validator is a key you can never rotate. A"
+              , "script\'s address derives from its hash, so replacing the constant -- or the"
+              , "value applied to the compiled code via applyCode -- produces a *different*"
+              , "script at a *different* address. If that key is lost every UTxO it guards is"
+              , "frozen; if it is compromised the attacker keeps that authority until you"
+              , "deploy a new script and migrate every locked UTxO to it. Holding the"
+              , "credential in datum instead lets a governance action replace it in one"
+              , "transaction, with no redeploy and no migration."
+              ]
+          , docsBadExample = unlines
+              [ "-- baked in two ways: as a top-level constant, and specialised into the"
+              , "-- compiled validator, so neither can be changed after deployment"
+              , "adminKey :: PubKeyHash"
+              , "adminKey = PubKeyHash \"a1b2c3...\""
+              , ""
+              , "validator = $$(compile [|| mkValidator ||]) `unsafeApplyCode` liftCodeDef adminKey"
+              ]
+          , docsGoodExample = unlines
+              [ "-- the authority lives in the datum and can be rotated in place"
+              , "data VaultDatum = VaultDatum { vaultAdmin :: PubKeyHash }"
+              , ""
+              , "signedByAdmin d info = vaultAdmin d `elem` txInfoSignatories info"
+              ]
+          , docsAnchor = ""
+          }
+      )
     ]

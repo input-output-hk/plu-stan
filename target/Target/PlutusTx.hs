@@ -1427,7 +1427,7 @@ plutStan21UnusedAdminKeyShouldPass =
   PubKeyHash (BI.stringToBuiltinByteStringHex "cafebabe")
 
 plutStan21CompiledAdminValidator :: Tx.CompiledCode (PubKeyHash -> BuiltinData -> BuiltinData)
-plutStan21CompiledAdminValidator = undefined
+plutStan21CompiledAdminValidator = undefined  -- stan-ignore: STAN-0212
 
 plutStan21BakedLocalCredentialApplyCode :: Either String (Tx.CompiledCode (BuiltinData -> BuiltinData))
 -- PLU-STAN-21 (should trigger): locally scoped credentials specialized with applyCode are still baked into the validator.
@@ -1437,7 +1437,7 @@ plutStan21BakedLocalCredentialApplyCode =
   in Tx.applyCode plutStan21CompiledAdminValidator (Tx.liftCodeDef localAdminKey)
 
 plutStan21CompiledAddressValidator :: Tx.CompiledCode (Address -> BuiltinData -> BuiltinData)
-plutStan21CompiledAddressValidator = undefined
+plutStan21CompiledAddressValidator = undefined  -- stan-ignore: STAN-0212
 
 plutStan21BakedAddressUnsafeApplyCode :: Tx.CompiledCode (BuiltinData -> BuiltinData)
 -- PLU-STAN-21 (should trigger): credential-like address baked into compiled code via unsafeApplyCode.
@@ -1450,7 +1450,7 @@ plutStan21ImplicitCredential =
   PubKeyCredential plutStan21ImmutableAdminKey
 
 plutStan21CompiledCredentialValidator :: Tx.CompiledCode (Credential -> BuiltinData -> BuiltinData)
-plutStan21CompiledCredentialValidator = undefined
+plutStan21CompiledCredentialValidator = undefined  -- stan-ignore: STAN-0212
 
 plutStan21BakedCredentialHelperFlow :: Tx.CompiledCode (BuiltinData -> BuiltinData)
 -- PLU-STAN-21 (should trigger): helper indirection before and after liftCodeDef still bakes the credential into the validator.
@@ -1466,7 +1466,7 @@ plutStan21ImmutableScriptHash =
   ScriptHash (BI.stringToBuiltinByteStringHex "deadbeef")
 
 plutStan21CompiledScriptHashValidator :: Tx.CompiledCode (ScriptHash -> BuiltinData -> BuiltinData)
-plutStan21CompiledScriptHashValidator = undefined
+plutStan21CompiledScriptHashValidator = undefined  -- stan-ignore: STAN-0212
 
 plutStan21BakedScriptHashMultilineApplyCode :: Either String (Tx.CompiledCode (BuiltinData -> BuiltinData))
 -- PLU-STAN-21 (should trigger): multiline ScriptHash specialization still bakes the hash into compiled code.
@@ -1478,7 +1478,7 @@ plutStan21BakedScriptHashMultilineApplyCode =
     )
 
 plutStan21CompiledIntegerValidator :: Tx.CompiledCode (Integer -> BuiltinData -> BuiltinData)
-plutStan21CompiledIntegerValidator = undefined
+plutStan21CompiledIntegerValidator = undefined  -- stan-ignore: STAN-0212
 
 plutStan21BakedIntegerShouldPass :: Tx.CompiledCode (BuiltinData -> BuiltinData)
 -- PLU-STAN-21 (should NOT trigger): non-credential parameters are out of scope.
