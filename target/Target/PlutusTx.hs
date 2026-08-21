@@ -1436,13 +1436,13 @@ plutStan22TwoFieldsOnlyShouldPass out =
 
 -- Fixtures for PLU-STAN-23 (unstableMakeIsData)
 
-data PlutStan21Datum = PlutStan21Datum
+data PlutStan23Datum = PlutStan23Datum
   { plutStan23Amount :: Integer
   }
 
 -- PLU-STAN-23 (should trigger): constructor indices are assigned positionally,
 -- so adding or reordering a constructor silently changes the on-chain encoding.
-Tx.unstableMakeIsData ''PlutStan21Datum
+Tx.unstableMakeIsData ''PlutStan23Datum
 
 -- Fixtures for PLU-STAN-24 (empty string used to detect ADA)
 
