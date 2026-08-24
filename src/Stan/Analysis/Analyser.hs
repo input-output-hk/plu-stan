@@ -1869,19 +1869,19 @@ immutableCredentialSpans hie =
                 ]
         in fromMaybe False $ do
             block <- bindingSourceBlock targetName
-            pure $ any (`containsWordBS` block) bindingOccs
+            pure $ any (`containsWordBoundary` block) bindingOccs
 
     bindingSignatureContainsCompiledCode :: Name -> Bool
     bindingSignatureContainsCompiledCode name = fromMaybe False $ do
         sig <- bindingSignatureLine name
-        pure $ containsWordBS "CompiledCode" sig
+        pure $ containsWordBoundary "CompiledCode" sig
 
     bindingSignatureContainsCompiledCredentialLike :: Name -> Bool
     bindingSignatureContainsCompiledCredentialLike name = fromMaybe False $ do
         sig <- bindingSignatureLine name
         pure $
-            containsWordBS "CompiledCode" sig
-                && any (`containsWordBS` sig)
+            containsWordBoundary "CompiledCode" sig
+                && any (`containsWordBoundary` sig)
                     [ "PubKeyHash"
                     , "ScriptHash"
                     , "Credential"
@@ -1933,24 +1933,6 @@ immutableCredentialSpans hie =
     lineCodePart :: ByteString -> ByteString
     lineCodePart = fst . BS8.breakSubstring "--"
 
-    isIdentifierChar :: Char -> Bool
-    isIdentifierChar c = isAlphaNum c || c == '_' || c == '\''
-
-    containsWordBS :: ByteString -> ByteString -> Bool
-    containsWordBS needle haystack
-        | BS8.null needle = False
-        | otherwise = go haystack
-      where
-        go bs = case BS8.breakSubstring needle bs of
-            (_before, after)
-                | BS8.null after -> False
-                | otherwise ->
-                    let idx = BS8.length bs - BS8.length after
-                        beforeCh = bs BS8.!? (idx - 1)
-                        afterCh = bs BS8.!? (idx + BS8.length needle)
-                        beforeOk = maybe True (not . isIdentifierChar) beforeCh
-                        afterOk = maybe True (not . isIdentifierChar) afterCh
-                    in (beforeOk && afterOk) || go (BS8.drop 1 after)
     usedBoundNamesInNode :: HieAST TypeIndex -> Set Name
     usedBoundNamesInNode node =
         Set.intersection trackedBindingNames (usedNamesInSubtree node)
@@ -3992,7 +3974,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
         -> (Bool, Maybe (Map String (Set String), Bool), Map String (Set String))
     collectRecordFieldAliases varOccs (pendingTxOutIntro, activeCapture, aliasesByField) rawLine =
         let line = lineCodePart rawLine
-            hasTxOutWord = containsWordBS "TxOut" line
+            hasTxOutWord = containsWordBoundary "TxOut" line
             hasOpenBrace = BS8.elem '{' line
             lineAliases = parseRecordFieldAliasesFromLine line
             commitAliases rhsOcc aliasesToCommit =
@@ -4169,7 +4151,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
         lineLooksLikeAddressOperandToken :: ByteString -> Bool
         lineLooksLikeAddressOperandToken line =
             isNothing (parseBindingLhs line)
-                && containsWordBS "txOutAddress" (lineCodePart line)
+                && containsWordBoundary "txOutAddress" (lineCodePart line)
 
     subtreeHasEqName :: HieAST TypeIndex -> Bool
     subtreeHasEqName n@Node{nodeChildren = children} =
@@ -4436,15 +4418,15 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
 
     lineMentionsVarOcc :: String -> ByteString -> Bool
     lineMentionsVarOcc varOcc line =
-        containsWordBS (BS8.pack varOcc) (lineCodePart line)
+        containsWordBoundary (BS8.pack varOcc) (lineCodePart line)
 
     lineLooksLikeCaseScrutinee :: String -> ByteString -> Bool
     lineLooksLikeCaseScrutinee varOcc line =
         let code = lineCodePart line
         in isNothing (parseBindingLhs line)
-            && containsWordBS "case" code
-            && containsWordBS "of" code
-            && containsWordBS (BS8.pack varOcc) code
+            && containsWordBoundary "case" code
+            && containsWordBoundary "of" code
+            && containsWordBoundary (BS8.pack varOcc) code
     isSkippableCodeLine :: ByteString -> Bool
     isSkippableCodeLine line =
         BS8.null $ BS8.dropWhile isSpace $ lineCodePart line
@@ -4457,7 +4439,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
     lineHasAnyFieldToken :: [String] -> ByteString -> Bool
     lineHasAnyFieldToken tokens line =
         let code = lineCodePart line
-        in any (\tok -> containsWordBS (BS8.pack tok) code) tokens
+        in any (\tok -> containsWordBoundary (BS8.pack tok) code) tokens
 
     isUnusedBindingLine :: [(Int, ByteString)] -> Int -> ByteString -> Bool
     isUnusedBindingLine numberedLines lineNumber line = case parseBindingLhs line of
@@ -4465,7 +4447,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
         Just lhsOcc ->
             not $ any
                 (\(n, candidateLine) ->
-                    n > lineNumber && containsWordBS (BS8.pack lhsOcc) candidateLine
+                    n > lineNumber && containsWordBoundary (BS8.pack lhsOcc) candidateLine
                 )
                 numberedLines
 
@@ -4485,7 +4467,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
     firstWordAndRest :: ByteString -> Maybe (String, ByteString)
     firstWordAndRest bs = do
         let trimmed = BS8.dropWhile isSpace bs
-            (word, rest) = BS8.span isIdentifierChar trimmed
+            (word, rest) = BS8.span isIdentPartChar trimmed
         guard (not $ BS8.null word)
         pure (BS8.unpack word, BS8.dropWhile isSpace rest)
 
@@ -4493,38 +4475,19 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
     firstWordOccLoose :: ByteString -> Maybe String
     firstWordOccLoose bs = do
         let trimmed = BS8.dropWhile (\c -> isSpace c || c == '{' || c == '}') bs
-            word = BS8.takeWhile isIdentifierChar trimmed
+            word = BS8.takeWhile isIdentPartChar trimmed
         guard (not $ BS8.null word)
         pure (BS8.unpack word)
     lastWordOcc :: ByteString -> Maybe String
     lastWordOcc bs = do
         let trimmed = trimRight bs
-            revWord = BS8.takeWhile isIdentifierChar (BS8.reverse trimmed)
+            revWord = BS8.takeWhile isIdentPartChar (BS8.reverse trimmed)
             word = BS8.reverse revWord
         guard (not $ BS8.null word)
         pure (BS8.unpack word)
 
     trimRight :: ByteString -> ByteString
     trimRight = BS8.reverse . BS8.dropWhile isSpace . BS8.reverse
-
-    isIdentifierChar :: Char -> Bool
-    isIdentifierChar c = isAlphaNum c || c == '_' || c == '\''
-
-    containsWordBS :: ByteString -> ByteString -> Bool
-    containsWordBS needle haystack
-        | BS8.null needle = False
-        | otherwise = go haystack
-      where
-        go bs = case BS8.breakSubstring needle bs of
-            (_before, after)
-                | BS8.null after -> False
-                | otherwise ->
-                    let idx = BS8.length bs - BS8.length after
-                        beforeCh = bs BS8.!? (idx - 1)
-                        afterCh = bs BS8.!? (idx + BS8.length needle)
-                        beforeOk = maybe True (not . isIdentifierChar) beforeCh
-                        afterOk = maybe True (not . isIdentifierChar) afterCh
-                    in (beforeOk && afterOk) || go (BS8.drop 1 after)
 
     identTypeContainsTyConName :: String -> IdentifierDetails TypeIndex -> Bool
     identTypeContainsTyConName needle IdentifierDetails{identType = identType'} = case identType' of
