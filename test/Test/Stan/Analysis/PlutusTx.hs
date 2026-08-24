@@ -19,6 +19,7 @@ module Test.Stan.Analysis.PlutusTx (
   plustan17Spec,
   plustan18Spec,
   plustan19Spec,
+  plustan21Spec,
   plustan22Spec,
   plustan23Spec,
   plustan24Spec,
@@ -30,7 +31,7 @@ module Test.Stan.Analysis.PlutusTx (
 import Test.Hspec (Spec, describe, it)
 
 import Stan.Analysis (Analysis)
-import Test.Stan.Analysis.Common (noObservationAssert, observationAssert)
+import Test.Stan.Analysis.Common (noObservationAssert, observationAssert, observationAssertMulti)
 
 import qualified Stan.Inspection.AntiPattern as AntiPattern
 
@@ -55,6 +56,7 @@ analysisPlutusTxSpec analysis = describe "Plutus-Tx" $ do
   plustan17Spec analysis
   plustan18Spec analysis
   plustan19Spec analysis
+  plustan21Spec analysis
   plustan22Spec analysis
   plustan23Spec analysis
   plustan24Spec analysis
@@ -577,25 +579,72 @@ plustan19Spec analysis = describe "PLU-STAN-19" $ do
   it "does not flag when all TxOut fields are checked" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan19 1010
 
+plustan21Spec :: Analysis -> Spec
+plustan21Spec analysis = describe "PLU-STAN-21" $ do
+  let checkObservation = observationAssert ["PlutusTx"] analysis
+      checkObservationMulti = observationAssertMulti ["PlutusTx"] analysis
+      checkNoObservation = noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan21
+
+  it "flags validator-reachable top-level PubKeyHash constants" $
+    checkObservationMulti AntiPattern.plustan21 1411 1 1412 58
+
+  it "flags validator-reachable top-level StakingCredential constants" $
+    checkObservationMulti AntiPattern.plustan21 1416 1 1417 61
+
+  it "flags validator-reachable top-level Address constants" $
+    checkObservationMulti AntiPattern.plustan21 1421 1 1422 99
+
+  it "does not flag top-level credentials that are never specialized" $
+    checkNoObservation 1426
+
+  it "flags locally scoped applyCode credentials in isolation" $
+    checkObservation AntiPattern.plustan21 1437 68 81
+
+  it "flags credential-like address arguments baked in via unsafeApplyCode" $
+    checkObservation AntiPattern.plustan21 1446 41 67
+
+  it "flags top-level Credential bindings without explicit signatures" $
+    checkObservationMulti AntiPattern.plustan21 1449 1 1450 47
+
+  it "flags helper-flow baked credentials passed via lifted helper bindings" $
+    checkObservation AntiPattern.plustan21 1461 29 45
+
+  it "flags validator-reachable top-level ScriptHash constants" $
+    checkObservationMulti AntiPattern.plustan21 1465 1 1466 58
+
+  it "flags multiline ScriptHash specializations" $
+    checkObservation AntiPattern.plustan21 1477 9 38
+
+  it "does not flag non-credential lifted arguments" $
+    checkNoObservation 1485
+
+  it "flags MatchBind helper functions that lift credentials" $
+    checkObservation AntiPattern.plustan21 1497 29 45
+
+  it "does not flag mixed lifted bindings when only a non-credential projection is applied" $
+    checkNoObservation 1501
+
+  it "flags mixed lifted bindings when the credential projection is specialized" $
+    checkObservation AntiPattern.plustan21 1527 29 47
 plustan22Spec :: Analysis -> Spec
 plustan22Spec analysis = describe "PLU-STAN-22" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
 
   it "flags output validation that omits address checks" $
-    checkObservation AntiPattern.plustan22 1416 3 23
+    checkObservation AntiPattern.plustan22 1535 3 23
 
   it "does not flag when the output address is checked" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan22 1425
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan22 1544
 
   it "does not flag when only two output fields are checked" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan22 1434
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan22 1553
 
 plustan23Spec :: Analysis -> Spec
 plustan23Spec analysis = describe "PLU-STAN-23" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
 
   it "flags unstableMakeIsData splices" $
-    checkObservation AntiPattern.plustan23 1445 4 22
+    checkObservation AntiPattern.plustan23 1564 4 22
 
   it "does not flag makeIsDataIndexed, which pins constructor indices" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan23 250
@@ -605,52 +654,52 @@ plustan24Spec analysis = describe "PLU-STAN-24" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
 
   it "flags an empty-string TokenName standing in for adaToken" $
-    checkObservation AntiPattern.plustan24 1451 44 62
+    checkObservation AntiPattern.plustan24 1570 44 62
 
   it "flags an empty-string CurrencySymbol standing in for adaSymbol" $
-    checkObservation AntiPattern.plustan24 1455 49 72
+    checkObservation AntiPattern.plustan24 1574 49 72
 
   it "does not flag the dedicated adaToken/adaSymbol helpers" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan24 1460
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan24 1579
 
 plustan25Spec :: Analysis -> Spec
 plustan25Spec analysis = describe "PLU-STAN-25" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
 
   it "flags a script-input dependency with no redeemer check" $
-    checkObservation AntiPattern.plustan25 1468 1 33
+    checkObservation AntiPattern.plustan25 1587 1 33
 
   it "does not flag when the redeemer is inspected too" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1488
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1607
 
   it "does not flag validation that only reads outputs" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1495
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1614
 
   it "does not flag when the redeemer check lives in a where clause" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1554
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1673
 
 plustan26Spec :: Analysis -> Spec
 plustan26Spec analysis = describe "PLU-STAN-26" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
 
   it "flags zip with no length comparison" $
-    checkObservation AntiPattern.plustan26 1502 1 23
+    checkObservation AntiPattern.plustan26 1621 1 23
 
   it "does not flag zip guarded by a length comparison" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan26 1507
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan26 1626
 
   it "flags zip when the length check is on an unrelated list" $
-    checkObservation AntiPattern.plustan26 1544 1 38
+    checkObservation AntiPattern.plustan26 1663 1 38
 
 plustan27Spec :: Analysis -> Spec
 plustan27Spec analysis = describe "PLU-STAN-27" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
 
   it "flags an input spent only to be recreated identically" $
-    checkObservation AntiPattern.plustan27 1517 1 27
+    checkObservation AntiPattern.plustan27 1636 1 27
 
   it "does not flag a partial field comparison" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan27 1526
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan27 1645
 
   it "does not flag a validator that already reads reference inputs" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan27 1534
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan27 1653

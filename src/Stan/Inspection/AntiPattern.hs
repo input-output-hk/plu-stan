@@ -67,6 +67,7 @@ module Stan.Inspection.AntiPattern
     , plustan17
     , plustan18
     , plustan19
+    , plustan21
     , plustan22
     , plustan23
     , plustan24
@@ -139,6 +140,7 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan17
     , plustan18
     , plustan19
+    , plustan21
     , plustan22
     , plustan23
     , plustan24
@@ -839,6 +841,17 @@ plustan19 = mkAntiPatternInspection (Id "PLU-STAN-19") "TxOut validation misses 
     & withPlutusCategory
     & severityL .~ Warning
 
+plustan21 :: Inspection
+plustan21 = mkAntiPatternInspection (Id "PLU-STAN-21") "Immutable credentials baked into validators"
+    ImmutableCredential
+    & descriptionL .~ "Validator-reachable top-level PubKeyHash/Credential/StakingCredential/Address/ScriptHash bindings, and credential-like values specialized into compiled validator code via applyCode/unsafeApplyCode, cannot be rotated on-chain when governance, signer sets, or recovery requirements change."
+    & solutionL .~
+        [ "Store mutable credentials in datum/state that validators can update under explicit authorization"
+        , "Avoid baking credential-like values into compiled code via applyCode/unsafeApplyCode unless immutability is intentional and documented"
+        , "If the credential is intentionally immutable, suppress the warning locally and document the operational trade-off"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
 plustan22 :: Inspection
 plustan22 = mkAntiPatternInspection (Id "PLU-STAN-22") "TxOut validation misses address checks"
     MissingTxOutAddressCheck

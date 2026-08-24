@@ -64,6 +64,7 @@ So far, Plu-Stan implements the following automated detection rules:
 | PLU-STAN-14 | TxOut validation misses staking credential checks | Warning | Validation over `TxOut`/`TxOutAsData` checks several output fields but never constrains the staking credential |
 | PLU-STAN-15 | TxOut validation misses value checks | Warning | Validation over `TxOut`/`TxOutAsData` checks several output fields but never constrains the output value |
 | PLU-STAN-16 | Precision loss: division before multiplication | Warning     | Division before multiplication in integer arithmetic causes precision loss; multiply first, then divide |
+| PLU-STAN-21 | Immutable credentials baked into validators | Warning     | Validator-reachable top-level `PubKeyHash` / `Credential` / `StakingCredential` / `Address` / `ScriptHash` bindings, and credential-like values specialized into validator code via `applyCode` / `unsafeApplyCode`, cannot be rotated on-chain; prefer datum/state-managed credentials |
 | PLU-STAN-17 | Redeemer-supplied indices must be unique | Warning | Selecting list elements by redeemer-supplied index without enforcing uniqueness lets duplicates validate the same element repeatedly |
 | PLU-STAN-18 | Avoid lazy `(&&)` in on-chain code | Warning | Lazy `(&&)` in a branching predicate adds delay/force overhead in the generated UPLC; prefer a strict combinator |
 | PLU-STAN-19 | TxOut validation misses datum checks | Warning | Validation over `TxOut`/`TxOutAsData` checks several output fields but never constrains the datum |
@@ -103,6 +104,7 @@ fact from the source tree; only the coverage grading is curated.
 | Research rule | Category | Coverage | Inspection(s) |
 |---|---|---|---|
 | [EmptyStringADACheck](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/EmptyStringADACheck.md) | Code quality | **direct** | `PLU-STAN-24` |
+| [ImmutableCredential](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/ImmutableCredential.md) | Code quality, Security | **direct** | `PLU-STAN-21` |
 | [PrecisionLoss](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/PrecisionLoss.md) | Code quality | **direct** | `PLU-STAN-16` |
 | [UnstableMakeIsData](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/UnstableMakeIsData.md) | Security | **direct** | `PLU-STAN-23` |
 | [ZipWithoutLengthCheck](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/ZipWithoutLengthCheck.md) | Code quality, Security | **direct** | `PLU-STAN-26` |
@@ -123,7 +125,6 @@ fact from the source tree; only the coverage grading is curated.
 | [ValidityRangeBound](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/ValidityRangeBound.md) | Security | **adjacent** | `PLU-STAN-12` |
 | [DoubleSatisfaction](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/DoubleSatisfaction.md) | Security | **none** | — |
 | [FixedStructureMap](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/FixedStructureMap.md) | Code quality | **none** | — |
-| [ImmutableCredential](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/ImmutableCredential.md) | Code quality, Security | **none** | — |
 | [NoBurningLogic](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/NoBurningLogic.md) | Code quality, Security | **none** | — |
 
 7 inspections have no counterpart in the research rule set (mostly UPLC efficiency, where the research rules skew towards security): `PLU-STAN-01`, `PLU-STAN-03`, `PLU-STAN-06`, `PLU-STAN-07`, `PLU-STAN-08`, `PLU-STAN-10`, `PLU-STAN-18`.

@@ -96,8 +96,8 @@ MAPPING = [
 
     ("NoBurningLogic", "none", [], "blocked",
      "Implemented in open PR #39 as PLU-STAN-20, not merged: 20 of its own tests fail on its base and it carries 61 hlint hints. It does solve the (currencySymbol, tokenName) pairing that makes this rule hard."),
-    ("ImmutableCredential", "none", [], "blocked",
-     "Implemented in open PR #40 as PLU-STAN-21 (stacked on #39), not merged. A Pattern-1-only version was prepared on this branch and dropped in favour of the PR, which also covers Pattern 2 (applyCode/liftCode) and filters to validator-reachable bindings."),
+    ("ImmutableCredential", "direct", ["PLU-STAN-21"], "",
+     "Covers both patterns the rule specifies: top-level credential constants, and credentials specialised into compiled code via applyCode/unsafeApplyCode/liftCode. Also filters to validator-reachable bindings, so an unused top-level credential is not flagged."),
     ("DoubleSatisfaction", "none", [], "deferred",
      "Deferred: proving the ABSENCE of uniqueness attribution is not tractable, and legitimate value aggregation over filtered outputs is common, so a shape-only rule would be noise."),
     ("FixedStructureMap", "none", [], "spec-incomplete",
