@@ -852,6 +852,7 @@ plustan21 = mkAntiPatternInspection (Id "PLU-STAN-21") "Immutable credentials ba
         ]
     & withPlutusCategory
     & severityL .~ Warning
+
 plustan22 :: Inspection
 plustan22 = mkAntiPatternInspection (Id "PLU-STAN-22") "TxOut validation misses address checks"
     MissingTxOutAddressCheck

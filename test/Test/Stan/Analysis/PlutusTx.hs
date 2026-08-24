@@ -626,6 +626,7 @@ plustan21Spec analysis = describe "PLU-STAN-21" $ do
 
   it "flags mixed lifted bindings when the credential projection is specialized" $
     checkObservation AntiPattern.plustan21 1527 29 47
+
 plustan22Spec :: Analysis -> Spec
 plustan22Spec analysis = describe "PLU-STAN-22" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
@@ -670,10 +671,10 @@ plustan25Spec analysis = describe "PLU-STAN-25" $ do
     checkObservation AntiPattern.plustan25 1587 1 33
 
   it "does not flag when the redeemer is inspected too" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1607
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1600
 
   it "does not flag validation that only reads outputs" $
-    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1614
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1613
 
   it "does not flag when the redeemer check lives in a where clause" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1673

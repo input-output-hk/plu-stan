@@ -114,7 +114,10 @@ def inspection_facts():
     an = read("src/Stan/Analysis/Analyser.hs")
     te = read("test/Test/Stan/Analysis/PlutusTx.hs")
 
-    dispatch = dict(re.findall(r"^\s{8}(\w+) -> (analyse\w+) inspectionId hie node", an, re.M))
+    # Match the analyser name up to a word boundary: some analysers take extra
+    # leading arguments (e.g. analyseImmutableCredential's precomputed span set),
+    # and requiring the exact "insId hie node" tail silently lost those rows.
+    dispatch = dict(re.findall(r"^\s{8}(\w+) -> (analyse\w+)\b", an, re.M))
 
     insp = {}
     for m in re.finditer(
