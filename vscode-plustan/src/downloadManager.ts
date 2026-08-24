@@ -350,7 +350,7 @@ export async function checkForUpdates(
   }
 
   try {
-    output.appendLine(`Plu-Stan: checking for updates (GHC ${ghc})...`);
+    output.appendLine(`Plu-Stan CLI: checking for updates (GHC ${ghc})...`);
     const release = await fetchJson(GITHUB_API_LATEST) as GitHubRelease;
     const latestVersion = release.tag_name.replace(/^v/, "");
     const cachedVersion = getCacheMap(context.globalState)[ghcSeries(ghc)]?.version;
