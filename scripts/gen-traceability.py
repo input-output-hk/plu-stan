@@ -73,7 +73,7 @@ MAPPING = [
     ("TrashTokens", "narrower", ["PLU-STAN-15"], "trigger-gate",
      "Only fires when >=3 of the 5 TxOut fields are already checked; the rule's leq/geq subset comparisons are not detected (those names are local operator bindings in the analyser, not Plutus value functions)."),
     ("UncheckedRedeemer", "narrower", ["PLU-STAN-25"], "scope-limited",
-     "Matches source text within a top-level definition rather than resolved names, so it also matches tokens in comments and strings; the script-input helper names it recognises are a fixed list."),
+     "Matches source text within a top-level definition rather than resolved names, so it also matches tokens in comments and strings; the script-input helper names it recognises are a fixed list. Reference inputs are not treated as a dependency: they carry no redeemer, so no redeemer check could ever cover them."),
     ("ReadOnlySpend", "narrower", ["PLU-STAN-27"], "scope-limited",
      "Requires all four field accessors plus txInInfoResolved, so a three-field identical recreation is not flagged."),
 

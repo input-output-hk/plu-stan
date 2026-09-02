@@ -1682,3 +1682,37 @@ plutStan25ScriptInputsRedeemerInWhereShouldPass ctx =
                    _ -> False)
           (txInfoInputs info))
     opIsSettle = BI.unsafeDataAsI (getRedeemer (scriptContextRedeemer ctx)) == 1
+
+-- Fixture for PLU-STAN-25: reference inputs are not a script-input dependency
+
+plutStan25ReferenceInputsOnlyShouldPass :: ScriptContext -> Bool
+-- PLU-STAN-25 (should NOT trigger): reference inputs carry no redeemer, so
+-- reading them cannot be paired with a redeemer check, and flagging them
+-- would suggest a fix that does not exist.
+plutStan25ReferenceInputsOnlyShouldPass ctx =
+  let refIns = txInfoReferenceInputs (scriptContextTxInfo ctx)
+      scriptRefs =
+        filter
+          (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+                   ScriptCredential _ -> True
+                   _ -> False)
+          refIns
+  in length scriptRefs == 1
+
+-- Fixtures for PLU-STAN-26: zip3 must carry a length check per zipped list
+
+plutStan26Zip3PartiallyChecked :: [Integer] -> [Integer] -> [Integer] -> [Integer]
+-- PLU-STAN-26 (should trigger): only two of the three zipped lists carry a
+-- length check; the third is still silently truncated.
+plutStan26Zip3PartiallyChecked xs ys zs =
+  if length xs == length ys
+    then map (\(a, b, _) -> a + b) (zip3 xs ys zs)
+    else []
+
+plutStan26Zip3FullyCheckedShouldPass :: [Integer] -> [Integer] -> [Integer] -> [Integer]
+-- PLU-STAN-26 (should NOT trigger): all three zipped lists carry a length
+-- check.
+plutStan26Zip3FullyCheckedShouldPass xs ys zs =
+  if length xs == length ys && length ys == length zs
+    then map (\(a, b, _) -> a + b) (zip3 xs ys zs)
+    else []
