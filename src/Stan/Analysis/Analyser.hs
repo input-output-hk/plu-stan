@@ -3509,7 +3509,8 @@ analyseZipWithoutLengthCheck insId hie curNode =
         go = \case
             [] -> []
             t : rest
-                | t == "zip" || t == "zip3" -> take 2 rest <> go rest
+                | t == "zip" -> take 2 rest <> go rest
+                | t == "zip3" -> take 3 rest <> go rest
                 | otherwise -> go rest
 
         identTokens :: ByteString -> [ByteString]
@@ -3646,6 +3647,11 @@ isIdentPartChar c = isAlphaNum c || c == '_' || c == '\''
 
 {- | PLU-STAN-25: validation reads the transaction's other script inputs but
 never inspects a redeemer, so it cannot tell which operation they belong to.
+
+Reference inputs are deliberately /not/ treated as a dependency here: they
+carry no redeemer (they never appear in 'txInfoRedeemers'), so reading them can
+never be paired with the redeemer check the rule demands, and flagging them
+would suggest a fix that does not exist.
 -}
 analyseScriptInputDependencyWithoutRedeemer
     :: Id Inspection
@@ -3659,7 +3665,6 @@ analyseScriptInputDependencyWithoutRedeemer insId hie curNode =
     inputsTokens, scriptInputTokens, redeemerTokens :: [String]
     inputsTokens =
         [ "txInfoInputs"
-        , "txInfoReferenceInputs"
         ]
 
     -- How on-chain code tells a script input apart from a pubkey one. Helper

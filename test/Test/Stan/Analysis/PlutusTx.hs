@@ -679,6 +679,9 @@ plustan25Spec analysis = describe "PLU-STAN-25" $ do
   it "does not flag when the redeemer check lives in a where clause" $
     noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1673
 
+  it "does not flag a dependency on reference inputs only" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan25 1692
+
 plustan26Spec :: Analysis -> Spec
 plustan26Spec analysis = describe "PLU-STAN-26" $ do
   let checkObservation = observationAssert ["PlutusTx"] analysis
@@ -691,6 +694,12 @@ plustan26Spec analysis = describe "PLU-STAN-26" $ do
 
   it "flags zip when the length check is on an unrelated list" $
     checkObservation AntiPattern.plustan26 1663 1 38
+
+  it "flags zip3 when only two of the three lists carry a length check" $
+    checkObservation AntiPattern.plustan26 1707 1 31
+
+  it "does not flag zip3 when all three lists carry a length check" $
+    noObservationAssert ["PlutusTx"] analysis AntiPattern.plustan26 1715
 
 plustan27Spec :: Analysis -> Spec
 plustan27Spec analysis = describe "PLU-STAN-27" $ do
