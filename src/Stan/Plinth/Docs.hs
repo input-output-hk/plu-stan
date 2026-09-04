@@ -546,4 +546,155 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
+    , ( Id "PLU-STAN-22"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "Validating what an output *contains* while never checking where it *goes*"
+              , "is a payment-redirection bug. If the validator pins down the value, datum"
+              , "and reference script of a continuing output but leaves its address"
+              , "unconstrained, the transaction builder simply points that output at their"
+              , "own wallet: every field-level assertion still passes and the funds leave"
+              , "the contract. The address is what makes the other checks meaningful, so"
+              , "assert the payment credential -- and the staking credential with it."
+              ]
+          , docsBadExample = unlines
+              [ "okOutput out ="
+              , "  txOutValue out == expectedValue"
+              , "    && txOutDatum out == OutputDatum (Datum (toBuiltinData newState))"
+              , "    -- address unconstrained: the output can be paid anywhere"
+              ]
+          , docsGoodExample = unlines
+              [ "okOutput out ="
+              , "  txOutAddress out == vaultAddr"
+              , "    && txOutValue out == expectedValue"
+              , "    && txOutDatum out == OutputDatum (Datum (toBuiltinData newState))"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-23"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "'unstableMakeIsData' numbers your constructors by the order they happen to"
+              , "appear in the source. Add a constructor, or move one, and every index after"
+              , "it shifts -- so a datum written by the old script decodes as a *different*"
+              , "constructor under the new one. Funds already locked at the old encoding"
+              , "become unspendable, or worse, spendable under the wrong branch. The"
+              , "encoding is a permanent on-chain contract, so pin it explicitly and never"
+              , "renumber an index that has already shipped."
+              ]
+          , docsBadExample = unlines
+              [ "-- indices are positional: inserting a constructor silently renumbers them"
+              , "PlutusTx.unstableMakeIsData ''MyDatum"
+              ]
+          , docsGoodExample = unlines
+              [ "-- indices are pinned and stay valid as the type grows"
+              , "PlutusTx.makeIsDataIndexed ''MyDatum"
+              , "  [ ('Borrow', 0)"
+              , "  , ('Repay',  1)"
+              , "  ]"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-24"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "ADA is the asset whose currency symbol and token name are both the empty"
+              , "bytestring, so `tokenName \"\"` does technically denote it. But written that"
+              , "way the intent is invisible: a reader cannot tell whether the empty string"
+              , "means \"ADA\", \"unset\", or \"a token whose name I forgot to fill in\", and the"
+              , "same literal is easy to copy into a position where it silently matches the"
+              , "wrong asset. 'adaSymbol' and 'adaToken' say exactly what is meant and cannot"
+              , "be confused with an unfilled placeholder."
+              ]
+          , docsBadExample = unlines
+              [ "-- is this ADA, or an unset field? the literal does not say"
+              , "isAda cs tn = cs == currencySymbol \"\" && tn == tokenName \"\""
+              ]
+          , docsGoodExample = unlines
+              [ "-- the intent is explicit"
+              , "isAda cs tn = cs == adaSymbol && tn == adaToken"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-25"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "A validator that reads the transaction's *other* script inputs is trusting"
+              , "work it did not do. Without checking those inputs' redeemers it cannot tell"
+              , "which operation they were spent for, so an attacker composes one"
+              , "transaction that spends your UTxO alongside an unrelated script input that"
+              , "happens to satisfy your shape test -- your validator sees the evidence it"
+              , "wanted and approves. Requiring the expected redeemer on the input you"
+              , "depend on ties the two spends to the same intended operation."
+              ]
+          , docsBadExample = unlines
+              [ "-- \"some other script input exists\" is not a statement about *why*"
+              , "okSpend info ="
+              , "  length (filter isScriptInput (txInfoInputs info)) == 2"
+              ]
+          , docsGoodExample = unlines
+              [ "-- the co-spent input must carry the redeemer this operation expects"
+              , "okSpend info ="
+              , "  case findScriptInput info of"
+              , "    Just i  -> redeemerOf info i == toBuiltinData Settle"
+              , "    Nothing -> False"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-26"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "\'zip\' stops at the shorter list. If a redeemer supplies one of the two"
+              , "lists, an attacker sends a short one and every element of the longer list"
+              , "past that point is dropped before your per-pair check ever sees it -- the"
+              , "validation loop runs, passes, and silently covers a subset of the data. The"
+              , "fix is to reject a length mismatch outright rather than let truncation"
+              , "decide how much gets validated."
+              ]
+          , docsBadExample = unlines
+              [ "-- a short `sigs` means most `owners` are never checked"
+              , "allSigned owners sigs ="
+              , "  all (uncurry checkSig) (zip owners sigs)"
+              ]
+          , docsGoodExample = unlines
+              [ "-- a mismatch is rejected instead of silently truncating"
+              , "allSigned owners sigs ="
+              , "  length owners == length sigs"
+              , "    && all (uncurry checkSig) (zip owners sigs)"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-27"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "If a validator only checks that an output puts the spent UTxO back exactly"
+              , "as it was -- same address, value, datum and reference script -- then the"
+              , "spend achieved nothing except cost. Spending pays the full validator"
+              , "execution budget and, worse, consumes the UTxO: two transactions that both"
+              , "want to read it now contend for it, and one fails. A reference input reads"
+              , "the same data without consuming it, so concurrent readers no longer"
+              , "conflict."
+              ]
+          , docsBadExample = unlines
+              [ "-- spends the oracle UTxO just to put it back untouched"
+              , "okSpend i out ="
+              , "  txOutAddress (txInInfoResolved i) == txOutAddress out"
+              , "    && txOutValue (txInInfoResolved i) == txOutValue out"
+              , "    && txOutDatum (txInInfoResolved i) == txOutDatum out"
+              ]
+          , docsGoodExample = unlines
+              [ "-- reads the oracle without spending it: no contention, no recreation"
+              , "oracleRate info ="
+              , "  case txInfoReferenceInputs info of"
+              , "    [i] -> rateFromDatum (txOutDatum (txInInfoResolved i))"
+              , "    _   -> traceError \"expected one reference input\""
+              ]
+          , docsAnchor = ""
+          }
+      )
     ]

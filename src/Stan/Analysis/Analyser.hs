@@ -22,9 +22,9 @@ import Stan.Core.Id (Id)
 import Stan.Core.List (nonRepeatingPairs)
 import Stan.Core.ModuleName (ModuleName (..), fromGhcModule)
 import Stan.FileInfo (isExtensionDisabled)
-import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, nameModule, nameOccName, occNameString,
-                        srcSpanEndCol, srcSpanEndLine, srcSpanStartCol, srcSpanStartLine,
-                        isExternalName, IfaceTyCon (..))
+import Stan.Ghc.Compat (Name, RealSrcSpan, isSymOcc, mkFastString, mkRealSrcLoc, mkRealSrcSpan,
+                        nameModule, nameOccName, occNameString, srcSpanEndCol, srcSpanEndLine,
+                        srcSpanStartCol, srcSpanStartLine, isExternalName, IfaceTyCon (..))
 import Stan.Hie (eqAst, slice)
 import Stan.Hie.Compat (ContextInfo (..), HieAST (..), HieASTs (..), HieFile (..),
                         HieArgs (..), HieType (..), HieTypeFlat, Identifier, IdentifierDetails (..),
@@ -96,6 +96,11 @@ createVisitor hie exts inspections =
         MissingTxOutStakingCredentialCheck -> analyseMissingTxOutStakingCredentialCheck inspectionId hie node
         MissingTxOutValueCheck -> analyseMissingTxOutValueCheck inspectionId hie node
         MissingTxOutDatumCheck -> analyseMissingTxOutDatumCheck inspectionId hie node
+        MissingTxOutAddressCheck -> analyseMissingTxOutAddressCheck inspectionId hie node
+        UnstableMakeIsDataUsage -> analyseUnstableMakeIsDataUsage inspectionId hie node
+        ScriptInputDependencyWithoutRedeemer -> analyseScriptInputDependencyWithoutRedeemer inspectionId hie node
+        ZipWithoutLengthCheck -> analyseZipWithoutLengthCheck inspectionId hie node
+        SpendAndRecreateInsteadOfReferenceInput -> analyseSpendAndRecreateInsteadOfReferenceInput inspectionId hie node
 
 {- | Check for big tuples (size >= 4) in the following places:
 
@@ -1864,19 +1869,19 @@ immutableCredentialSpans hie =
                 ]
         in fromMaybe False $ do
             block <- bindingSourceBlock targetName
-            pure $ any (`containsWordBS` block) bindingOccs
+            pure $ any (`containsWordBoundary` block) bindingOccs
 
     bindingSignatureContainsCompiledCode :: Name -> Bool
     bindingSignatureContainsCompiledCode name = fromMaybe False $ do
         sig <- bindingSignatureLine name
-        pure $ containsWordBS "CompiledCode" sig
+        pure $ containsWordBoundary "CompiledCode" sig
 
     bindingSignatureContainsCompiledCredentialLike :: Name -> Bool
     bindingSignatureContainsCompiledCredentialLike name = fromMaybe False $ do
         sig <- bindingSignatureLine name
         pure $
-            containsWordBS "CompiledCode" sig
-                && any (`containsWordBS` sig)
+            containsWordBoundary "CompiledCode" sig
+                && any (`containsWordBoundary` sig)
                     [ "PubKeyHash"
                     , "ScriptHash"
                     , "Credential"
@@ -1928,24 +1933,6 @@ immutableCredentialSpans hie =
     lineCodePart :: ByteString -> ByteString
     lineCodePart = fst . BS8.breakSubstring "--"
 
-    isIdentifierChar :: Char -> Bool
-    isIdentifierChar c = isAlphaNum c || c == '_' || c == '\''
-
-    containsWordBS :: ByteString -> ByteString -> Bool
-    containsWordBS needle haystack
-        | BS8.null needle = False
-        | otherwise = go haystack
-      where
-        go bs = case BS8.breakSubstring needle bs of
-            (_before, after)
-                | BS8.null after -> False
-                | otherwise ->
-                    let idx = BS8.length bs - BS8.length after
-                        beforeCh = bs BS8.!? (idx - 1)
-                        afterCh = bs BS8.!? (idx + BS8.length needle)
-                        beforeOk = maybe True (not . isIdentifierChar) beforeCh
-                        afterOk = maybe True (not . isIdentifierChar) afterCh
-                    in (beforeOk && afterOk) || go (BS8.drop 1 after)
     usedBoundNamesInNode :: HieAST TypeIndex -> Set Name
     usedBoundNamesInNode node =
         Set.intersection trackedBindingNames (usedNamesInSubtree node)
@@ -3430,12 +3417,14 @@ data MissingTxOutField
     | MissingStakingCredential
     | MissingValue
     | MissingDatum
+    | MissingAddress
 
 instance Eq MissingTxOutField where
     MissingReferenceScript == MissingReferenceScript = True
     MissingStakingCredential == MissingStakingCredential = True
     MissingValue == MissingValue = True
     MissingDatum == MissingDatum = True
+    MissingAddress == MissingAddress = True
     _ == _ = False
 
 data TxOutFieldUsage = TxOutFieldUsage
@@ -3445,6 +3434,314 @@ data TxOutFieldUsage = TxOutFieldUsage
     , txOutFieldDatumChecked :: !Bool
     , txOutFieldReferenceChecked :: !Bool
     }
+
+analyseMissingTxOutAddressCheck
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseMissingTxOutAddressCheck =
+    analyseMissingTxOutFieldCheck MissingAddress
+
+{- | PLU-STAN-26: 'zip' used without comparing the two lists' lengths.
+
+Deliberately not marker-based. 'zip' appears in ordinary code, so a rule that
+fired on every call and relied on a suppression comment would tax every project
+on every call site; the length comparison is real counter-evidence, so it is
+checked for.
+
+Scoped to the definition, since the guard is usually a separate @if@ or @where@
+binding rather than part of the zip expression -- but /not/ merely "does this
+definition mention length anywhere". That would let a guard on some unrelated
+list (@length outs == 1@) exempt the zip, which fails in the direction that
+matters: a missed detection rather than noise. The zipped lists are identified by
+name and each must carry its own length check.
+-}
+analyseZipWithoutLengthCheck
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseZipWithoutLengthCheck insId hie curNode =
+    addObservations $ mkObservation insId hie <$> matchNode curNode
+  where
+    matchNode :: HieAST TypeIndex -> Slist RealSrcSpan
+    matchNode node
+        | isTopLevelDefinitionSite node
+        , let defLines = topLevelDefinitionLines hie (srcSpanStartLine (nodeSpan node))
+        , linesContainWord zipTokens defLines
+        , zipIsUnguarded defLines
+        = S.one (nodeSpan node)
+        | otherwise = mempty
+
+    zipTokens, lengthTokens :: [String]
+    zipTokens =
+        [ "zip"
+        , "zipWith"
+        , "zip3"
+        ]
+
+    lengthTokens =
+        [ "length"
+        , "lengthOfByteString"
+        ]
+
+    zipIsUnguarded :: [ByteString] -> Bool
+    zipIsUnguarded defLines = case zippedListNames defLines of
+        -- Arguments could not be read off positionally (e.g. 'zipWith', which
+        -- takes a function first): fall back to the coarse test rather than
+        -- silently passing.
+        [] -> not (linesContainWord lengthTokens defLines)
+        names -> not (all hasLengthCheck names)
+      where
+        hasLengthCheck :: ByteString -> Bool
+        hasLengthCheck name =
+            any (containsWordBoundary ("length " <> name)) defLines
+
+    -- The identifiers passed to a plain 'zip'/'zip3', read positionally.
+    zippedListNames :: [ByteString] -> [ByteString]
+    zippedListNames = concatMap fromLine
+      where
+        fromLine :: ByteString -> [ByteString]
+        fromLine = go . identTokens
+
+        go :: [ByteString] -> [ByteString]
+        go = \case
+            [] -> []
+            t : rest
+                | t == "zip" -> take 2 rest <> go rest
+                | t == "zip3" -> take 3 rest <> go rest
+                | otherwise -> go rest
+
+        identTokens :: ByteString -> [ByteString]
+        identTokens = filter (not . BS8.null) . BS8.splitWith (not . isIdentPartChar)
+
+{- | PLU-STAN-27: an input is spent only to be recreated identically.
+
+Asserting that an output reproduces a spent input's address, value, datum /and/
+reference script says the UTxO was spent purely to be put back unchanged -- work
+a reference input does without paying to spend it. All four accessors are
+required so that a partial comparison (which is doing something else) does not
+match, and any use of reference inputs suppresses it.
+-}
+analyseSpendAndRecreateInsteadOfReferenceInput
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseSpendAndRecreateInsteadOfReferenceInput insId hie curNode =
+    addObservations $ mkObservation insId hie
+        <$> definitionScopedMatch hie requiredGroups referenceInputTokens curNode
+  where
+    requiredGroups :: [[String]]
+    requiredGroups =
+        [ ["txInInfoResolved"]
+        , ["txOutAddress"]
+        , ["txOutValue"]
+        , ["txOutDatum"]
+        , ["txOutReferenceScript"]
+        ]
+
+    referenceInputTokens :: [String]
+    referenceInputTokens =
+        [ "txInfoReferenceInputs"
+        ]
+
+{- | Shared machinery for the definition-scoped Plinth rules (PLU-STAN-25, -26
+and -27).
+
+Each of those rules is of the shape "this definition does X but not Y", and the
+absence half has to be judged over a whole top-level definition. That is harder
+to get from the HIE than it looks:
+
+  * A subtree walk is wrong. The counter-evidence commonly sits in a /sibling/
+    binding, so the node wrapping the suspicious expression genuinely lacks it
+    and the rule fires on correct code.
+  * The node carrying a top-level binding identifier is a leaf -- it does not
+    contain the body as children -- so its subtree is no use either.
+  * Only 'ValBind' carries a span for its binding (which is how PLU-STAN-08
+    finds RHS spans); a function binding like @f x = ...@ is a 'MatchBind',
+    which carries none.
+
+So the extent is recovered from Haskell layout: a top-level definition begins in
+column 1 and continues through every following blank or indented line. That is
+the boundary these rules care about, and it takes in the sibling let/where
+bindings a subtree walk would miss.
+-}
+definitionScopedMatch
+    :: HieFile
+    -> [[String]]
+    -- ^ Token groups that must /all/ be present in the definition.
+    -> [String]
+    -- ^ Tokens whose presence suppresses the match.
+    -> HieAST TypeIndex
+    -> Slist RealSrcSpan
+definitionScopedMatch hie required forbidden node
+    | isTopLevelDefinitionSite node
+    , let defLines = topLevelDefinitionLines hie (srcSpanStartLine (nodeSpan node))
+    , all (`linesContainWord` defLines) required
+    , not (linesContainWord forbidden defLines)
+    = S.one (nodeSpan node)
+    | otherwise = mempty
+
+-- | Is this node the defining occurrence of a top-level binding?
+isTopLevelDefinitionSite :: HieAST TypeIndex -> Bool
+isTopLevelDefinitionSite node =
+    srcSpanStartCol (nodeSpan node) == 1
+        && any isExternalBinding (Map.assocs (nodeIdentifiers (nodeInfo node)))
+  where
+    isExternalBinding :: (Identifier, IdentifierDetails TypeIndex) -> Bool
+    isExternalBinding (ident, IdentifierDetails{identInfo = info}) = case ident of
+        Right name -> isExternalName name && any isBindingContext (toList info)
+        Left _ -> False
+
+    isBindingContext :: ContextInfo -> Bool
+    isBindingContext = \case
+        ValBind {} -> True
+        MatchBind -> True
+        _ -> False
+
+-- | Source lines of the top-level definition starting on the given line.
+topLevelDefinitionLines :: HieFile -> Int -> [ByteString]
+topLevelDefinitionLines hie startLine =
+    case drop (startLine - 1) (BS8.lines (hie_hs_src hie)) of
+        [] -> []
+        firstLine : rest -> firstLine : takeWhile isContinuation rest
+  where
+    -- Blank, or indented: still inside the definition. A new top-level
+    -- declaration (or its comment) starts hard against column 1.
+    isContinuation :: ByteString -> Bool
+    isContinuation l = case BS8.uncons l of
+        Nothing -> True
+        Just (c, _) -> c == ' ' || c == '\t'
+
+{- | Whether any of the tokens occurs in the lines, matched at word boundaries.
+
+Word boundaries are load-bearing rather than cosmetic: with a plain
+'BS8.isInfixOf' a token is read out of any identifier that merely contains it,
+so a validator named @checkInputsNoRedeemer@ would look as though it inspected a
+redeemer and would silently suppress PLU-STAN-25.
+-}
+linesContainWord :: [String] -> [ByteString] -> Bool
+linesContainWord targets =
+    any (\l -> any (\t -> containsWordBoundary (BS8.pack t) l) targets)
+
+containsWordBoundary :: ByteString -> ByteString -> Bool
+containsWordBoundary needle haystack
+    | BS8.null needle = False
+    | otherwise = go haystack
+  where
+    go :: ByteString -> Bool
+    go bs =
+        let (before, after) = BS8.breakSubstring needle bs
+        in not (BS8.null after)
+            && ( let beforeCh = if BS8.null before then Nothing else Just (BS8.last before)
+                     afterCh = fst <$> BS8.uncons (BS8.drop (BS8.length needle) after)
+                     boundaryOk = maybe True (not . isIdentPartChar) beforeCh
+                         && maybe True (not . isIdentPartChar) afterCh
+                 in boundaryOk || go (BS8.drop 1 after)
+               )
+
+isIdentPartChar :: Char -> Bool
+isIdentPartChar c = isAlphaNum c || c == '_' || c == '\''
+
+{- | PLU-STAN-25: validation reads the transaction's other script inputs but
+never inspects a redeemer, so it cannot tell which operation they belong to.
+
+Reference inputs are deliberately /not/ treated as a dependency here: they
+carry no redeemer (they never appear in 'txInfoRedeemers'), so reading them can
+never be paired with the redeemer check the rule demands, and flagging them
+would suggest a fix that does not exist.
+-}
+analyseScriptInputDependencyWithoutRedeemer
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseScriptInputDependencyWithoutRedeemer insId hie curNode =
+    addObservations $ mkObservation insId hie
+        <$> definitionScopedMatch hie [inputsTokens, scriptInputTokens] redeemerTokens curNode
+  where
+    inputsTokens, scriptInputTokens, redeemerTokens :: [String]
+    inputsTokens =
+        [ "txInfoInputs"
+        ]
+
+    -- How on-chain code tells a script input apart from a pubkey one. Helper
+    -- names are included for the common case where that test is factored out,
+    -- mirroring how the TxOut token lists carry helper names.
+    scriptInputTokens =
+        [ "ScriptCredential"
+        , "addressCredential"
+        , "isScriptInput"
+        , "isScriptAddress"
+        ]
+
+    redeemerTokens =
+        [ "getRedeemer"
+        , "scriptContextRedeemer"
+        , "txInfoRedeemers"
+        , "Redeemer"
+        , "findOwnRedeemer"
+        ]
+
+
+{- | PLU-STAN-23: flag 'unstableMakeIsData', which assigns constructor indices
+positionally.
+
+This one cannot use a 'NameMeta' / 'FindAst' pattern the way PLU-STAN-02 does.
+'unstableMakeIsData' is a Template Haskell /declaration splice/: by the time the
+@.hie@ file is written the splice has been expanded, and the file references
+@PlutusTx.IsData.Class@ (from the generated instances) but never
+@PlutusTx.IsData.TH@, so there is no resolved name occurrence to match on.
+
+So we read the module source instead -- the same technique PLU-STAN-17 uses to
+find its suppression marker. The scan is anchored to the current node's start
+line, which keeps it O(1) per visited node rather than rescanning the file;
+repeated emissions for several nodes on the same line are collapsed by
+'dedupObservations'. See NOTE [Observation dedup backstop].
+-}
+analyseUnstableMakeIsDataUsage
+    :: Id Inspection
+    -> HieFile
+    -> HieAST TypeIndex
+    -> State VisitorState ()
+analyseUnstableMakeIsDataUsage insId hie curNode =
+    addObservations $ mkObservation insId hie <$> S.slist spans
+  where
+    needle :: ByteString
+    needle = "unstableMakeIsData"
+
+    curLine :: Int
+    curLine = srcSpanStartLine (nodeSpan curNode)
+
+    spans :: [RealSrcSpan]
+    spans =
+        [ mkSpan curLine col
+        | Just line <- [BS8.lines (hie_hs_src hie) !!? (curLine - 1)]
+        , col <- occurrenceCols line
+        ]
+
+    -- 1-based columns at which `needle` occurs in the line.
+    occurrenceCols :: ByteString -> [Int]
+    occurrenceCols = go 0
+      where
+        go :: Int -> ByteString -> [Int]
+        go offset bs =
+            let (before, after) = BS8.breakSubstring needle bs
+            in if BS8.null after
+                then []
+                else
+                    let idx = offset + BS8.length before
+                    in (idx + 1)
+                        : go (idx + BS8.length needle) (BS8.drop (BS8.length needle) after)
+
+    mkSpan :: Int -> Int -> RealSrcSpan
+    mkSpan lineNo col = mkRealSrcSpan
+        (mkRealSrcLoc filePath lineNo col)
+        (mkRealSrcLoc filePath lineNo (col + BS8.length needle))
+      where
+        filePath = mkFastString (hie_hs_file hie)
 
 analyseMissingTxOutReferenceScriptCheck
     :: Id Inspection
@@ -3682,7 +3979,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
         -> (Bool, Maybe (Map String (Set String), Bool), Map String (Set String))
     collectRecordFieldAliases varOccs (pendingTxOutIntro, activeCapture, aliasesByField) rawLine =
         let line = lineCodePart rawLine
-            hasTxOutWord = containsWordBS "TxOut" line
+            hasTxOutWord = containsWordBoundary "TxOut" line
             hasOpenBrace = BS8.elem '{' line
             lineAliases = parseRecordFieldAliasesFromLine line
             commitAliases rhsOcc aliasesToCommit =
@@ -3859,7 +4156,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
         lineLooksLikeAddressOperandToken :: ByteString -> Bool
         lineLooksLikeAddressOperandToken line =
             isNothing (parseBindingLhs line)
-                && containsWordBS "txOutAddress" (lineCodePart line)
+                && containsWordBoundary "txOutAddress" (lineCodePart line)
 
     subtreeHasEqName :: HieAST TypeIndex -> Bool
     subtreeHasEqName n@Node{nodeChildren = children} =
@@ -4126,15 +4423,15 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
 
     lineMentionsVarOcc :: String -> ByteString -> Bool
     lineMentionsVarOcc varOcc line =
-        containsWordBS (BS8.pack varOcc) (lineCodePart line)
+        containsWordBoundary (BS8.pack varOcc) (lineCodePart line)
 
     lineLooksLikeCaseScrutinee :: String -> ByteString -> Bool
     lineLooksLikeCaseScrutinee varOcc line =
         let code = lineCodePart line
         in isNothing (parseBindingLhs line)
-            && containsWordBS "case" code
-            && containsWordBS "of" code
-            && containsWordBS (BS8.pack varOcc) code
+            && containsWordBoundary "case" code
+            && containsWordBoundary "of" code
+            && containsWordBoundary (BS8.pack varOcc) code
     isSkippableCodeLine :: ByteString -> Bool
     isSkippableCodeLine line =
         BS8.null $ BS8.dropWhile isSpace $ lineCodePart line
@@ -4147,7 +4444,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
     lineHasAnyFieldToken :: [String] -> ByteString -> Bool
     lineHasAnyFieldToken tokens line =
         let code = lineCodePart line
-        in any (\tok -> containsWordBS (BS8.pack tok) code) tokens
+        in any (\tok -> containsWordBoundary (BS8.pack tok) code) tokens
 
     isUnusedBindingLine :: [(Int, ByteString)] -> Int -> ByteString -> Bool
     isUnusedBindingLine numberedLines lineNumber line = case parseBindingLhs line of
@@ -4155,7 +4452,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
         Just lhsOcc ->
             not $ any
                 (\(n, candidateLine) ->
-                    n > lineNumber && containsWordBS (BS8.pack lhsOcc) candidateLine
+                    n > lineNumber && containsWordBoundary (BS8.pack lhsOcc) candidateLine
                 )
                 numberedLines
 
@@ -4175,7 +4472,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
     firstWordAndRest :: ByteString -> Maybe (String, ByteString)
     firstWordAndRest bs = do
         let trimmed = BS8.dropWhile isSpace bs
-            (word, rest) = BS8.span isIdentifierChar trimmed
+            (word, rest) = BS8.span isIdentPartChar trimmed
         guard (not $ BS8.null word)
         pure (BS8.unpack word, BS8.dropWhile isSpace rest)
 
@@ -4183,38 +4480,19 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
     firstWordOccLoose :: ByteString -> Maybe String
     firstWordOccLoose bs = do
         let trimmed = BS8.dropWhile (\c -> isSpace c || c == '{' || c == '}') bs
-            word = BS8.takeWhile isIdentifierChar trimmed
+            word = BS8.takeWhile isIdentPartChar trimmed
         guard (not $ BS8.null word)
         pure (BS8.unpack word)
     lastWordOcc :: ByteString -> Maybe String
     lastWordOcc bs = do
         let trimmed = trimRight bs
-            revWord = BS8.takeWhile isIdentifierChar (BS8.reverse trimmed)
+            revWord = BS8.takeWhile isIdentPartChar (BS8.reverse trimmed)
             word = BS8.reverse revWord
         guard (not $ BS8.null word)
         pure (BS8.unpack word)
 
     trimRight :: ByteString -> ByteString
     trimRight = BS8.reverse . BS8.dropWhile isSpace . BS8.reverse
-
-    isIdentifierChar :: Char -> Bool
-    isIdentifierChar c = isAlphaNum c || c == '_' || c == '\''
-
-    containsWordBS :: ByteString -> ByteString -> Bool
-    containsWordBS needle haystack
-        | BS8.null needle = False
-        | otherwise = go haystack
-      where
-        go bs = case BS8.breakSubstring needle bs of
-            (_before, after)
-                | BS8.null after -> False
-                | otherwise ->
-                    let idx = BS8.length bs - BS8.length after
-                        beforeCh = bs BS8.!? (idx - 1)
-                        afterCh = bs BS8.!? (idx + BS8.length needle)
-                        beforeOk = maybe True (not . isIdentifierChar) beforeCh
-                        afterOk = maybe True (not . isIdentifierChar) afterCh
-                    in (beforeOk && afterOk) || go (BS8.drop 1 after)
 
     identTypeContainsTyConName :: String -> IdentifierDetails TypeIndex -> Bool
     identTypeContainsTyConName needle IdentifierDetails{identType = identType'} = case identType' of
@@ -4237,6 +4515,7 @@ analyseMissingTxOutFieldCheck missingField insId hie curNode =
         TxOutFieldUsage{txOutFieldStakingChecked = False} | missing == MissingStakingCredential -> True
         TxOutFieldUsage{txOutFieldValueChecked = False} | missing == MissingValue -> True
         TxOutFieldUsage{txOutFieldDatumChecked = False} | missing == MissingDatum -> True
+        TxOutFieldUsage{txOutFieldAddressChecked = False} | missing == MissingAddress -> True
         _ -> False
 
     hasTxOutEvidence :: HieAST TypeIndex -> Bool

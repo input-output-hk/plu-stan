@@ -68,6 +68,12 @@ module Stan.Inspection.AntiPattern
     , plustan18
     , plustan19
     , plustan21
+    , plustan22
+    , plustan23
+    , plustan24
+    , plustan25
+    , plustan26
+    , plustan27
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -135,6 +141,12 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan18
     , plustan19
     , plustan21
+    , plustan22
+    , plustan23
+    , plustan24
+    , plustan25
+    , plustan26
+    , plustan27
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -840,3 +852,85 @@ plustan21 = mkAntiPatternInspection (Id "PLU-STAN-21") "Immutable credentials ba
         ]
     & withPlutusCategory
     & severityL .~ Warning
+
+plustan22 :: Inspection
+plustan22 = mkAntiPatternInspection (Id "PLU-STAN-22") "TxOut validation misses address checks"
+    MissingTxOutAddressCheck
+    & descriptionL .~ "Validation logic over TxOut/TxOutAsData checks multiple output fields but never constrains the output address, so the validated output can be paid to an arbitrary destination."
+    & solutionL .~
+        [ "Assert the destination address (payment and staking credentials) of the validated output"
+        , "If the destination is intentionally unconstrained, document this and suppress the warning"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan23 :: Inspection
+plustan23 = mkAntiPatternInspection (Id "PLU-STAN-23") "unstableMakeIsData assigns unstable constructor indices"
+    UnstableMakeIsDataUsage
+    & descriptionL .~ "'unstableMakeIsData' derives constructor indices positionally, so adding or reordering a constructor silently changes the on-chain data encoding and breaks every UTxO already locked under the old layout."
+    & solutionL .~
+        [ "Use 'makeIsDataIndexed' and pin each constructor to an explicit index"
+        , "Never renumber an index that has already been used on chain"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan24 :: Inspection
+plustan24 = mkAntiPatternInspection (Id "PLU-STAN-24") "Empty string used to detect ADA"
+    (FindAst emptyAdaPat)
+    & descriptionL .~ "An empty string literal is used to build a TokenName or CurrencySymbol, standing in for ADA instead of the dedicated 'adaToken' / 'adaSymbol' helpers."
+    & solutionL .~
+        [ "Use 'adaSymbol' and 'adaToken' from PlutusLedgerApi.V1.Value"
+        , "Reserve string literals for genuinely user-defined asset names"
+        ]
+    & withPlutusCategory
+    & severityL .~ Style
+  where
+    emptyAdaPat :: PatternAst
+    emptyAdaPat = app
+        (anyNamesToPatternAst $ tokenNameMeta :| [currencySymbolMeta])
+        (PatternAstConstant (ExactStr "\"\""))
+
+    tokenNameMeta, currencySymbolMeta :: NameMeta
+    tokenNameMeta = ledgerValueName "tokenName"
+    currencySymbolMeta = ledgerValueName "currencySymbol"
+
+    ledgerValueName :: Text -> NameMeta
+    ledgerValueName name = NameMeta
+        { nameMetaName       = name
+        , nameMetaModuleName = ModuleName "PlutusLedgerApi.V1.Value"
+        , nameMetaPackage    = "plutus-ledger-api"
+        }
+
+plustan25 :: Inspection
+plustan25 = mkAntiPatternInspection (Id "PLU-STAN-25") "Script-input dependency without a redeemer check"
+    ScriptInputDependencyWithoutRedeemer
+    & descriptionL .~ "Validation reads the transaction's other script inputs but never inspects a redeemer, so it cannot tell which operation those inputs were spent for and can be satisfied by an unrelated transaction."
+    & solutionL .~
+        [ "Inspect the redeemer of the script inputs the validation depends on"
+        , "Require the expected redeemer constructor before trusting a co-spent script input"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan26 :: Inspection
+plustan26 = mkAntiPatternInspection (Id "PLU-STAN-26") "zip without a length check"
+    ZipWithoutLengthCheck
+    & descriptionL .~ "'zip' truncates to the shorter of its two lists, so when the lengths are not compared first any trailing elements of the longer list are silently dropped and never validated."
+    & solutionL .~
+        [ "Compare the lengths of both lists before zipping and reject a mismatch"
+        , "Or use a zip that fails on unequal lengths rather than truncating"
+        ]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan27 :: Inspection
+plustan27 = mkAntiPatternInspection (Id "PLU-STAN-27") "Input spent only to be recreated identically"
+    SpendAndRecreateInsteadOfReferenceInput
+    & descriptionL .~ "Validation asserts that an output reproduces a spent input's address, value, datum and reference script -- that is, the UTxO is spent only to be recreated unchanged. A reference input reads it without spending it."
+    & solutionL .~
+        [ "Read the UTxO with a reference input instead of spending and recreating it"
+        , "Spending costs execution budget and serialises access to the UTxO for no benefit"
+        ]
+    & withPlutusCategory
+    & severityL .~ Performance
