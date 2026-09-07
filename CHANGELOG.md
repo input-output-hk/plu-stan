@@ -38,6 +38,18 @@ The change log is available [on GitHub][2].
   tag. Releases are now created as prereleases (published, tag resolvable,
   and excluded from `/releases/latest`) and promoted once assets exist.
 
+## vscode-plustan 0.3.4
+
+* Scope the binary-management messages to the CLI. Every notification and
+  output line in `downloadManager.ts` now reads `Plu-Stan CLI:` rather than
+  the generic `Plu-Stan:`, so "already up to date" and "download failed"
+  clearly refer to the backend binary and not the extension itself. The
+  extension's own messages (analysis results, session state, status bar) keep
+  the plain `Plu-Stan:` prefix, making the two distinguishable at a glance.
+
+  This matters because the update prompt fires from a once-a-day background
+  check, so it can appear without the user having asked for anything.
+
 ## vscode-plustan 0.3.0
 
 * Add the review-session cockpit: **Start Review** analyzes the chosen
