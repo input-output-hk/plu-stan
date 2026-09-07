@@ -26,11 +26,33 @@ jobs:
       # because GitHub's /releases/latest ignores prereleases -- which is the
       # endpoint the VS Code extension uses to find a binary. promote_release
       # below flips it to a full latest release once assets exist.
+      # Release notes come from the CHANGELOG section matching the tag, so the
+      # release page says the same thing as the repo. v1.0.0 shipped with an
+      # empty body because this step only passed --title. If there is no
+      # matching section (tag and CHANGELOG out of step), fall back to GitHub's
+      # generated notes rather than shipping nothing.
       - name: Create Release
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --prerelease \
-            --title "Release ${{ github.ref_name }}"
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="## ${VERSION}" '
+            $0 == v {found=1; next}
+            found && /^## / {exit}
+            found {print}
+          ' CHANGELOG.md | sed '/./,$!d' > notes.md
+
+          if [ -s notes.md ]; then
+            echo "Using CHANGELOG section for ${VERSION} ($(wc -l < notes.md) lines)."
+            gh release create "${GITHUB_REF_NAME}" \
+              --prerelease \
+              --title "Release ${GITHUB_REF_NAME}" \
+              --notes-file notes.md
+          else
+            echo "No '## ${VERSION}' section in CHANGELOG.md; using generated notes." >&2
+            gh release create "${GITHUB_REF_NAME}" \
+              --prerelease \
+              --title "Release ${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
