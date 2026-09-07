@@ -189,10 +189,10 @@ function resignAdHoc(binaryPath: string, output: vscode.OutputChannel): Promise<
     execFile("/usr/bin/codesign", ["--force", "--sign", "-", binaryPath], (error, _stdout, stderr) => {
       if (error) {
         output.appendLine(
-          `Plu-Stan: ad-hoc re-sign failed (macOS may kill the binary with SIGKILL): ${stderr || error.message}`
+          `Plu-Stan CLI: ad-hoc re-sign failed (macOS may kill the binary with SIGKILL): ${stderr || error.message}`
         );
       } else {
-        output.appendLine("Plu-Stan: re-signed binary ad-hoc for macOS.");
+        output.appendLine("Plu-Stan CLI: re-signed binary ad-hoc for macOS.");
       }
       resolve();
     });
@@ -221,7 +221,7 @@ export async function offerDownload(
   }
 
   const choice = await vscode.window.showInformationMessage(
-    "Plu-Stan: No binary configured. Download the latest plu-stan binary automatically?",
+    "Plu-Stan CLI: No binary configured. Download the latest plu-stan binary automatically?",
     "Download",
     "Set Path Manually"
   );
@@ -246,23 +246,23 @@ export async function downloadLatest(
 ): Promise<string | undefined> {
   const resolved = platform ?? detectPlatform();
   if (!resolved) {
-    vscode.window.showErrorMessage("Plu-Stan: auto-download is not supported on this platform/architecture.");
+    vscode.window.showErrorMessage("Plu-Stan CLI: auto-download is not supported on this platform/architecture.");
     return undefined;
   }
 
   if (!ghc) {
     vscode.window.showErrorMessage(
-      "Plu-Stan: couldn't detect your project's GHC version (no .hie files found). " +
+      "Plu-Stan CLI: couldn't detect your project's GHC version (no .hie files found). " +
       "Build your project first, or set `plustan.binaryPath` to a plustan you built yourself."
     );
     return undefined;
   }
 
   return vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: "Plu-Stan: Downloading binary", cancellable: true },
+    { location: vscode.ProgressLocation.Notification, title: "Plu-Stan CLI: Downloading binary", cancellable: true },
     async (_progress, token) => {
       try {
-        output.appendLine("Plu-Stan: fetching latest release info from GitHub...");
+        output.appendLine("Plu-Stan CLI: fetching latest release info from GitHub...");
         const release = await fetchJson(GITHUB_API_LATEST) as GitHubRelease;
         const version = release.tag_name.replace(/^v/, "");
         const name = assetName(version, resolved, ghc);
@@ -291,7 +291,7 @@ export async function downloadLatest(
         const ext = platformExt(resolved);
         const binaryPath = path.join(storageDir, `plustan-ghc${ghcSeries(ghc)}${ext}`);
 
-        output.appendLine(`Plu-Stan: downloading ${name}...`);
+        output.appendLine(`Plu-Stan CLI: downloading ${name}...`);
         await downloadFile(asset.browser_download_url, binaryPath, token);
 
         if (process.platform !== "win32") {
@@ -305,13 +305,13 @@ export async function downloadLatest(
         cache[ghcSeries(ghc)] = { path: binaryPath, version };
         await context.globalState.update(CACHED_BINARIES_KEY, cache);
 
-        output.appendLine(`Plu-Stan: ${version} (GHC ${ghc}) installed at ${binaryPath}`);
-        vscode.window.showInformationMessage(`Plu-Stan ${version} (GHC ${ghc}) installed. Ready to use.`);
+        output.appendLine(`Plu-Stan CLI: ${version} (GHC ${ghc}) installed at ${binaryPath}`);
+        vscode.window.showInformationMessage(`Plu-Stan CLI ${version} (GHC ${ghc}) installed. Ready to use.`);
         return binaryPath;
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        output.appendLine(`Plu-Stan: download error: ${msg}`);
-        vscode.window.showErrorMessage(`Plu-Stan: download failed — ${msg}`);
+        output.appendLine(`Plu-Stan CLI: download error: ${msg}`);
+        vscode.window.showErrorMessage(`Plu-Stan CLI: download failed — ${msg}`);
         return undefined;
       }
     }
@@ -334,7 +334,7 @@ export async function checkForUpdates(
   const platform = detectPlatform();
   if (!platform) {
     if (!quiet) {
-      vscode.window.showWarningMessage("Plu-Stan: auto-download is not supported on this platform.");
+      vscode.window.showWarningMessage("Plu-Stan CLI: auto-download is not supported on this platform.");
     }
     return;
   }
@@ -342,7 +342,7 @@ export async function checkForUpdates(
   if (!ghc) {
     if (!quiet) {
       vscode.window.showWarningMessage(
-        "Plu-Stan: couldn't detect your project's GHC version (no .hie files found). " +
+        "Plu-Stan CLI: couldn't detect your project's GHC version (no .hie files found). " +
         "Build your project first so Plu-Stan can fetch a matching binary."
       );
     }
