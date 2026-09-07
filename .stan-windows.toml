@@ -1,3 +1,16 @@
+# Windows counterpart of .stan.toml (paths need backslash separators here).
+# Keep the [[remove]] / [[check]] entries in sync with .stan.toml -- the CI
+# "Dogfooding on Windows" step uses this file, so drift makes Windows analyse a
+# different set of modules than Linux/macOS and fail on its own source.
+[[remove]]
+directory = "src\\"
+
+[[remove]]
+directory = "app\\"
+
+[[remove]]
+directory = "test\\"
+
 [[remove]]
 directory = "target\\"
 

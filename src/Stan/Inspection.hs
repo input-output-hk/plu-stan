@@ -132,6 +132,8 @@ data InspectionAnalysis
     | RedeemerSuppliedIndicesUniqueness
     -- | `&&` used in on-chain code (prefer strict builtinAnd).
     | LazyAndInOnChainCode
+    -- | Credential-like values are stored top-level or baked into compiled code.
+    | ImmutableCredential
     -- | TxOut validation misses reference script checks.
     | MissingTxOutReferenceScriptCheck
     -- | TxOut validation misses staking credential checks.
@@ -140,6 +142,16 @@ data InspectionAnalysis
     | MissingTxOutValueCheck
     -- | TxOut validation misses datum checks.
     | MissingTxOutDatumCheck
+    -- | TxOut validation misses address checks.
+    | MissingTxOutAddressCheck
+    -- | 'unstableMakeIsData' used instead of 'makeIsDataIndexed'.
+    | UnstableMakeIsDataUsage
+    -- | Validation depends on other script inputs without checking a redeemer.
+    | ScriptInputDependencyWithoutRedeemer
+    -- | 'zip' used without comparing the lengths of both lists.
+    | ZipWithoutLengthCheck
+    -- | An input is spent only to be recreated identically.
+    | SpendAndRecreateInsteadOfReferenceInput
     deriving stock (Show, Eq)
 
 -- | Show 'Inspection' in a human-friendly format.

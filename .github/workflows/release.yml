@@ -14,8 +14,23 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v5
 
+      # Created as a PRERELEASE, not a draft. A draft release is untagged until
+      # it is published -- `gh release create <tag> --draft` reports a URL like
+      # .../releases/tag/untagged-b33d94318fbaa71ad116 -- so the tag cannot be
+      # resolved, and the `gh release upload <tag>` in every build leg below
+      # fails with "release not found". That is exactly how the v1.0.0 run
+      # (33880256903) failed: all six binaries built, all six uploads failed.
+      #
+      # A prerelease is published, so its tag resolves and uploads work. It is
+      # still safe to have one sitting around empty while the matrix builds,
+      # because GitHub's /releases/latest ignores prereleases -- which is the
+      # endpoint the VS Code extension uses to find a binary. promote_release
+      # below flips it to a full latest release once assets exist.
       - name: Create Release
-        run: gh release create ${{ github.ref_name }} --draft --title "Release ${{ github.ref_name }}"
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --prerelease \
+            --title "Release ${{ github.ref_name }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -123,13 +138,15 @@ jobs:
           # so one bad GHC/OS leg never blocks shipping the rest. But never
           # promote an EMPTY release to `--latest`: that would point every
           # user's auto-download at a release with no binaries. Require at
-          # least one uploaded asset before un-drafting.
-          COUNT=$(gh release view ${{ github.ref_name }} --json assets --jq '.assets | length')
+          # least one uploaded asset before clearing the prerelease flag.
+          COUNT=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets | length')
           echo "Uploaded assets: ${COUNT}"
           if [ "${COUNT}" -gt 0 ]; then
-            gh release edit ${{ github.ref_name }} --draft=false --latest
+            gh release edit "${{ github.ref_name }}" --prerelease=false --latest
           else
-            echo "No assets uploaded — leaving release as draft." >&2
+            echo "No assets uploaded — leaving release as a prerelease." >&2
+            echo "It stays out of /releases/latest, so no user auto-download" >&2
+            echo "will resolve to this empty release." >&2
             exit 1
           fi
         env:

@@ -17,7 +17,6 @@ import Stan.Core.Id (Id (..))
 import Stan.Inspection (Inspection)
 
 import qualified Data.HashMap.Strict as HM
-import qualified Data.Text as Text
 
 
 -- | Extended, Plinth-specific documentation for one inspection.
@@ -39,7 +38,7 @@ plinthDocsMap :: HashMap (Id Inspection) InspectionDocs
 plinthDocsMap = fromList
     [ ( Id "PLU-STAN-01"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "The signature builtins only prove that a signature matches a message and a"
               , "public key — they say nothing about which transaction the message authorizes."
               , "If the message is supplied by the redeemer and does not commit to this"
@@ -47,12 +46,12 @@ plinthDocsMap = fromList
               , "on-chain), anyone who has seen one valid signature can replay it in a new"
               , "transaction and re-run the authorized action as often as they like."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- the redeemer supplies both message and signature: the same signed"
               , "-- blob authorizes this action in every future transaction (replay)"
               , "checkAuth (msg, sig) = verifyEd25519Signature ownerKey msg sig"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- the message is rebuilt on-chain and commits to the spent UTxO,"
               , "-- so a captured signature is useless in any other transaction"
               , "checkAuth sig ownRef ="
@@ -64,7 +63,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-02"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "'unsafeFromBuiltinData' eagerly decodes the whole BuiltinData blob into a"
               , "sums-of-products value. An attacker who controls the datum can attach a huge"
               , "or deeply nested blob so that decoding alone blows the execution budget and"
@@ -73,13 +72,13 @@ plinthDocsMap = fromList
               , "script can do; inspecting only the needed fields on the raw BuiltinData is"
               , "far cheaper."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- decodes the entire datum, however large the attacker made it"
               , "validate d _redeemer _ctx ="
               , "  let LoanDatum{owner, amount} = unsafeFromBuiltinData d"
               , "  in checkTerms owner amount"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- walk the BuiltinData directly and touch only the needed fields"
               , "-- (BI = PlutusTx.Builtins.Internal)"
               , "validate d _redeemer _ctx ="
@@ -93,7 +92,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-03"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "Every 'Maybe' produced on-chain allocates a 'Just'/'Nothing' constructor that"
               , "is usually deconstructed immediately afterwards, paying execution units for"
               , "nothing. Worse, defaulting with 'fromMaybe' silently substitutes a value in"
@@ -101,11 +100,11 @@ plinthDocsMap = fromList
               , "\"not found\" turns into a successful validation with a bogus value. Explicit"
               , "fast-fail matching (or continuation-passing) is both cheaper and safer."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- a missing value silently becomes 0 and validation \"succeeds\" on garbage"
               , "total = fromMaybe 0 (lookupValue token outputs)"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- fail fast: a missing value must reject the transaction"
               , "-- (traceError is safe inside a case branch; Plinth's strict application"
               , "--  means it would fire eagerly in an argument position like fromMaybe's)"
@@ -118,7 +117,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-04"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "When the hash is drawn from an output's address, comparing only a"
               , "PubKeyHash, ScriptHash, or Credential checks the payment part of that"
               , "address and ignores the staking part. An attacker can construct an output"
@@ -127,11 +126,11 @@ plinthDocsMap = fromList
               , "also fires on legitimate uses (e.g. 'txInfoSignatories' membership checks);"
               , "those can be reviewed and suppressed."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- only the payment credential is compared"
               , "paysToOwner out = addressCredential (txOutAddress out) == ownerCredential"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- the full Address (payment + staking) is compared"
               , "paysToOwner out = txOutAddress out == ownerAddress"
               ]
@@ -140,7 +139,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-05"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "Higher-order helpers such as 'all', 'any', 'find', 'filter', and 'foldr'"
               , "compile to UPLC that builds and applies a closure for the predicate on every"
               , "element, and the Foldable-polymorphic versions add dictionary overhead on"
@@ -149,11 +148,11 @@ plinthDocsMap = fromList
               , "transaction over the execution budget. A specialized recursive function"
               , "inlines the predicate and eliminates the closure traffic."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- 'any' applies the lambda closure to each element"
               , "paidEnough outs = any (\\o -> txOutValue o `geq` price) outs"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- specialized recursion: the predicate is inlined into the loop"
               , "paidEnough = go"
               , "  where"
@@ -165,7 +164,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-06"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "Composing traversals such as 'map' over 'filter' walks the list twice and"
               , "materializes an intermediate list in between; UPLC has no fusion, so every"
               , "extra pass and every intermediate cons cell is billed as CPU and memory"
@@ -174,11 +173,11 @@ plinthDocsMap = fromList
               , "recursive function does the same work in one traversal with no intermediate"
               , "allocation."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- two passes plus an intermediate list"
               , "scriptOuts = map txOutValue (filter isScriptOut (txInfoOutputs info))"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- one fused pass, no intermediate list"
               , "scriptOuts = go (txInfoOutputs info)"
               , "  where"
@@ -191,7 +190,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-07"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "GHC desugars guards into nested pattern-match fall-through chains, and the"
               , "Plinth compiler turns those into deeper, more expensive UPLC than a plain"
               , "if-then-else expresses. The redundant match scaffolding costs execution"
@@ -199,13 +198,13 @@ plinthDocsMap = fromList
               , "same logic written with explicit conditionals compiles to a flat, cheap"
               , "chain of 'ifThenElse' calls."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "tier n"
               , "  | n <= 10   = 1"
               , "  | n <= 100  = 2"
               , "  | otherwise = 3"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "tier n ="
               , "  if n <= 10 then 1"
               , "  else if n <= 100 then 2"
@@ -216,7 +215,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-08"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "In Plinth a non-strict let binding is compiled as a delayed computation, so"
               , "a binding that is referenced several times can be re-evaluated at every use"
               , "site in the generated UPLC. If the bound expression is expensive — say,"
@@ -224,12 +223,12 @@ plinthDocsMap = fromList
               , "reference instead of once per transaction. A bang pattern forces one shared"
               , "evaluation up front."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- 'total' may be recomputed at each of its two use sites"
               , "let total = valueSpent info"
               , "in total `geq` minDeposit && total `geq` minCollateral"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- forced once, shared by both checks"
               , "let !total = valueSpent info"
               , "in total `geq` minDeposit && total `geq` minCollateral"
@@ -239,7 +238,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-09"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "'valueOf' inspects a single currency/token entry, so a comparison built on"
               , "it says nothing about the rest of the Value. An output can satisfy"
               , "'valueOf out cs tn >= n' while also carrying any number of unexpected dust"
@@ -248,11 +247,11 @@ plinthDocsMap = fromList
               , "protocol parameter that changes over time. Compare whole values, or bound"
               , "the token set explicitly."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- passes even if the output is stuffed with arbitrary extra tokens"
               , "paidOut out = valueOf (txOutValue out) cs tn == amount"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- compare the full expected value: nothing unexpected can ride along"
               , "paidOut out = txOutValue out == expectedValue"
               ]
@@ -261,7 +260,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-10"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "'unsafeFromBuiltinData' checks only the shape of the encoding, not the"
               , "ledger's invariants — e.g. that a credential hash is exactly 28 bytes. A"
               , "user-supplied Address or PubKeyHash can be structurally valid yet impossible"
@@ -271,13 +270,13 @@ plinthDocsMap = fromList
               , "never build a repayment transaction, and their collateral is guaranteed to"
               , "be liquidated."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- repayAddr came from attacker-supplied data; if its hash is not"
               , "-- 28 bytes, no real output can ever satisfy this equality"
               , "LoanDatum{repayAddr} = unsafeFromBuiltinData datum"
               , "repaid out = txOutAddress out == repayAddr"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- validate ledger invariants (hash lengths, well-formed staking part)"
               , "-- on the raw BuiltinData before trusting the address in a check"
               , "repaid out ="
@@ -289,7 +288,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-11"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "'currencySymbolValueOf' sums every token amount under a currency symbol"
               , "without requiring the entries to have a uniform sign. A burn-only check like"
               , "'currencySymbolValueOf minted ownCS < 0' is satisfied by a transaction that"
@@ -297,11 +296,11 @@ plinthDocsMap = fromList
               , "negative, yet the attacker just minted an unauthorized token through your"
               , "Burn redeemer."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- passes with txInfoMint = [(TokenA, -2), (TokenB, 1)]: TokenB is minted!"
               , "Burn -> currencySymbolValueOf (txInfoMint info) ownCS < 0"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- every amount under our symbol must be strictly negative"
               , "Burn -> allBurns (tokenAmounts (txInfoMint info) ownCS)"
               , "  where"
@@ -313,7 +312,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-12"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "A transaction's validity range is chosen by whoever builds the transaction,"
               , "and by default it is unbounded on both sides. Interval helpers like 'from',"
               , "'to', 'always', or 'contains' make it easy to write a time check that an"
@@ -322,12 +321,12 @@ plinthDocsMap = fromList
               , "letting vesting or auction funds be claimed early. Always require the"
               , "relevant bound of 'txInfoValidRange' to be 'Finite' before comparing it."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- an open-ended range [now, +inf) extends past the deadline, so this"
               , "-- passes even for a transaction submitted before the deadline"
               , "deadlinePassed = not (to deadline `contains` txInfoValidRange info)"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- require a Finite lower bound and compare it against the deadline"
               , "deadlinePassed = case ivFrom (txInfoValidRange info) of"
               , "  LowerBound (Finite t) _ -> t > deadline"
@@ -338,7 +337,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-13"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "A validator that pins down an output's address, value, and datum but never"
               , "constrains 'txOutReferenceScript' lets the transaction builder attach an"
               , "arbitrary reference script to that output. That silently raises the"
@@ -348,14 +347,14 @@ plinthDocsMap = fromList
               , "attacker's script. Assert the expected policy (usually 'Nothing')"
               , "explicitly, or document why it is irrelevant."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "okOutput out ="
               , "  txOutAddress out == vaultAddr"
               , "    && txOutValue out == expectedValue"
               , "    && txOutDatum out == expectedDatum"
               , "    -- txOutReferenceScript is never constrained"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "okOutput out ="
               , "  txOutAddress out == vaultAddr"
               , "    && txOutValue out == expectedValue"
@@ -367,7 +366,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-14"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "Checking several fields of an output while matching only the payment part"
               , "of its address leaves the staking credential attacker-chosen. The output"
               , "still \"pays to the script\" as far as the payment credential is concerned,"
@@ -376,13 +375,13 @@ plinthDocsMap = fromList
               , "contract is supposed to protect. Compare the full 'Address', or assert the"
               , "staking credential explicitly."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "okOutput out ="
               , "  txOutValue out == expectedValue"
               , "    && addressCredential (txOutAddress out) == vaultCredential"
               , "    -- the staking part of the address is unconstrained"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "okOutput out ="
               , "  txOutValue out == expectedValue"
               , "    && txOutAddress out == vaultAddress  -- payment AND staking parts"
@@ -392,7 +391,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-15"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "If a validator checks an output's address and datum but never constrains"
               , "'txOutValue', the transaction builder decides how much value that output"
               , "carries. The classic exploit is a continuing-output check: the attacker"
@@ -401,13 +400,13 @@ plinthDocsMap = fromList
               , "output needs an explicit value constraint — at minimum the required assets"
               , "and amounts."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "okOutput out ="
               , "  txOutAddress out == vaultAddr"
               , "    && txOutDatum out == expectedDatum"
               , "    -- value is unconstrained: a dust output satisfies this"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "okOutput out ="
               , "  txOutAddress out == vaultAddr"
               , "    && txOutDatum out == expectedDatum"
@@ -418,7 +417,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-16"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "On-chain arithmetic is integer-only, and 'divide' truncates. Dividing before"
               , "multiplying throws the remainder away before it can be scaled back up, so"
               , "results are systematically too small — and an attacker picks the amounts."
@@ -427,11 +426,11 @@ plinthDocsMap = fromList
               , "amounts. Multiplying first keeps full precision until the single final"
               , "division."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- amount = 9999 gives fee 0 for any rate: rounding happens too early"
               , "fee amount rate = (amount `divide` 10000) * rate"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- multiply first: rounding happens once, at the very end"
               , "fee amount rate = (amount * rate) `divide` 10000"
               ]
@@ -440,7 +439,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-17"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "Redeemers often carry indices into the inputs or outputs list to spare the"
               , "script an on-chain search. If the validator does not enforce that those"
               , "indices are pairwise distinct, an attacker submits the same index twice and"
@@ -449,14 +448,14 @@ plinthDocsMap = fromList
               , "obligations. Enforce uniqueness (strictly increasing indices, or a bitmask)"
               , "or select elements by stable identifiers such as 'TxOutRef' instead."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- redeemer [2, 2] makes one output satisfy two claims"
               , "checkClaims is = go is"
               , "  where"
               , "    go []         = True"
               , "    go (i : rest) = paysClaim (txInfoOutputs info !! i) && go rest"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "-- strictly increasing indices are necessarily unique"
               , "checkClaims is = go (negate 1) is"
               , "  where"
@@ -469,7 +468,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-18"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "Plinth compiles the lazy '(&&)' with delay/force wrappers so that the right"
               , "operand is only evaluated when the left one is 'True'. In the predicate of"
               , "a branch whose failure case immediately errors, that laziness buys nothing"
@@ -478,11 +477,11 @@ plinthDocsMap = fromList
               , "'ifThenElse' avoids the overhead. Keep '(&&)' only when the right-hand side"
               , "deliberately throws (e.g. 'traceError') and short-circuiting matters."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "-- lazy (&&) adds delay/force overhead; the failure branch errors anyway"
               , "if signedByOwner && deadlineOk then () else traceError \"bad tx\""
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "{-# INLINE builtinAnd #-}"
               , "builtinAnd :: Bool -> Bool -> Bool"
               , "builtinAnd b1 b2 = BI.ifThenElse b1 b2 False"
@@ -494,7 +493,7 @@ plinthDocsMap = fromList
       )
     , ( Id "PLU-STAN-19"
       , InspectionDocs
-          { docsWhyItMatters = Text.unlines
+          { docsWhyItMatters = unlines
               [ "An output re-locked at a script address carries the contract's state in its"
               , "datum. If the validator checks address and value but leaves the datum"
               , "unconstrained, the transaction builder writes whatever state they like into"
@@ -503,17 +502,197 @@ plinthDocsMap = fromList
               , "bricking the UTxO and the funds it holds. Pin down the datum shape and its"
               , "security-critical fields for every continuing output."
               ]
-          , docsBadExample = Text.unlines
+          , docsBadExample = unlines
               [ "okOutput out ="
               , "  txOutAddress out == vaultAddr"
               , "    && txOutValue out == expectedValue"
               , "    -- datum unconstrained: the attacker rewrites the vault state"
               ]
-          , docsGoodExample = Text.unlines
+          , docsGoodExample = unlines
               [ "okOutput out ="
               , "  txOutAddress out == vaultAddr"
               , "    && txOutValue out == expectedValue"
               , "    && txOutDatum out == OutputDatum (Datum (toBuiltinData newState))"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-21"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "A credential compiled into a validator is a key you can never rotate. A"
+              , "script\'s address derives from its hash, so replacing the constant -- or the"
+              , "value applied to the compiled code via applyCode -- produces a *different*"
+              , "script at a *different* address. If that key is lost every UTxO it guards is"
+              , "frozen; if it is compromised the attacker keeps that authority until you"
+              , "deploy a new script and migrate every locked UTxO to it. Holding the"
+              , "credential in datum instead lets a governance action replace it in one"
+              , "transaction, with no redeploy and no migration."
+              ]
+          , docsBadExample = unlines
+              [ "-- baked in two ways: as a top-level constant, and specialised into the"
+              , "-- compiled validator, so neither can be changed after deployment"
+              , "adminKey :: PubKeyHash"
+              , "adminKey = PubKeyHash \"a1b2c3...\""
+              , ""
+              , "validator = $$(compile [|| mkValidator ||]) `unsafeApplyCode` liftCodeDef adminKey"
+              ]
+          , docsGoodExample = unlines
+              [ "-- the authority lives in the datum and can be rotated in place"
+              , "data VaultDatum = VaultDatum { vaultAdmin :: PubKeyHash }"
+              , ""
+              , "signedByAdmin d info = vaultAdmin d `elem` txInfoSignatories info"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-22"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "Validating what an output *contains* while never checking where it *goes*"
+              , "is a payment-redirection bug. If the validator pins down the value, datum"
+              , "and reference script of a continuing output but leaves its address"
+              , "unconstrained, the transaction builder simply points that output at their"
+              , "own wallet: every field-level assertion still passes and the funds leave"
+              , "the contract. The address is what makes the other checks meaningful, so"
+              , "assert the payment credential -- and the staking credential with it."
+              ]
+          , docsBadExample = unlines
+              [ "okOutput out ="
+              , "  txOutValue out == expectedValue"
+              , "    && txOutDatum out == OutputDatum (Datum (toBuiltinData newState))"
+              , "    -- address unconstrained: the output can be paid anywhere"
+              ]
+          , docsGoodExample = unlines
+              [ "okOutput out ="
+              , "  txOutAddress out == vaultAddr"
+              , "    && txOutValue out == expectedValue"
+              , "    && txOutDatum out == OutputDatum (Datum (toBuiltinData newState))"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-23"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "'unstableMakeIsData' numbers your constructors by the order they happen to"
+              , "appear in the source. Add a constructor, or move one, and every index after"
+              , "it shifts -- so a datum written by the old script decodes as a *different*"
+              , "constructor under the new one. Funds already locked at the old encoding"
+              , "become unspendable, or worse, spendable under the wrong branch. The"
+              , "encoding is a permanent on-chain contract, so pin it explicitly and never"
+              , "renumber an index that has already shipped."
+              ]
+          , docsBadExample = unlines
+              [ "-- indices are positional: inserting a constructor silently renumbers them"
+              , "PlutusTx.unstableMakeIsData ''MyDatum"
+              ]
+          , docsGoodExample = unlines
+              [ "-- indices are pinned and stay valid as the type grows"
+              , "PlutusTx.makeIsDataIndexed ''MyDatum"
+              , "  [ ('Borrow', 0)"
+              , "  , ('Repay',  1)"
+              , "  ]"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-24"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "ADA is the asset whose currency symbol and token name are both the empty"
+              , "bytestring, so `tokenName \"\"` does technically denote it. But written that"
+              , "way the intent is invisible: a reader cannot tell whether the empty string"
+              , "means \"ADA\", \"unset\", or \"a token whose name I forgot to fill in\", and the"
+              , "same literal is easy to copy into a position where it silently matches the"
+              , "wrong asset. 'adaSymbol' and 'adaToken' say exactly what is meant and cannot"
+              , "be confused with an unfilled placeholder."
+              ]
+          , docsBadExample = unlines
+              [ "-- is this ADA, or an unset field? the literal does not say"
+              , "isAda cs tn = cs == currencySymbol \"\" && tn == tokenName \"\""
+              ]
+          , docsGoodExample = unlines
+              [ "-- the intent is explicit"
+              , "isAda cs tn = cs == adaSymbol && tn == adaToken"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-25"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "A validator that reads the transaction's *other* script inputs is trusting"
+              , "work it did not do. Without checking those inputs' redeemers it cannot tell"
+              , "which operation they were spent for, so an attacker composes one"
+              , "transaction that spends your UTxO alongside an unrelated script input that"
+              , "happens to satisfy your shape test -- your validator sees the evidence it"
+              , "wanted and approves. Requiring the expected redeemer on the input you"
+              , "depend on ties the two spends to the same intended operation."
+              ]
+          , docsBadExample = unlines
+              [ "-- \"some other script input exists\" is not a statement about *why*"
+              , "okSpend info ="
+              , "  length (filter isScriptInput (txInfoInputs info)) == 2"
+              ]
+          , docsGoodExample = unlines
+              [ "-- the co-spent input must carry the redeemer this operation expects"
+              , "okSpend info ="
+              , "  case findScriptInput info of"
+              , "    Just i  -> redeemerOf info i == toBuiltinData Settle"
+              , "    Nothing -> False"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-26"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "\'zip\' stops at the shorter list. If a redeemer supplies one of the two"
+              , "lists, an attacker sends a short one and every element of the longer list"
+              , "past that point is dropped before your per-pair check ever sees it -- the"
+              , "validation loop runs, passes, and silently covers a subset of the data. The"
+              , "fix is to reject a length mismatch outright rather than let truncation"
+              , "decide how much gets validated."
+              ]
+          , docsBadExample = unlines
+              [ "-- a short `sigs` means most `owners` are never checked"
+              , "allSigned owners sigs ="
+              , "  all (uncurry checkSig) (zip owners sigs)"
+              ]
+          , docsGoodExample = unlines
+              [ "-- a mismatch is rejected instead of silently truncating"
+              , "allSigned owners sigs ="
+              , "  length owners == length sigs"
+              , "    && all (uncurry checkSig) (zip owners sigs)"
+              ]
+          , docsAnchor = ""
+          }
+      )
+    , ( Id "PLU-STAN-27"
+      , InspectionDocs
+          { docsWhyItMatters = unlines
+              [ "If a validator only checks that an output puts the spent UTxO back exactly"
+              , "as it was -- same address, value, datum and reference script -- then the"
+              , "spend achieved nothing except cost. Spending pays the full validator"
+              , "execution budget and, worse, consumes the UTxO: two transactions that both"
+              , "want to read it now contend for it, and one fails. A reference input reads"
+              , "the same data without consuming it, so concurrent readers no longer"
+              , "conflict."
+              ]
+          , docsBadExample = unlines
+              [ "-- spends the oracle UTxO just to put it back untouched"
+              , "okSpend i out ="
+              , "  txOutAddress (txInInfoResolved i) == txOutAddress out"
+              , "    && txOutValue (txInInfoResolved i) == txOutValue out"
+              , "    && txOutDatum (txInInfoResolved i) == txOutDatum out"
+              ]
+          , docsGoodExample = unlines
+              [ "-- reads the oracle without spending it: no contention, no recreation"
+              , "oracleRate info ="
+              , "  case txInfoReferenceInputs info of"
+              , "    [i] -> rateFromDatum (txOutDatum (txInInfoResolved i))"
+              , "    _   -> traceError \"expected one reference input\""
               ]
           , docsAnchor = ""
           }

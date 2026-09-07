@@ -38,7 +38,6 @@ import qualified Data.HashMap.Strict as HM
 import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import qualified Data.Text as Text
 import qualified Slist as S
 
 -- | This data type stores all information collected during static analysis.
@@ -149,12 +148,11 @@ addIgnoredObservations obs = modify' $ over ignoredObservationsL (obs <>)
 isInlineIgnored :: HieFile -> Observation -> Bool
 isInlineIgnored HieFile{..} Observation{..} =
   let lineNo = srcSpanStartLine observationSrcSpan
-      marker = "stan-ignore: " <> Text.unpack (unId observationInspectionId)
+      marker = "stan-ignore: " <> toString (unId observationInspectionId)
       linesSrc = BS8.lines hie_hs_src
       lineHas n =
-        if n <= 0
-          then False
-          else case linesSrc !!? (n - 1) of
+        n > 0
+          && case linesSrc !!? (n - 1) of
             Nothing -> False
             Just line -> marker `isInfixOf` BS8.unpack line
    in lineHas lineNo || lineHas (lineNo - 1)
