@@ -3,6 +3,41 @@
 `stan` uses [PVP Versioning][1].
 The change log is available [on GitHub][2].
 
+## 1.0.0
+
+* Add seven Plinth inspections mapped from the
+  [Cardano-CWE-Research](https://github.com/input-output-hk/Cardano-CWE-Research)
+  rule set:
+
+    * `PLU-STAN-21` — credentials baked immutably into validators, both as
+      top-level constants and specialised into compiled code via
+      `applyCode` / `unsafeApplyCode` / `liftCode`.
+    * `PLU-STAN-22` — TxOut validation that constrains other fields but
+      never the output address, so the output can be paid anywhere.
+    * `PLU-STAN-23` — `unstableMakeIsData`, whose positional constructor
+      indices change the on-chain encoding when a type gains or reorders a
+      constructor.
+    * `PLU-STAN-24` — an empty-string literal standing in for ADA instead of
+      `adaSymbol` / `adaToken`.
+    * `PLU-STAN-25` — validation that depends on the transaction's other
+      script inputs without inspecting a redeemer.
+    * `PLU-STAN-26` — `zip` without comparing the two lists' lengths, which
+      silently drops the tail of the longer one.
+    * `PLU-STAN-27` — an input spent only to be recreated identically, where
+      a reference input would do.
+
+* Add `TRACEABILITY.csv` and `scripts/gen-traceability.py`: a matrix mapping
+  all 23 upstream research rules to Plu-Stan inspections in both directions,
+  with a divergence note and the tests backing each link. Inspection facts
+  are derived from the source tree, so they cannot drift; the generator also
+  renders the README matrix and fails if a registered inspection has no
+  README row.
+
+* Fix the release workflow: it created the GitHub release as a draft, which
+  is untagged until published, so every binary upload failed to resolve the
+  tag. Releases are now created as prereleases (published, tag resolvable,
+  and excluded from `/releases/latest`) and promoted once assets exist.
+
 ## vscode-plustan 0.3.0
 
 * Add the review-session cockpit: **Start Review** analyzes the chosen
