@@ -248,7 +248,7 @@ researchFindings hie = precisionFindings hie <> concatMap inspect tops
         Nothing -> []
         Just v ->
             let bodies = filter (ann "GRHS" "GRHS") (nodeChildren n)
-                es = map (normalise hie defs Map.empty (Set.singleton v) 80) bodies
+                es = map (normalise hie defs Map.empty (one v) 80) bodies
                 sp = maybe (nodeSpan n) nodeSpan (viaNonEmpty head (nodeChildren n))
             in [(pid,sp) | (pid,predicate) <- rules, any predicate es]
                 <> [(pid,sp) | emptyOutputValidation n es, pid <- ["PLU-STAN-28", "PLU-STAN-30", "PLU-STAN-32"]]

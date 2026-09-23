@@ -80,7 +80,7 @@ createVisitor hie exts inspections =
         codeSource = stripNonCode (hie_hs_src hie)
     in Visitor $ \node ->
     forM_ inspections $ \Inspection{..} -> case inspectionAnalysis of
-        ResearchRule -> pure ()
+        ResearchRule -> pass
         FindAst patAst -> matchAst inspectionId patAst hie node
         Infix -> analyseInfix hie node
         LazyField -> when
@@ -94,7 +94,7 @@ createVisitor hie exts inspections =
         UnsafeFromBuiltinDataInHashComparison -> analyseUnsafeFromBuiltinDataInHashComparison inspectionId hie node
         CurrencySymbolValueOfOnMintedValue -> analyseCurrencySymbolValueOfOnMintedValue inspectionId hie node
         ValidityIntervalMisuse -> analyseValidityIntervalMisuse inspectionId hie node
-        PrecisionLossDivisionBeforeMultiply -> pure () -- resolved arithmetic in researchFindings
+        PrecisionLossDivisionBeforeMultiply -> pass -- resolved arithmetic in researchFindings
         RedeemerSuppliedIndicesUniqueness -> analyseRedeemerSuppliedIndicesUniqueness inspectionId hie node
         LazyAndInOnChainCode -> analyseLazyAndInOnChainCode inspectionId hie node
         ImmutableCredential -> analyseImmutableCredential credentialSpans inspectionId hie node
@@ -105,7 +105,7 @@ createVisitor hie exts inspections =
         MissingTxOutAddressCheck -> analyseMissingTxOutAddressCheck inspectionId hie node
         UnstableMakeIsDataUsage -> analyseUnstableMakeIsDataUsage codeSource inspectionId hie node
         ScriptInputDependencyWithoutRedeemer -> analyseScriptInputDependencyWithoutRedeemer inspectionId hie node
-        ZipWithoutLengthCheck -> pure () -- resolved expression analysis in researchFindings
+        ZipWithoutLengthCheck -> pass -- resolved expression analysis in researchFindings
         SpendAndRecreateInsteadOfReferenceInput -> analyseSpendAndRecreateInsteadOfReferenceInput inspectionId hie node
 
 {- | Check for big tuples (size >= 4) in the following places:
