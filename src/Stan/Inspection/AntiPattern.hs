@@ -74,6 +74,20 @@ module Stan.Inspection.AntiPattern
     , plustan25
     , plustan26
     , plustan27
+    , plustan28
+    , plustan29
+    , plustan30
+    , plustan31
+    , plustan32
+    , plustan33
+    , plustan34
+    , plustan35
+    , plustan36
+    , plustan37
+    , plustan38
+    , plustan39
+    , plustan40
+    , plustan41
     -- * All inspections
     , antiPatternInspectionsMap
     ) where
@@ -147,6 +161,20 @@ antiPatternInspectionsMap = fromList $ fmapToFst inspectionId
     , plustan25
     , plustan26
     , plustan27
+    , plustan28
+    , plustan29
+    , plustan30
+    , plustan31
+    , plustan32
+    , plustan33
+    , plustan34
+    , plustan35
+    , plustan36
+    , plustan37
+    , plustan38
+    , plustan39
+    , plustan40
+    , plustan41
     ]
 
 -- | Smart constructor to create anti-pattern 'Inspection'.
@@ -888,8 +916,11 @@ plustan24 = mkAntiPatternInspection (Id "PLU-STAN-24") "Empty string used to det
   where
     emptyAdaPat :: PatternAst
     emptyAdaPat = app
-        (anyNamesToPatternAst $ tokenNameMeta :| [currencySymbolMeta])
-        (PatternAstConstant (ExactStr "\"\""))
+        (anyNamesToPatternAst $ tokenNameMeta :| [currencySymbolMeta, ledgerValueName "TokenName", ledgerValueName "CurrencySymbol"])
+        (PatternAstConstant (ExactStr "\"\"")
+            ||| anyNamesToPatternAst ("emptyByteString" `plutusTxNameFrom` "PlutusTx.Builtins" :|
+                ["emptyByteString" `plutusTxNameFrom` "PlutusTx.Builtins.Internal",
+                 "emptyByteString" `plutusTxNameFrom` "PlutusTx.Prelude"]))
 
     tokenNameMeta, currencySymbolMeta :: NameMeta
     tokenNameMeta = ledgerValueName "tokenName"
@@ -934,3 +965,115 @@ plustan27 = mkAntiPatternInspection (Id "PLU-STAN-27") "Input spent only to be r
         ]
     & withPlutusCategory
     & severityL .~ Performance
+
+plustan28 :: Inspection
+plustan28 = mkAntiPatternInspection (Id "PLU-STAN-28") "Output validation misses address constraints"
+    ResearchRule
+    & descriptionL .~ "Output validation misses address constraints. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan29 :: Inspection
+plustan29 = mkAntiPatternInspection (Id "PLU-STAN-29") "Output validation misses staking constraints"
+    ResearchRule
+    & descriptionL .~ "Output validation misses staking constraints. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan30 :: Inspection
+plustan30 = mkAntiPatternInspection (Id "PLU-STAN-30") "Output validation misses reference script constraints"
+    ResearchRule
+    & descriptionL .~ "Output validation misses reference script constraints. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan31 :: Inspection
+plustan31 = mkAntiPatternInspection (Id "PLU-STAN-31") "Output validation misses datum constraints"
+    ResearchRule
+    & descriptionL .~ "Output validation misses datum constraints. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan32 :: Inspection
+plustan32 = mkAntiPatternInspection (Id "PLU-STAN-32") "Output permits unconstrained tokens"
+    ResearchRule
+    & descriptionL .~ "Output permits unconstrained tokens. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan33 :: Inspection
+plustan33 = mkAntiPatternInspection (Id "PLU-STAN-33") "Script input dependency misses corresponding redeemer validation"
+    ResearchRule
+    & descriptionL .~ "Script input dependency misses corresponding redeemer validation. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan34 :: Inspection
+plustan34 = mkAntiPatternInspection (Id "PLU-STAN-34") "Unchanged datum is spent and recreated"
+    ResearchRule
+    & descriptionL .~ "Unchanged datum is spent and recreated. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Performance
+
+plustan35 :: Inspection
+plustan35 = mkAntiPatternInspection (Id "PLU-STAN-35") "Validity range lacks a maximum duration"
+    ResearchRule
+    & descriptionL .~ "Validity range lacks a maximum duration. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan36 :: Inspection
+plustan36 = mkAntiPatternInspection (Id "PLU-STAN-36") "Decoded datum used in field equality"
+    ResearchRule
+    & descriptionL .~ "Decoded datum used in field equality. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Performance
+
+plustan37 :: Inspection
+plustan37 = mkAntiPatternInspection (Id "PLU-STAN-37") "Flattened token tuple is incompletely validated"
+    ResearchRule
+    & descriptionL .~ "Flattened token tuple is incompletely validated. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan38 :: Inspection
+plustan38 = mkAntiPatternInspection (Id "PLU-STAN-38") "Exact ADA output equality"
+    ResearchRule
+    & descriptionL .~ "Exact ADA output equality. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan39 :: Inspection
+plustan39 = mkAntiPatternInspection (Id "PLU-STAN-39") "Selected input lacks token identity validation"
+    ResearchRule
+    & descriptionL .~ "Selected input lacks token identity validation. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Warning
+
+plustan40 :: Inspection
+plustan40 = mkAntiPatternInspection (Id "PLU-STAN-40") "Trivial forwarding or pattern matching helper"
+    ResearchRule
+    & descriptionL .~ "Trivial forwarding or pattern matching helper. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Performance
+
+plustan41 :: Inspection
+plustan41 = mkAntiPatternInspection (Id "PLU-STAN-41") "Fixed string keys used in a datum map"
+    ResearchRule
+    & descriptionL .~ "Fixed string keys used in a datum map. Bounded intramodule analysis of the Cardano-CWE-Research pattern; see docs/cwe-conformance.md for supported forms."
+    & solutionL .~ ["Review the corresponding Cardano-CWE-Research rule and validate the affected value explicitly"]
+    & withPlutusCategory
+    & severityL .~ Style

@@ -1,0 +1,860 @@
+{
+  "research_commit": "10eeea42c9b18d37cc2985c02b8b6987c0bb1c13",
+  "eligible_rules": [
+    "DatumComparisonOptimization",
+    "DoubleSatisfaction",
+    "EmptyStringADACheck",
+    "FixedStructureMap",
+    "HelperFunctions",
+    "ImmutableCredential",
+    "IncompleteTokenValidation",
+    "ListUniqueness",
+    "MissingAddressValidation",
+    "MissingStakingValidation",
+    "NoBurningLogic",
+    "PartialUnvalidatedDatum",
+    "PrecisionLoss",
+    "ReadOnlySpend",
+    "StrictValueEquality",
+    "TrashTokens",
+    "UncheckedRedeemer",
+    "UnstableMakeIsData",
+    "UnvalidatedDatum",
+    "UnvalidatedInputIndex",
+    "UnvalidatedReferenceScript",
+    "ValidityRangeBound",
+    "ZipWithoutLengthCheck"
+  ],
+  "cases": [
+    {
+      "rule": "PrecisionLoss",
+      "inspection": "PLU-STAN-16",
+      "binding": "precisionBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "PrecisionLoss",
+      "inspection": "PLU-STAN-16",
+      "binding": "precisionQuot",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "PrecisionLoss",
+      "inspection": "PLU-STAN-16",
+      "binding": "precisionAlias",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "PrecisionLoss",
+      "inspection": "PLU-STAN-16",
+      "binding": "precisionGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "EmptyStringADACheck",
+      "inspection": "PLU-STAN-24",
+      "binding": "adaLiteral",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "EmptyStringADACheck",
+      "inspection": "PLU-STAN-24",
+      "binding": "adaEmptyBuiltin",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "EmptyStringADACheck",
+      "inspection": "PLU-STAN-24",
+      "binding": "adaReverse",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "EmptyStringADACheck",
+      "inspection": "PLU-STAN-24",
+      "binding": "adaCurrency",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "EmptyStringADACheck",
+      "inspection": "PLU-STAN-24",
+      "binding": "adaGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UnstableMakeIsData",
+      "inspection": "PLU-STAN-23",
+      "binding": "stableMarker",
+      "expected": false,
+      "note": "Stable splice above must not warn; see splice cases below"
+    },
+    {
+      "rule": "UnstableMakeIsData",
+      "inspection": "PLU-STAN-23",
+      "binding": "splice:Tx.unstableMakeIsData",
+      "expected": true,
+      "note": "upstream invalid splice"
+    },
+    {
+      "rule": "ImmutableCredential",
+      "inspection": "PLU-STAN-21",
+      "binding": "bakedAdmin",
+      "expected": true,
+      "note": "Top-level credential reachable from mkValidator"
+    },
+    {
+      "rule": "ImmutableCredential",
+      "inspection": "PLU-STAN-21",
+      "binding": "mkValidator",
+      "expected": false,
+      "note": "Diagnostic belongs to credential definition"
+    },
+    {
+      "rule": "ImmutableCredential",
+      "inspection": "PLU-STAN-21",
+      "binding": "mutableAdmin",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipUnrelated",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipComment",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipDead",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "MissingAddressValidation",
+      "inspection": "PLU-STAN-28",
+      "binding": "addressBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "MissingAddressValidation",
+      "inspection": "PLU-STAN-28",
+      "binding": "addressGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "MissingAddressValidation",
+      "inspection": "PLU-STAN-28",
+      "binding": "addressOther",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "MissingAddressValidation",
+      "inspection": "PLU-STAN-28",
+      "binding": "addressAliasGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "MissingStakingValidation",
+      "inspection": "PLU-STAN-29",
+      "binding": "stakeBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "MissingStakingValidation",
+      "inspection": "PLU-STAN-29",
+      "binding": "stakeGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "MissingStakingValidation",
+      "inspection": "PLU-STAN-29",
+      "binding": "stakeFullAddress",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedReferenceScript",
+      "inspection": "PLU-STAN-30",
+      "binding": "referenceBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedReferenceScript",
+      "inspection": "PLU-STAN-30",
+      "binding": "referenceGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedReferenceScript",
+      "inspection": "PLU-STAN-30",
+      "binding": "referenceDead",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedDatum",
+      "inspection": "PLU-STAN-31",
+      "binding": "datumBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedDatum",
+      "inspection": "PLU-STAN-31",
+      "binding": "datumGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedDatum",
+      "inspection": "PLU-STAN-31",
+      "binding": "datumWildcard",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedDatum",
+      "inspection": "PLU-STAN-31",
+      "binding": "datumFieldsGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "TrashTokens",
+      "inspection": "PLU-STAN-32",
+      "binding": "trashSubset",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "TrashTokens",
+      "inspection": "PLU-STAN-32",
+      "binding": "trashAsset",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "TrashTokens",
+      "inspection": "PLU-STAN-32",
+      "binding": "trashMissing",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "TrashTokens",
+      "inspection": "PLU-STAN-32",
+      "binding": "trashGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "TrashTokens",
+      "inspection": "PLU-STAN-32",
+      "binding": "trashBounded",
+      "expected": false,
+      "note": "Supported bounded-token-set alternative"
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "redeemerBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "redeemerGood",
+      "expected": true,
+      "note": "A redeemer lookup for an unrelated reference does not establish correspondence"
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "redeemerDead",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "redeemerComment",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "redeemerReferences",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "ReadOnlySpend",
+      "inspection": "PLU-STAN-34",
+      "binding": "readOnlyFull",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ReadOnlySpend",
+      "inspection": "PLU-STAN-34",
+      "binding": "readOnlyDatum",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ReadOnlySpend",
+      "inspection": "PLU-STAN-34",
+      "binding": "readOnlyChanged",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "ReadOnlySpend",
+      "inspection": "PLU-STAN-34",
+      "binding": "readOnlyUnrelatedReference",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "timeFiniteBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "timeGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "timeContainsBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "timeNoUse",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "DatumComparisonOptimization",
+      "inspection": "PLU-STAN-36",
+      "binding": "decodeCompare",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "DatumComparisonOptimization",
+      "inspection": "PLU-STAN-36",
+      "binding": "decodeUnsafeCompare",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "DatumComparisonOptimization",
+      "inspection": "PLU-STAN-36",
+      "binding": "encodeCompare",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "DatumComparisonOptimization",
+      "inspection": "PLU-STAN-36",
+      "binding": "decodeValidate",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "IncompleteTokenValidation",
+      "inspection": "PLU-STAN-37",
+      "binding": "tokenWildcard0",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "IncompleteTokenValidation",
+      "inspection": "PLU-STAN-37",
+      "binding": "tokenWildcard1",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "IncompleteTokenValidation",
+      "inspection": "PLU-STAN-37",
+      "binding": "tokenWildcard2",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "IncompleteTokenValidation",
+      "inspection": "PLU-STAN-37",
+      "binding": "tokenGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "IncompleteTokenValidation",
+      "inspection": "PLU-STAN-37",
+      "binding": "tokenOutput",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "StrictValueEquality",
+      "inspection": "PLU-STAN-38",
+      "binding": "strictAda",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "StrictValueEquality",
+      "inspection": "PLU-STAN-38",
+      "binding": "strictAdaReverse",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "StrictValueEquality",
+      "inspection": "PLU-STAN-38",
+      "binding": "minimumAda",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedInputIndex",
+      "inspection": "PLU-STAN-39",
+      "binding": "indexBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedInputIndex",
+      "inspection": "PLU-STAN-39",
+      "binding": "indexGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedInputIndex",
+      "inspection": "PLU-STAN-39",
+      "binding": "referenceIndexBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedInputIndex",
+      "inspection": "PLU-STAN-39",
+      "binding": "indexAssetGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedInputIndex",
+      "inspection": "PLU-STAN-39",
+      "binding": "indexWrongInput",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "HelperFunctions",
+      "inspection": "PLU-STAN-40",
+      "binding": "forwardHelper",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "HelperFunctions",
+      "inspection": "PLU-STAN-40",
+      "binding": "patternHelper",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "HelperFunctions",
+      "inspection": "PLU-STAN-40",
+      "binding": "substantialHelper",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "FixedStructureMap",
+      "inspection": "PLU-STAN-41",
+      "binding": "mapBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "FixedStructureMap",
+      "inspection": "PLU-STAN-41",
+      "binding": "mapDynamic",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "FixedStructureMap",
+      "inspection": "PLU-STAN-41",
+      "binding": "recordGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "redeemerCorresponding",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "redeemerWrongPurpose",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ReadOnlySpend",
+      "inspection": "PLU-STAN-34",
+      "binding": "readOnlyFields",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ReadOnlySpend",
+      "inspection": "PLU-STAN-34",
+      "binding": "readOnlyPartialFields",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "timeWrongEndpoints",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "timeDeadGuard",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "timeDifferentRanges",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "timeAliasGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipWithBad",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipWithGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipOrBypass",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipMultilineGood",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "ZipWithoutLengthCheck",
+      "inspection": "PLU-STAN-26",
+      "binding": "zipSameBindingNames",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "MissingAddressValidation",
+      "inspection": "PLU-STAN-28",
+      "binding": "addressDeadGuard",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "MissingAddressValidation",
+      "inspection": "PLU-STAN-28",
+      "binding": "addressOrBypass",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedReferenceScript",
+      "inspection": "PLU-STAN-30",
+      "binding": "referenceComment",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedReferenceScript",
+      "inspection": "PLU-STAN-30",
+      "binding": "referenceOther",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "TrashTokens",
+      "inspection": "PLU-STAN-32",
+      "binding": "trashOtherBound",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "IncompleteTokenValidation",
+      "inspection": "PLU-STAN-37",
+      "binding": "tokenFilter",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "StrictValueEquality",
+      "inspection": "PLU-STAN-38",
+      "binding": "strictAdaAlias",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "StrictValueEquality",
+      "inspection": "PLU-STAN-38",
+      "binding": "strictAdaDead",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "UnvalidatedInputIndex",
+      "inspection": "PLU-STAN-39",
+      "binding": "indexDeadGuard",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "FixedStructureMap",
+      "inspection": "PLU-STAN-41",
+      "binding": "mapComment",
+      "expected": false,
+      "note": ""
+    },
+    {
+      "rule": "HelperFunctions",
+      "inspection": "PLU-STAN-40",
+      "binding": "helperFixedArg",
+      "expected": true,
+      "note": ""
+    },
+    {
+      "rule": "ImmutableCredential",
+      "inspection": "PLU-STAN-21",
+      "binding": "plutStan21BakedLocalCredentialApplyCode",
+      "module": "Target.PlutusTx",
+      "expected": true,
+      "note": "Applied credential variant in existing compiled fixture"
+    },
+    {
+      "rule": "ImmutableCredential",
+      "inspection": "PLU-STAN-21",
+      "binding": "plutStan21BakedAddressUnsafeApplyCode",
+      "module": "Target.PlutusTx",
+      "expected": true,
+      "note": "Applied credential variant in existing compiled fixture"
+    },
+    {
+      "rule": "ImmutableCredential",
+      "inspection": "PLU-STAN-21",
+      "binding": "plutStan21BakedIntegerShouldPass",
+      "module": "Target.PlutusTx",
+      "expected": false,
+      "note": "Applied credential variant in existing compiled fixture"
+    },
+    {
+      "rule": "ImmutableCredential",
+      "inspection": "PLU-STAN-21",
+      "binding": "plutStan21MixedLiftedTupleCredentialProjection",
+      "module": "Target.PlutusTx",
+      "expected": true,
+      "note": "Applied credential variant in existing compiled fixture"
+    },
+    {
+      "rule": "ImmutableCredential",
+      "inspection": "PLU-STAN-21",
+      "binding": "plutStan21MixedLiftedTupleProjectionShouldPass",
+      "module": "Target.PlutusTx",
+      "expected": false,
+      "note": "Applied credential variant in existing compiled fixture"
+    },
+    {
+      "rule": "UnstableMakeIsData",
+      "inspection": "PLU-STAN-23",
+      "binding": "spliceString",
+      "expected": false,
+      "note": "Contract boundary"
+    },
+    {
+      "rule": "UnstableMakeIsData",
+      "inspection": "PLU-STAN-23",
+      "binding": "spliceComment",
+      "expected": false,
+      "note": "Contract boundary"
+    },
+    {
+      "rule": "MissingStakingValidation",
+      "inspection": "PLU-STAN-29",
+      "binding": "stakeWildcard",
+      "expected": true,
+      "note": "Contract boundary"
+    },
+    {
+      "rule": "MissingStakingValidation",
+      "inspection": "PLU-STAN-29",
+      "binding": "stakePatternGood",
+      "expected": false,
+      "note": "Contract boundary"
+    },
+    {
+      "rule": "UnvalidatedDatum",
+      "inspection": "PLU-STAN-31",
+      "binding": "datumHashWildcard",
+      "expected": true,
+      "note": "Contract boundary"
+    },
+    {
+      "rule": "IncompleteTokenValidation",
+      "inspection": "PLU-STAN-37",
+      "binding": "tokenFold",
+      "expected": true,
+      "note": "Contract boundary"
+    },
+    {
+      "rule": "UnvalidatedInputIndex",
+      "inspection": "PLU-STAN-39",
+      "binding": "indexConstant",
+      "expected": false,
+      "note": "Contract boundary"
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "timeSeparateGood",
+      "expected": false,
+      "note": "Contract boundary"
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "redeemerWrongTransaction",
+      "expected": true,
+      "note": "Contract boundary"
+    },
+    {
+      "rule": "MissingAddressValidation",
+      "inspection": "PLU-STAN-28",
+      "binding": "addressNoFields",
+      "expected": true,
+      "note": "No checked fields"
+    },
+    {
+      "rule": "MissingAddressValidation",
+      "inspection": "PLU-STAN-28",
+      "binding": "addressRejectAll",
+      "expected": false,
+      "note": "Always rejects"
+    }
+  ],
+  "source_hashes": {
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "rules/DatumComparisonOptimization.md": "75c8c4c916524530838ad209fd0a5f8fdd45bf39d1de55e570df530306d4db91",
+    "rules/DoubleSatisfaction.md": "625573ad143ccdccf0bb8ccd77f2e16c913452ba55e897b55bed1be3e516bc10",
+    "rules/EmptyStringADACheck.md": "b5cd2db28ef420a598c1e506189736062b35175d6b511197547d401e5492e54e",
+    "rules/FixedStructureMap.md": "b414dcc6aa0b5810aa24abab91a43f89ca4d0f27249e431489d61f21ce8b043f",
+    "rules/HelperFunctions.md": "3b27a8cf86b061667d8736eab860fa913fbc7f4092bc9d53d796c38701e03e4e",
+    "rules/ImmutableCredential.md": "aefb096ea9d0b6c77eff6af80b68c6931d4e74180048f18098a35c09783fd585",
+    "rules/IncompleteTokenValidation.md": "b5b44ca2955c2bb8c13b106d85c288614c271ece042b651fdc7214923694513e",
+    "rules/ListUniqueness.md": "68745acaae87ce6dbbff6ec3f7f2e216d21a7a6d69b394970978be2f62341ddf",
+    "rules/MissingAddressValidation.md": "b5ac8440b0182079c0253d747f7c7d66ff678aadd23c678958a6c1ecc63532c6",
+    "rules/MissingStakingValidation.md": "086038a167c1650a43d03e908e7152f5345d844572d5d6c363322ff065bf790f",
+    "rules/NoBurningLogic.md": "06ffd467f724e905bf4ce979ad514134d470099b1295ffe2a886601bf7bc3aa5",
+    "rules/PartialUnvalidatedDatum.md": "3cc5ded62c08d11ecafc6573e49cc4a8cf0bfe437c7883a3052d68a29ceeb624",
+    "rules/PrecisionLoss.md": "a78efcadd72e50f66b5354c7f20aa00b8c01aa76f7664dfe129b9dd7e266eb6d",
+    "rules/README.md": "22adb4511584380e6b10ce52a36a92d24e2f9b9fe1bb91672067345d9ea360c6",
+    "rules/ReadOnlySpend.md": "27b2e1f448ef968182ebf6544fffee9961f04b166ff4ffdb17b71f6532ccf15d",
+    "rules/StrictValueEquality.md": "be12da3fbfedaa9faa5ea7b4cbcf1a1b8a106f6b9409c97db151d9aaee0a206b",
+    "rules/TrashTokens.md": "6209443eddf5bddcc6817346d19e2a47076a73b9c1d8559610b2b93ffe0dc90b",
+    "rules/UncheckedRedeemer.md": "8500eb8cd1ce749aadb76d79e04e3fc0c08751a92387c75e8adcb950a3646b59",
+    "rules/UnstableMakeIsData.md": "a83143b588e6eaa1f7a659d161807adea51731598d99fd759613b0221297ff8b",
+    "rules/UnvalidatedDatum.md": "9a6e5171c33816c29e338aabf2f0b3df7c5e7e4234d18c5ce263ae7cfde519f1",
+    "rules/UnvalidatedInputIndex.md": "94d20e09a04fd63daff4f572e9632b7eac32e1e8b2234a79828158d48de90fdf",
+    "rules/UnvalidatedReferenceScript.md": "8d8393435d5798f53ecbe8d80a11b199a10614209d091f1e1e3c65755be032a9",
+    "rules/ValidityRangeBound.md": "8bd5a33844488429cc6ba7c4cde639c91ac39ccf0550dd142eaf26a584964f82",
+    "rules/ZipWithoutLengthCheck.md": "7e89bd26ddec81071ec04d951cb87cbc1e8fad722066889d0522c44bf0a3b40e"
+  }
+}

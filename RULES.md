@@ -293,3 +293,213 @@ isMaybeStakingCredential' b =
 
 - **Detector:** Flags use of validity interval utilities (e.g. `from`, `to`, `interval`, `always`, `contains`, `member`) or any use of `txInfoValidRange` that does not ensure either the lower or upper bound is `Finite`. (**Stan:** implemented via `PLU-STAN-12`)
 - **Risk:** Unbounded ranges can undermine intended timeboxing logic.
+
+## Research conformance inspections
+
+These complement the legacy inspections and are tested through the JSON CLI against the pinned research corpus.
+
+### CWE research rule 28
+
+**PLU-STAN-28: MissingAddressValidation.** An unconstrained destination lets a transaction pay the validated output to another address.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+addressBad out d = txOutDatum out == OutputDatum d
+
+-- Alternative
+addressGood out d addr = txOutDatum out == OutputDatum d && txOutAddress out == addr
+```
+
+### CWE research rule 29
+
+**PLU-STAN-29: MissingStakingValidation.** Payment credentials alone leave delegation and staking rewards unconstrained.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+stakeBad out cred = addressCredential (txOutAddress out) == cred
+
+-- Alternative
+stakeGood out cred = addressCredential (txOutAddress out) == cred && addressStakingCredential (txOutAddress out) == Nothing
+```
+
+### CWE research rule 30
+
+**PLU-STAN-30: UnvalidatedReferenceScript.** An attacker can attach a costly reference script to an otherwise valid output.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+referenceBad out addr = txOutAddress out == addr
+
+-- Alternative
+referenceGood out addr = txOutAddress out == addr && txOutReferenceScript out == Nothing
+```
+
+### CWE research rule 31
+
+**PLU-STAN-31: UnvalidatedDatum.** A script output with unconstrained datum content can corrupt state or become unspendable.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+datumBad out addr = txOutAddress out == addr
+
+-- Alternative
+datumGood out addr d = txOutAddress out == addr && txOutDatum out == OutputDatum d
+```
+
+### CWE research rule 32
+
+**PLU-STAN-32: TrashTokens.** Checking only required assets permits unrelated tokens and growing output costs.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+trashSubset out expected = txOutValue out `V.geq` expected
+
+-- Alternative
+trashGood out expected = txOutValue out == expected
+```
+
+### CWE research rule 33
+
+**PLU-STAN-33: UncheckedRedeemer.** A co-spent script input must perform the expected operation; check its corresponding redeemer.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+redeemerBad info = any (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+  ScriptCredential _ -> True
+  _ -> False) (txInfoInputs info)
+
+-- Alternative
+redeemerReferences info = any (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+  ScriptCredential _ -> True
+  _ -> False) (txInfoReferenceInputs info)
+```
+
+### CWE research rule 34
+
+**PLU-STAN-34: ReadOnlySpend.** Recreating an unchanged datum can cause unnecessary spending and contention. Review whether a reference input suffices.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+readOnlyFull i out = txOutAddress (txInInfoResolved i) == txOutAddress out && txOutValue (txInInfoResolved i) == txOutValue out && txOutDatum (txInInfoResolved i) == txOutDatum out && txOutReferenceScript (txInInfoResolved i) == txOutReferenceScript out
+
+-- Alternative
+readOnlyChanged i out next = txOutDatum out == OutputDatum next && txOutValue out == txOutValue (txInInfoResolved i)
+```
+
+### CWE research rule 35
+
+**PLU-STAN-35: ValidityRangeBound.** Finite endpoints alone allow arbitrarily long validity windows. Bound their difference.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+timeFiniteBad info deadline = case I.ivFrom (txInfoValidRange info) of
+  I.LowerBound (I.Finite lo) _ -> lo >= deadline
+  _ -> False
+
+-- Alternative
+timeGood info maxDuration = case (I.ivFrom (txInfoValidRange info), I.ivTo (txInfoValidRange info)) of
+  (I.LowerBound (I.Finite lo) _, I.UpperBound (I.Finite hi) _) -> hi - lo <= maxDuration
+  _ -> False
+```
+
+### CWE research rule 36
+
+**PLU-STAN-36: DatumComparisonOptimization.** Decoding a datum only to compare fields can cost more than comparing its encoded representation.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+decodeCompare d expected = case Tx.fromBuiltinData d of
+  Just (TestDatum n pkh) -> n == amount expected && pkh == owner expected
+  Nothing -> False
+
+-- Alternative
+encodeCompare d expected = d == Tx.toBuiltinData expected
+```
+
+### CWE research rule 37
+
+**PLU-STAN-37: IncompleteTokenValidation.** Ignoring a currency symbol, token name or amount can authorize an unintended token.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+tokenWildcard0 info symbol name = all (\(_, tn, q) -> tn == name && q == 1) (V.flattenValue (txInfoMint info))
+
+-- Alternative
+tokenGood info symbol name = all (\(cs, tn, q) -> cs == symbol && tn == name && q == 1) (V.flattenValue (txInfoMint info))
+```
+
+### CWE research rule 38
+
+**PLU-STAN-38: StrictValueEquality.** Exact ADA equality can conflict with minimum-output requirements. Review an appropriate lower bound.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+strictAda out n = V.lovelaceValueOf (txOutValue out) == n
+
+-- Alternative
+minimumAda out n = V.lovelaceValueOf (txOutValue out) >= n
+```
+
+### CWE research rule 39
+
+**PLU-STAN-39: UnvalidatedInputIndex.** A dynamic index selects a position, not the intended UTxO. Check the selected input identity.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+indexBad info r addr = let selected = txInfoInputs info !! fromInteger (inputIndex r) in txOutAddress (txInInfoResolved selected) == addr
+
+-- Alternative
+indexGood info r cs tn = let selected = txInfoInputs info !! fromInteger (inputIndex r) in V.valueOf (txOutValue (txInInfoResolved selected)) cs tn == 1
+```
+
+### CWE research rule 40
+
+**PLU-STAN-40: HelperFunctions.** A trivial helper may be inlined to reduce overhead. Measure generated code before changing it.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+forwardHelper pkh info = txSignedBy info pkh
+
+-- Alternative
+substantialHelper x y = x > 0 && y > x
+```
+
+### CWE research rule 41
+
+**PLU-STAN-41: FixedStructureMap.** Fixed string keys in a datum map can hide missing fields. A typed record makes structure explicit.
+
+This is a bounded static warning. [Detection contract and limitations](docs/cwe-conformance.md).
+
+```haskell
+-- Suspicious
+mapBad d = M.member "fee" (extraInfo d) && M.member "owner" (extraInfo d)
+
+-- Alternative
+mapDynamic key d = M.member key (extraInfo d)
+```
