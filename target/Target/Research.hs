@@ -13,6 +13,7 @@ import PlutusLedgerApi.V2
 import PlutusLedgerApi.V2.Contexts (txSignedBy)
 import PlutusLedgerApi.V1.Value qualified as V
 import PlutusLedgerApi.V1.Interval qualified as I
+import Target.PlutusTx qualified as Helpers
 {-# ANN module ("onchain-contract" :: String) #-}
 
 data TestDatum = TestDatum { amount :: Integer, owner :: PubKeyHash }
@@ -521,3 +522,21 @@ addressNoFields _out = True
 -- A predicate that always rejects cannot accept a redirected output.
 addressRejectAll :: TxOut -> Bool
 addressRejectAll _out = False
+
+-- UnvalidatedReferenceScript: invalid
+-- A rejecting call nested inside an accepting arm does not make that arm reject.
+referenceTraceArm :: TxOut -> Address -> Bool
+referenceTraceArm out addr = case txOutDatum out of
+  OutputDatum _ -> if txOutAddress out == addr then True else P.traceError "address"
+  _ -> False
+
+-- ValidityRangeBound: valid
+timeTraceArm :: TxInfo -> POSIXTime -> Bool
+timeTraceArm info maxDuration = case (I.ivFrom (txInfoValidRange info), I.ivTo (txInfoValidRange info)) of
+  (I.LowerBound (I.Finite lo) _, I.UpperBound (I.Finite hi) _) -> if hi - lo <= maxDuration then True else P.traceError "range"
+  _ -> False
+
+-- MissingAddressValidation: valid
+-- The output is handed to a helper this module cannot expand.
+outputForward :: TxOut -> Bool
+outputForward out = Helpers.hasOutputAddress out

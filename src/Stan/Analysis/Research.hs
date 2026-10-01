@@ -165,11 +165,26 @@ required e
   where
     common [] = []
     common (xs:xss) = foldl' (\acc ys -> filter (`elem` ys) acc) xs xss
-    rejecting (Form "branch" (_:xs)) = any isFalse xs
-    rejecting x = isFalse x
+    rejecting = isFalse
 
+-- An expression that can only reject: the constant 'False', a throwing
+-- call, or a form whose every reachable arm rejects. Only the root is
+-- classified; a throwing call nested inside an otherwise accepting arm (an
+-- @else traceError@ guarding a check) does not turn that arm into a
+-- rejection, so its facts stay in play and its siblings are not pruned.
 isFalse :: Expr -> Bool
-isFalse e = isName "False" e || has "traceError" e || has "error" e
+isFalse = \case
+    e@Ref{} -> isName "False" e
+    Call f [a,b]
+        | isName "&&" f -> isFalse a || isFalse b
+        | isName "||" f -> isFalse a && isFalse b
+    e@Call{} -> isCall "traceError" e || isCall "error" e
+    Form "if" [_,t,f] -> isFalse t && isFalse f
+    Form "case" (_:bs) -> not (null bs) && all isFalse bs
+    Form "branch" (_:xs) -> not (null xs) && all isFalse xs
+    Form "alternatives" xs -> not (null xs) && all isFalse xs
+    Form "guard" xs -> maybe False isFalse (viaNonEmpty last xs)
+    _ -> False
 
 comparison :: Expr -> Maybe (String, Expr, Expr)
 comparison (Call f [a,b]) = do
@@ -256,10 +271,17 @@ researchFindings hie = precisionFindings hie <> concatMap inspect tops
                     any (helperShape . normalise hie Map.empty Map.empty Set.empty 80) bodies]
     -- An explicitly typed output predicate that accepts without inspecting
     -- any output field is still validation; there is no three-field gate.
+    -- An output that reaches a call this module cannot expand (an imported
+    -- or multi-clause checker) is unknown rather than uninspected, so a
+    -- forwarding wrapper is left alone: only a body that never mentions the
+    -- output at all is known to accept without looking at it.
     emptyOutputValidation n es =
         any (any (typed "TxOut") . nodes) (patterns n)
         && any (typedResult "Bool") (take 1 (nodeChildren n))
-        && any (\e -> null (outputArgs e) && not (isFalse e)) es
+        && any (\e -> null (outputArgs e) && not (isFalse e)
+                && not (any (`mentions` e) outputs)) es
+      where
+        outputs = [Ref v | p <- patterns n, a <- nodes p, typed "TxOut" a, v <- names a]
     typed target n = any (typeIs target) (mapMaybe identType (Map.elems (nodeIdentifiers (nodeInfo n))))
     typedResult target n = any (resultIs target) (mapMaybe identType (Map.elems (nodeIdentifiers (nodeInfo n))))
     typeIs target ix = case hie_types hie Arr.! ix of
