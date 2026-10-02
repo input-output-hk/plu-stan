@@ -540,3 +540,101 @@ timeTraceArm info maxDuration = case (I.ivFrom (txInfoValidRange info), I.ivTo (
 -- The output is handed to a helper this module cannot expand.
 outputForward :: TxOut -> Bool
 outputForward out = Helpers.hasOutputAddress out
+
+-- A reference-script check bypassed by || True must still warn.
+reviewReferenceBypass :: TxOut -> Address -> Bool
+reviewReferenceBypass out addr = txOutAddress out == addr && ((case txOutReferenceScript out of
+  Nothing -> True
+  _ -> False) || True)
+
+reviewDatumBypass :: TxOut -> Address -> Bool
+reviewDatumBypass out addr = txOutAddress out == addr && ((case txOutDatum out of
+  OutputDatum (Datum d) -> case Tx.fromBuiltinData d of
+    Just (TestDatum n _) -> n > 0
+    Nothing -> False
+  _ -> False) || True)
+
+reviewStakeBypass :: TxOut -> Credential -> Bool
+reviewStakeBypass out cred = addressCredential (txOutAddress out) == cred && ((case txOutAddress out of
+  Address _ Nothing -> True
+  _ -> False) || True)
+
+-- subtract hi lo computes lo-hi; this imposes no maximum window.
+reviewSubtractWrong :: TxInfo -> POSIXTime -> Bool
+reviewSubtractWrong info maxDuration = case (I.ivFrom (txInfoValidRange info), I.ivTo (txInfoValidRange info)) of
+  (I.LowerBound (I.Finite lo) _, I.UpperBound (I.Finite hi) _) -> subtract hi lo <= maxDuration
+  _ -> False
+
+reviewSubtractGood :: TxInfo -> POSIXTime -> Bool
+reviewSubtractGood info maxDuration = case (I.ivFrom (txInfoValidRange info), I.ivTo (txInfoValidRange info)) of
+  (I.LowerBound (I.Finite lo) _, I.UpperBound (I.Finite hi) _) -> subtract lo hi <= maxDuration
+  _ -> False
+
+-- Multiple guarded RHSs are alternatives, not cumulative requirements.
+reviewCaseGuards :: TxInfo -> POSIXTime -> POSIXTime -> Bool -> Bool
+reviewCaseGuards info maxDuration deadline bypass = case (I.ivFrom (txInfoValidRange info), I.ivTo (txInfoValidRange info)) of
+  (I.LowerBound (I.Finite lo) _, I.UpperBound (I.Finite hi) _)
+    | bypass -> hi - lo <= maxDuration
+    | otherwise -> lo >= deadline
+  _ -> False
+
+-- Another credential branch cannot supply the script branch's facts.
+reviewRedeemerWrongBranch :: TxInfo -> Redeemer -> Bool
+reviewRedeemerWrongBranch info expected = all (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+  ScriptCredential _ -> True
+  _ -> M.lookup (Spending (txInInfoOutRef i)) (txInfoRedeemers info) == Just expected) (txInfoInputs info)
+
+
+-- Direct constructor checks remain sufficient when required by acceptance.
+reviewReferenceCaseGood :: TxOut -> Address -> Bool
+reviewReferenceCaseGood out addr = txOutAddress out == addr && case txOutReferenceScript out of
+  Nothing -> True
+  _ -> False
+
+reviewReferenceRejectingOr :: TxOut -> Address -> Bool
+reviewReferenceRejectingOr out addr = txOutAddress out == addr && ((case txOutReferenceScript out of
+  Nothing -> True
+  _ -> False) || False)
+
+reviewDatumCaseGood :: TxOut -> Address -> Bool
+reviewDatumCaseGood out addr = txOutAddress out == addr && case txOutDatum out of
+  OutputDatum (Datum d) -> case Tx.fromBuiltinData d of
+    Just (TestDatum n _) -> n > 0
+    Nothing -> False
+  _ -> False
+
+reviewStakeCaseGood :: TxOut -> Credential -> Bool
+reviewStakeCaseGood out cred = addressCredential (txOutAddress out) == cred && case txOutAddress out of
+  Address _ Nothing -> True
+  _ -> False
+
+reviewCaseGuardsGood :: TxInfo -> POSIXTime -> Bool -> Bool
+reviewCaseGuardsGood info maxDuration alternate = case (I.ivFrom (txInfoValidRange info), I.ivTo (txInfoValidRange info)) of
+  (I.LowerBound (I.Finite lo) _, I.UpperBound (I.Finite hi) _)
+    | alternate -> hi - lo <= maxDuration
+    | otherwise -> hi - lo <= maxDuration
+  _ -> False
+
+reviewCaseRejectingGuard :: TxInfo -> POSIXTime -> Bool -> Bool
+reviewCaseRejectingGuard info maxDuration reject = case (I.ivFrom (txInfoValidRange info), I.ivTo (txInfoValidRange info)) of
+  (I.LowerBound (I.Finite lo) _, I.UpperBound (I.Finite hi) _)
+    | reject -> False
+    | otherwise -> hi - lo <= maxDuration
+  _ -> False
+
+reviewRedeemerBranchGood :: TxInfo -> Redeemer -> Bool
+reviewRedeemerBranchGood info expected = all (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+  ScriptCredential _ -> M.lookup (Spending (txInInfoOutRef i)) (txInfoRedeemers info) == Just expected
+  _ -> True) (txInfoInputs info)
+
+reviewRedeemerGuardBypass :: TxInfo -> Redeemer -> Bool -> Bool
+reviewRedeemerGuardBypass info expected bypass = all (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+  ScriptCredential _
+    | bypass -> True
+    | otherwise -> M.lookup (Spending (txInInfoOutRef i)) (txInfoRedeemers info) == Just expected
+  _ -> True) (txInfoInputs info)
+
+reviewRedeemerRejectScript :: TxInfo -> Bool
+reviewRedeemerRejectScript info = all (\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of
+  ScriptCredential _ -> False
+  _ -> True) (txInfoInputs info)
