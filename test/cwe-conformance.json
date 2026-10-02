@@ -849,6 +849,118 @@
       "binding": "outputForward",
       "expected": false,
       "note": "The output reaches a helper from another module; unknown, not uninspected"
+    },
+    {
+      "rule": "UnvalidatedReferenceScript",
+      "inspection": "PLU-STAN-30",
+      "binding": "reviewReferenceBypass",
+      "expected": true,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "UnvalidatedReferenceScript",
+      "inspection": "PLU-STAN-30",
+      "binding": "reviewReferenceCaseGood",
+      "expected": false,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "UnvalidatedReferenceScript",
+      "inspection": "PLU-STAN-30",
+      "binding": "reviewReferenceRejectingOr",
+      "expected": false,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "UnvalidatedDatum",
+      "inspection": "PLU-STAN-31",
+      "binding": "reviewDatumBypass",
+      "expected": true,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "UnvalidatedDatum",
+      "inspection": "PLU-STAN-31",
+      "binding": "reviewDatumCaseGood",
+      "expected": false,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "MissingStakingValidation",
+      "inspection": "PLU-STAN-29",
+      "binding": "reviewStakeBypass",
+      "expected": true,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "MissingStakingValidation",
+      "inspection": "PLU-STAN-29",
+      "binding": "reviewStakeCaseGood",
+      "expected": false,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "reviewSubtractWrong",
+      "expected": true,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "reviewSubtractGood",
+      "expected": false,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "reviewCaseGuards",
+      "expected": true,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "reviewCaseGuardsGood",
+      "expected": false,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "ValidityRangeBound",
+      "inspection": "PLU-STAN-35",
+      "binding": "reviewCaseRejectingGuard",
+      "expected": false,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "reviewRedeemerWrongBranch",
+      "expected": true,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "reviewRedeemerBranchGood",
+      "expected": false,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "reviewRedeemerGuardBypass",
+      "expected": true,
+      "note": "Regression: validation must hold on the accepting path"
+    },
+    {
+      "rule": "UncheckedRedeemer",
+      "inspection": "PLU-STAN-33",
+      "binding": "reviewRedeemerRejectScript",
+      "expected": false,
+      "note": "Regression: validation must hold on the accepting path"
     }
   ],
   "source_hashes": {

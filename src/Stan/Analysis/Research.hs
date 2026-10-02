@@ -155,17 +155,20 @@ normalise hie defs env seen fuel n
 required :: Expr -> [Expr]
 required e
     | Call f [a,b] <- e, isName "&&" f = required a <> required b
-    | Call f [a,b] <- e, isName "||" f = filter (`elem` required b) (required a)
+    | Call f [a,b] <- e, isName "||" f = alternatives [a,b]
     | Form "if" [c,t,f] <- e, isFalse f = required c <> required t
     | Form "if" [_c,t,f] <- e = filter (`elem` required f) (required t)
-    | Form "case" (_:bs) <- e = common (map required (filter (not . rejecting) bs))
-    | Form "branch" (_:xs) <- e = concatMap required xs
+    -- Keep the required case itself as evidence of a constructor constraint.
+    -- Its nested facts still have to hold in every accepting alternative.
+    | Form "case" (_:bs) <- e = e : alternatives bs
+    | Form "branch" (_:xs) <- e = alternatives xs
+    | Form "alternatives" xs <- e = alternatives xs
     | Form "guard" xs <- e = concatMap required xs
     | otherwise = [e]
   where
     common [] = []
     common (xs:xss) = foldl' (\acc ys -> filter (`elem` ys) acc) xs xss
-    rejecting = isFalse
+    alternatives = common . map required . filter (not . isFalse)
 
 -- An expression that can only reject: the constant 'False', a throwing
 -- call, or a form whose every reachable arm rejects. Only the root is
@@ -214,16 +217,16 @@ outputArgs e = unique [x | s <- ["txOutAddress","txOutValue","txOutDatum","txOut
 -- or a constructor must be constrained by a case with a rejecting alternative.
 fieldChecked :: String -> Expr -> Expr -> Bool
 fieldChecked s out e = any (\(_,a,b) -> field s out a || field s out b) (checks e)
-    || any caseCheck (expressions e)
+    || any caseCheck (required e)
   where
     caseCheck (Form "case" (scrut:bs)) = field s out scrut &&
-        any rejects bs && any validates bs
+        any isFalse bs && not (null (accepting bs)) && all validates (accepting bs)
     caseCheck _ = False
-    rejects (Form "branch" (_:xs)) = any isFalse xs
-    rejects _ = False
+    accepting = filter (not . isFalse)
     validates (Form "branch" (Form "pattern" ps:xs)) =
         (s /= "txOutDatum" && not (null ps) && not (all isFalse xs))
-        || any (any (\(_,a,b) -> mentionsOrigin scrutOrigin a || mentionsOrigin scrutOrigin b) . checks) xs
+        || any (\(_,a,b) -> mentionsOrigin scrutOrigin a || mentionsOrigin scrutOrigin b)
+            (checks (Form "branch" (Form "pattern" ps:xs)))
     validates _ = False
     scrutOrigin = [Call (Ref n) [out] | Ref n <- expressions e, isName s (Ref n)]
     mentionsOrigin origins x = any (`mentions` x) origins
@@ -241,10 +244,12 @@ missingStake e = any bad (outputArgs e)
   where
     bad out = fieldChecked "txOutAddress" out e
         && not (any (\(_,a,b) -> complete out a || complete out b) (checks e))
-        && not (any (explicitNoStake out) (expressions e))
+        && not (any (explicitNoStake out) (required e))
     explicitNoStake out (Form "case" (address:bs)) = field "txOutAddress" out address &&
-        any (\case Form "branch" (p:_) -> has "Address" p && has "Nothing" p; _ -> False) bs
+        any isFalse bs && not (null (accepting bs)) &&
+        all (\case Form "branch" (p:_) -> has "Address" p && has "Nothing" p; _ -> False) (accepting bs)
     explicitNoStake _ _ = False
+    accepting = filter (not . isFalse)
     complete out x = field "txOutAddress" out x &&
         (isCall "txOutAddress" x || has "addressStakingCredential" x || any projectedStake (expressions x))
       where
@@ -331,19 +336,23 @@ uncheckedRedeemer :: Expr -> Bool
 uncheckedRedeemer e = has "txInfoInputs" e && any unchecked contexts
   where
     contexts = e : [b | Form "lambda" (_:bs) <- expressions e, b <- bs]
-    unchecked body = any (missing body) scriptInputs
+    unchecked body = any (uncurry (missing body)) scriptInputs
       where
-        scriptInputs = [i | Form "case" (scrut:branches) <- expressions body,
-            any (has "ScriptCredential") branches, [i] <- argsOf "txInInfoResolved" scrut]
-    missing body input = not (any (valid input) (contextFacts body))
-    valid input fact = any (lookupFor input) (expressions fact)
-        && (isJust (comparison fact) || case fact of Form "case" _ -> True; _ -> False)
+        scriptInputs = [(i,branch) | Form "case" (scrut:branches) <- expressions body,
+            branch@(Form "branch" (pat:_)) <- branches,
+            has "ScriptCredential" pat, not (isFalse branch),
+            [i] <- argsOf "txInInfoResolved" scrut]
+    -- Sibling credential arms cannot authorize the accepting script arm.
+    missing body input branch = not (any (valid input) (required body <> required branch))
+    valid input fact
+        | isJust (comparison fact) = any (lookupFor input) (expressions fact)
+        | Form "case" (scrut:branches) <- fact =
+            any (lookupFor input) (expressions scrut) && any isFalse branches
+        | otherwise = False
     lookupFor input (Call f [purpose,redeemers]) = isName "lookup" f
         && any (`elem` argsOf "txInfoInputs" e) (argsOf "txInfoRedeemers" redeemers)
         && [input] `elem` argsOf "txInInfoOutRef" purpose && has "Spending" purpose
     lookupFor _ _ = False
-    contextFacts body = required body <>
-        [fact | Form "branch" (_:bs) <- expressions body, b <- bs, fact <- required b]
 
 readOnlySpend :: [[Name]] -> Expr -> Bool
 readOnlySpend schemas e = any direct equalities || any allFields schemas
@@ -364,7 +373,7 @@ validityRange e = has "txInfoValidRange" e && not (any bounded (checks e))
   where
     bounded (op,a,b) = (op `elem` ["<=","<"] && duration a && not (has "txInfoValidRange" b))
         || (op `elem` [">=",">"] && duration b && not (has "txInfoValidRange" a))
-    duration x = any delta (argsOf "-" x <> argsOf "subtract" x)
+    duration x = any delta (argsOf "-" x) || any (delta . reverse) (argsOf "subtract" x)
     delta [hi,lo] = has "ivTo" hi && has "ivFrom" lo && sameRange hi lo
     delta _ = False
     sameRange hi lo = any (`elem` argsOf "ivFrom" lo) (argsOf "ivTo" hi)
