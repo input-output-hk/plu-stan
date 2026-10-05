@@ -23,6 +23,14 @@ It is a standard VS Code extension, so it works in both VS Code and Cursor.
 - A buildable Haskell workspace producing `.hie`/`.hi` artifacts — the CLI auto-builds when needed.
 - Extension 0.3.x requires `plustan` >= 0.2.5.0 (schema v2 JSON). On a version mismatch, Start Review shows an error with a "Check for Updates" action instead of silently misparsing output.
 
+## CLI 1.1.0 and extension 0.3.5
+
+CLI 1.1.0 adds 14 inspections (`PLU-STAN-28` through `PLU-STAN-41`) with teaching examples. Rule definitions come from the CLI and remain compatible with the extension's schema-v2 protocol.
+
+Run **Plu-Stan: Check for Updates** to install the latest CLI matching your project's GHC. The extension also checks on activation, at most once a day, when it manages a downloaded binary. If you set `plustan.binaryPath`, update that binary yourself; background checks skip it.
+
+CLI 1.1.0 ships GHC 9.6.x and 9.12.x binaries for Linux x64, macOS ARM64 and Windows x64. For another GHC series, build the CLI with that GHC and configure `plustan.binaryPath`. See [conformance scope and limits](https://github.com/input-output-hk/plu-stan/blob/main/docs/cwe-conformance.md) for the new research inspections.
+
 ## Install In Cursor
 
 1. Build extension assets:
