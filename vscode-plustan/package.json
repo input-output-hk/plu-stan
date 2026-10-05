@@ -2,7 +2,7 @@
   "name": "vscode-plustan",
   "displayName": "Plu-Stan",
   "description": "Security and performance static analysis for Cardano smart contracts written in Plinth.",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "icon": "media/logo.png",
   "publisher": "IOG",
   "license": "MPL-2.0",
@@ -187,6 +187,7 @@
     }
   },
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test:unit": "npm run compile && mocha \"out/core/**/*.test.js\" \"out/analyzer/**/*.test.js\"",

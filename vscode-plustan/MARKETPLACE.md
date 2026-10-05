@@ -19,6 +19,14 @@
 - A Haskell workspace compiled with `.hie`/`.hi` artifacts (Plu-Stan will trigger a build automatically if needed)
 - A GHC the extension ships a prebuilt binary for. The `plustan` binary reads `.hie` files, whose on-disk format is tied to the GHC **major.minor series** that produced them — patch releases within a series share the format, so one binary handles any patch of its series (e.g. a 9.6 build reads any 9.6.x project). The extension fetches the binary matching your project's GHC. If your project's GHC series isn't shipped, build `plustan` with that GHC and set `plustan.binaryPath`.
 
+## CLI updates and new rules
+
+The extension and the `plustan` CLI have separate versions. Extension **0.3.5** works with CLI **1.1.0**, which adds 14 inspections (`PLU-STAN-28` through `PLU-STAN-41`) and their teaching examples. Rules and explanations come from the CLI, so new compatible CLI releases reach the extension without an extension update.
+
+Run **Plu-Stan: Check for Updates** to download CLI 1.1.0 for your project's GHC. When the extension manages your binary, it also checks for updates on activation, at most once a day, and offers to install a newer CLI. If you set `plustan.binaryPath`, update that binary yourself; background update checks skip explicitly configured binaries.
+
+CLI 1.1.0 provides binaries for **GHC 9.6.x and 9.12.x** on Linux x64, macOS ARM64, and Windows x64. For another GHC series, build the CLI with your project's GHC and set `plustan.binaryPath`.
+
 ## Getting Started
 
 1. Open your Plinth project in VS Code or Cursor.
@@ -67,23 +75,52 @@ Every dismissal is recorded in `.plustan/dismissals.json` at your workspace root
 
 ## Rules
 
-Plu-Stan checks for security and performance issues specific to Plinth on-chain code, including:
+The inspections available depend on your CLI version. CLI **1.1.0** includes:
 
-- Signature verification invariants (PLU-STAN-01)
-- Unsafe `unsafeFromBuiltinData` usage (PLU-STAN-02)
-- Optional types in on-chain code (PLU-STAN-03)
-- Credential-only equality comparisons (PLU-STAN-04)
-- Inefficient higher-order list helpers (PLU-STAN-05)
-- Multiple list traversals (PLU-STAN-06)
-- Guard syntax inefficiency (PLU-STAN-07)
-- Non-strict let bindings (PLU-STAN-08)
-- Unsafe `valueOf` comparisons (PLU-STAN-09)
-- Unvalidated hashes from `BuiltinData` (PLU-STAN-10)
-- `currencySymbolValueOf` misuse (PLU-STAN-11)
-- Validity interval / POSIX time misuse (PLU-STAN-12)
-- Division before multiplication precision loss (PLU-STAN-16)
+- Signature verification builtin usage must satisfy invariants (`PLU-STAN-01`)
+- Usage of `unsafeFromBuiltinData` (`PLU-STAN-02`)
+- Usage of Optional types in on-chain code (`PLU-STAN-03`)
+- Equality/comparison on PubKeyHash, ScriptHash, or Credential (`PLU-STAN-04`)
+- Usage of higher-order list helpers (`PLU-STAN-05`)
+- Multiple list traversals in on-chain code (`PLU-STAN-06`)
+- Guard syntax in on-chain code (`PLU-STAN-07`)
+- Non-strict let binding used multiple times (`PLU-STAN-08`)
+- `valueOf` in equality comparisons (`PLU-STAN-09`)
+- Unvalidated hashes from BuiltinData in comparisons (`PLU-STAN-10`)
+- Usage of `currencySymbolValueOf` (`PLU-STAN-11`)
+- Validity interval / POSIX time misuse (`PLU-STAN-12`)
+- TxOut validation misses reference script checks (`PLU-STAN-13`)
+- TxOut validation misses staking credential checks (`PLU-STAN-14`)
+- TxOut validation misses value checks (`PLU-STAN-15`)
+- Precision loss: division before multiplication (`PLU-STAN-16`)
+- Redeemer-supplied indices must be unique (`PLU-STAN-17`)
+- Avoid lazy `(&&)` in on-chain code (`PLU-STAN-18`)
+- TxOut validation misses datum checks (`PLU-STAN-19`)
+- Immutable credentials baked into validators (`PLU-STAN-21`)
+- TxOut validation misses address checks (`PLU-STAN-22`)
+- `unstableMakeIsData` assigns unstable constructor indices (`PLU-STAN-23`)
+- Empty string used to detect ADA (`PLU-STAN-24`)
+- Script-input dependency without a redeemer check (`PLU-STAN-25`)
+- `zip` without a length check (`PLU-STAN-26`)
+- Input spent only to be recreated identically (`PLU-STAN-27`)
+- Output validation misses address constraints (`PLU-STAN-28`)
+- Output validation misses staking constraints (`PLU-STAN-29`)
+- Output validation misses reference script constraints (`PLU-STAN-30`)
+- Output validation misses datum constraints (`PLU-STAN-31`)
+- Output permits unconstrained tokens (`PLU-STAN-32`)
+- Script input dependency misses corresponding redeemer validation (`PLU-STAN-33`)
+- Unchanged datum is spent and recreated (`PLU-STAN-34`)
+- Validity range lacks a maximum duration (`PLU-STAN-35`)
+- Decoded datum used in field equality (`PLU-STAN-36`)
+- Flattened token tuple is incompletely validated (`PLU-STAN-37`)
+- Exact ADA output equality (`PLU-STAN-38`)
+- Selected input lacks token identity validation (`PLU-STAN-39`)
+- Trivial forwarding or pattern matching helper (`PLU-STAN-40`)
+- Fixed string keys used in a datum map (`PLU-STAN-41`)
 
-Each rule's finding comes with a plain-language explanation, a bad/good example pair, and a fix suggestion right in the Finding Detail panel. For full rule documentation see the [plu-stan repository](https://github.com/input-output-hk/plu-stan/blob/main/RULES.md).
+Each rule's finding includes an explanation, teaching examples and fix guidance in the Finding Detail panel. See the [full rule documentation](https://github.com/input-output-hk/plu-stan/blob/main/RULES.md) for details.
+
+The new research inspections use bounded intramodule analysis of documented warning patterns. The conformance corpus covers representative detection contracts for 19 of 23 Cardano-CWE-Research rules (133 positive and negative CLI cases); this is not a measure of arbitrary-program vulnerability recall or a proof of contract safety. See the [conformance scope and limits](https://github.com/input-output-hk/plu-stan/blob/main/docs/cwe-conformance.md).
 
 ## License
 
