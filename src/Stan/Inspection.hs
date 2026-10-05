@@ -151,6 +151,7 @@ data InspectionAnalysis
     -- | 'zip' used without comparing the lengths of both lists.
     | ZipWithoutLengthCheck
     -- | An input is spent only to be recreated identically.
+    | ResearchRule
     | SpendAndRecreateInsteadOfReferenceInput
     deriving stock (Show, Eq)
 

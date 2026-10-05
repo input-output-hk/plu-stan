@@ -11,12 +11,14 @@ Usage:  python3 scripts/gen-traceability.py
 """
 
 import csv
+import json
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BASE = "https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules"
+RESEARCH_COMMIT = "10eeea42c9b18d37cc2985c02b8b6987c0bb1c13"
+BASE = f"https://github.com/input-output-hk/Cardano-CWE-Research/blob/{RESEARCH_COMMIT}/rules"
 
 # --- curated: upstream rule -> categories --------------------------------
 RULE_CATEGORIES = {
@@ -55,54 +57,142 @@ RULE_CATEGORIES = {
 #   disjoint              overlapping theme, non-overlapping target
 #   needs-new-analysis    requires analysis the tool does not do anywhere
 #   deferred / blocked / spec-incomplete   see the note
-MAPPING = [
-    ("PrecisionLoss", "direct", ["PLU-STAN-16"], "", ""),
-    ("EmptyStringADACheck", "direct", ["PLU-STAN-24"], "", ""),
-    ("UnstableMakeIsData", "direct", ["PLU-STAN-23"], "", ""),
-    ("ZipWithoutLengthCheck", "direct", ["PLU-STAN-26"], "",
-     "Length check matched per zipped list; zipWith args fall back to a definition-wide length test"),
-
-    ("MissingAddressValidation", "narrower", ["PLU-STAN-22"], "trigger-gate",
-     "Only fires when >=3 of the 5 TxOut fields are already checked; the rule fires on absence of txOutAddress generally. A validator that checks nothing at all is flagged by the rule and silent here."),
-    ("MissingStakingValidation", "narrower", ["PLU-STAN-14", "PLU-STAN-04"], "trigger-gate",
-     "PLU-STAN-14 only fires when >=3 of the 5 TxOut fields are already checked. PLU-STAN-04 covers the related hash-vs-Address comparison that leaks staking rewards."),
-    ("UnvalidatedReferenceScript", "narrower", ["PLU-STAN-13"], "trigger-gate",
-     "Only fires when >=3 of the 5 TxOut fields are already checked."),
-    ("UnvalidatedDatum", "narrower", ["PLU-STAN-19"], "trigger-gate",
-     "Only fires when >=3 of the 5 TxOut fields are already checked."),
-    ("TrashTokens", "narrower", ["PLU-STAN-15"], "trigger-gate",
-     "Only fires when >=3 of the 5 TxOut fields are already checked; the rule's leq/geq subset comparisons are not detected (those names are local operator bindings in the analyser, not Plutus value functions)."),
-    ("UncheckedRedeemer", "narrower", ["PLU-STAN-25"], "scope-limited",
-     "Matches source text within a top-level definition rather than resolved names, so it also matches tokens in comments and strings; the script-input helper names it recognises are a fixed list. Reference inputs are not treated as a dependency: they carry no redeemer, so no redeemer check could ever cover them."),
-    ("ReadOnlySpend", "narrower", ["PLU-STAN-27"], "scope-limited",
-     "Requires all four field accessors plus txInInfoResolved, so a three-field identical recreation is not flagged."),
-
-    ("ValidityRangeBound", "adjacent", ["PLU-STAN-12"], "needs-new-analysis",
-     "The rule requires the ABSENCE of a range-length bound, (upper - lower) <= max. PLU-STAN-12 does no arithmetic or comparison analysis at all; it uses a proxy, isFiniteCheckNode, which needs a case/let mentioning lowerBound/upperBound AND LowerBound/UpperBound AND Finite. GAP: a validator that destructures both bounds and matches Finite but imposes no maximum duration is silent -- exactly the rule's target. PRECISION: ivFrom/ivTo, the spelling the rule's own examples use, appear 0 times in the analyser, so code written that way fails the proxy and is flagged whether or not it bounds the duration."),
-    ("DatumComparisonOptimization", "adjacent", ["PLU-STAN-02"], "name-coverage",
-     "The rule targets the shape 'case fromBuiltinData d of Just (Ctor fs) -> field comparisons', recommending 'd == toBuiltinData expected'. PLU-STAN-02 is a bare NameMeta match on unsafeFromBuiltinData. GAP BOTH WAYS: fromBuiltinData (the rule's primary spelling) is not matched and toBuiltinData appears 0 times, so neither the flagged shape nor the recommended one is recognised; conversely PLU-STAN-02 fires on every unsafeFromBuiltinData use whether or not a comparison follows. It measures decode cost, not the upcast-then-compare shape."),
-    ("PartialUnvalidatedDatum", "adjacent", ["PLU-STAN-19"], "disjoint",
-     "Disjoint rather than narrower. The rule fires when the datum IS extracted and SOME fields are validated but not all. PLU-STAN-19 fires only when the datum is untouched (no txOutDatum/OutputDatum/getDatumData token) and >=3 other fields are checked. Validating 2 of 5 datum fields sets txOutFieldDatumChecked = True and silences PLU-STAN-19 -- so satisfying PLU-STAN-19 is precisely what triggers the rule. The rule's entire target set is invisible."),
-    ("IncompleteTokenValidation", "adjacent", ["PLU-STAN-09", "PLU-STAN-11"], "name-coverage",
-     "The rule's pattern is a fold over flattenValue (txInfoMint ...) whose (symbol, name, quantity) tuple leaves a component as a wildcard. flattenValue appears 0 times in the analyser and nothing inspects tuple patterns for wildcard components. PLU-STAN-09/-11 catch a different incomplete-value idiom (valueOf in comparisons; currencySymbolValueOf on minted value). Same concern, different code shape."),
-    ("StrictValueEquality", "adjacent", ["PLU-STAN-09", "PLU-STAN-15"], "disjoint",
-     "Opposite polarity. The rule fires on an over-strict PRESENCE -- lovelaceValueOf (txOutValue x) == y, which can make a validator unsatisfiable under min-ADA or collateral change -- whereas PLU-STAN-15 fires on the ABSENCE of a value constraint. lovelaceValueOf appears 0 times in the analyser, so PLU-STAN-09 cannot match the rule's one-line pattern either."),
-    ("UnvalidatedInputIndex", "adjacent", ["PLU-STAN-17"], "remediation-mismatch",
-     "The triggers nearly coincide -- both start from a redeemer-derived index into txInfoInputs, and PLU-STAN-17 already has subtreeHasIndexingCall plus redeemerDecodeIndicators -- but the remediation each demands differs. The rule wants an NFT identity check on the selected input, valueOf (txOutValue (txInInfoResolved v)) cs tn >= 1, i.e. 'is this the RIGHT input?'. PLU-STAN-17 wants index UNIQUENESS. A validator that enforces uniqueness satisfies PLU-STAN-17 while still trusting an unverified input. PLU-STAN-17's counter-evidence is also a source comment ('plutstan uniqueness enforced'), so it can be silenced with no code change at all."),
-    ("ListUniqueness", "adjacent", ["PLU-STAN-17"], "disjoint",
-     "Effectively uncovered. The rule wants 'xs == nub xs' (or 'length xs == length (nub xs)') on lists of identity types -- PubKeyHash, ValidatorHash, Address, Credential -- whereas PLU-STAN-17 concerns redeemer-supplied indices, not credential lists. No uniqueness detection exists: the analyser's only nub references belong to STAN-0209, which flags nub as SLOW, so implementing this rule would put two inspections in direct opposition on the same code. A signer list with duplicates, amplifying a compromised key, is invisible today."),
-    ("HelperFunctions", "adjacent", ["PLU-STAN-05"], "disjoint",
-     "Disjoint. PLU-STAN-05 matches calls to LIBRARY higher-order functions (all/any/find/filter/foldl/foldr/elem/traverse_ from PlutusTx.Prelude, .List and .Foldable). The rule targets USER-DEFINED trivial wrappers -- 'f x = g x', or a helper that only pattern-matches. The rule's own invalid example, 'isAdmin pkh info = txSignedBy info pkh', contains no higher-order call, so PLU-STAN-05 cannot see it. Shared theme (inlining overhead), nothing else."),
-
-    ("NoBurningLogic", "none", [], "blocked",
-     "Implemented in open PR #39 as PLU-STAN-20, not merged: 20 of its own tests fail on its base and it carries 61 hlint hints. It does solve the (currencySymbol, tokenName) pairing that makes this rule hard."),
-    ("ImmutableCredential", "direct", ["PLU-STAN-21"], "",
-     "Covers both patterns the rule specifies: top-level credential constants, and credentials specialised into compiled code via applyCode/unsafeApplyCode/liftCode. Also filters to validator-reachable bindings, so an unused top-level credential is not flagged."),
-    ("DoubleSatisfaction", "none", [], "deferred",
-     "Deferred: proving the ABSENCE of uniqueness attribution is not tractable, and legitimate value aggregation over filtered outputs is common, so a shape-only rule would be noise."),
-    ("FixedStructureMap", "none", [], "spec-incomplete",
-     "Held: detection is trivial ('member <string> (<field> <datum>)') but the rule does not say when a fixed map key is a defect, so there is no criterion to implement."),
-]
+MAPPING = [('PrecisionLoss',
+  'direct',
+  ['PLU-STAN-16'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('EmptyStringADACheck',
+  'direct',
+  ['PLU-STAN-24'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('UnstableMakeIsData',
+  'direct',
+  ['PLU-STAN-23'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('ZipWithoutLengthCheck',
+  'direct',
+  ['PLU-STAN-26'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('MissingAddressValidation',
+  'direct',
+  ['PLU-STAN-22', 'PLU-STAN-28'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('MissingStakingValidation',
+  'direct',
+  ['PLU-STAN-14', 'PLU-STAN-04', 'PLU-STAN-29'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('UnvalidatedReferenceScript',
+  'direct',
+  ['PLU-STAN-13', 'PLU-STAN-30'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('UnvalidatedDatum',
+  'direct',
+  ['PLU-STAN-19', 'PLU-STAN-31'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('TrashTokens',
+  'direct',
+  ['PLU-STAN-15', 'PLU-STAN-32'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('UncheckedRedeemer',
+  'direct',
+  ['PLU-STAN-25', 'PLU-STAN-33'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('ReadOnlySpend',
+  'direct',
+  ['PLU-STAN-27', 'PLU-STAN-34'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('ValidityRangeBound',
+  'direct',
+  ['PLU-STAN-12', 'PLU-STAN-35'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('DatumComparisonOptimization',
+  'direct',
+  ['PLU-STAN-02', 'PLU-STAN-36'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('PartialUnvalidatedDatum',
+  'adjacent',
+  ['PLU-STAN-19'],
+  'disjoint',
+  'Not counted: checking that some datum validation exists does not establish validation of every '
+  'datum field.'),
+ ('IncompleteTokenValidation',
+  'direct',
+  ['PLU-STAN-09', 'PLU-STAN-11', 'PLU-STAN-37'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('StrictValueEquality',
+  'direct',
+  ['PLU-STAN-09', 'PLU-STAN-15', 'PLU-STAN-38'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('UnvalidatedInputIndex',
+  'direct',
+  ['PLU-STAN-17', 'PLU-STAN-39'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('ListUniqueness',
+  'adjacent',
+  ['PLU-STAN-17'],
+  'disjoint',
+  'Not counted: integer-index uniqueness is a different concern from identity-list uniqueness.'),
+ ('HelperFunctions',
+  'direct',
+  ['PLU-STAN-05', 'PLU-STAN-40'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('NoBurningLogic',
+  'none',
+  [],
+  'blocked',
+  'Unmerged implementation in PR #39; excluded from the numerator, included in the denominator.'),
+ ('ImmutableCredential',
+  'direct',
+  ['PLU-STAN-21'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.'),
+ ('DoubleSatisfaction',
+  'none',
+  [],
+  'deferred',
+  'Not counted: operation-to-payment attribution needs a separately reviewed detection contract. '
+  'Retained in the denominator.'),
+ ('FixedStructureMap',
+  'direct',
+  ['PLU-STAN-41'],
+  '',
+  'Representative contract and limitations: docs/cwe-conformance.md. Measured by the CLI corpus in '
+  'test/cwe-conformance.json; mapping alone does not assert passing acceptance.')]
 
 
 def read(rel):
@@ -128,7 +218,9 @@ def inspection_facts():
         ctor = ctor or "FindAst"
         blk = re.search(r"^plustan%s = .*?(?=^plustan\d+ ::|\Z)" % num, ap, re.M | re.S)
         sev = re.search(r"severityL \.~ (\w+)", blk.group(0)) if blk else None
-        if ctor == "FindAst":
+        if ctor in {"ResearchRule", "PrecisionLossDivisionBeforeMultiply", "ZipWithoutLengthCheck"}:
+            impl = "src/Stan/Analysis/Research.hs:researchFindings"
+        elif ctor == "FindAst":
             impl = "src/Stan/Inspection/AntiPattern.hs (declarative FindAst pattern)"
         elif ctor in dispatch:
             impl = f"src/Stan/Analysis/Analyser.hs:{dispatch[ctor]}"
@@ -149,11 +241,23 @@ def inspection_facts():
         num, pid, body = m.groups()
         tests[pid] = {"spec": f"plustan{num}Spec", "cases": len(re.findall(r"^  it ", body, re.M))}
 
+    corpus = json.loads(read("test/cwe-conformance.json"))
+    for pid in insp:
+        cases = [c for c in corpus["cases"] if c["inspection"] == pid]
+        if cases:
+            previous = tests.get(pid, {"spec": "", "cases": 0})
+            tests[pid] = {
+                "spec": ";".join(filter(None, [previous["spec"], "CLI:test/cwe-conformance.json"])),
+                "cases": previous["cases"] + len(cases),
+            }
     return insp, tests
 
 
 def main():
     insp, tests = inspection_facts()
+    upstream = {p.stem for p in (ROOT / "test/research-source/rules").glob("*.md") if p.stem != "README"}
+    if upstream != {r[0] for r in MAPPING}:
+        sys.exit("Pinned research inventory and traceability mapping differ")
 
     unknown = {i for _, _, ids, _, _ in MAPPING for i in ids} - set(insp)
     if unknown:
@@ -171,7 +275,7 @@ def main():
             "inspection_severities": ";".join(insp[i]["severity"] for i in ids),
             "analysis_constructor": ";".join(insp[i]["ctor"] for i in ids),
             "implementation": ";".join(insp[i]["impl"] for i in ids),
-            "fixtures": "target/Target/PlutusTx.hs" if ids else "",
+            "fixtures": "target/Target/PlutusTx.hs;target/Target/Research.hs" if ids else "",
             "test_spec": ";".join(tests.get(i, {}).get("spec", "") for i in ids),
             "test_cases": ";".join(str(tests.get(i, {}).get("cases", "")) for i in ids),
             "gap_class": gap,
@@ -199,7 +303,7 @@ def main():
 
     out = ROOT / "TRACEABILITY.csv"
     with out.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()), lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
 
@@ -209,7 +313,8 @@ def main():
     counts = Counter(r["coverage"] for r in rows)
     covered = sum(1 for r in rows if r["rule_name"] and r["coverage"] != "none")
     print(f"wrote {out.relative_to(ROOT)}: {len(rows)} rows")
-    print(f"rules covered: {covered}/{len(MAPPING)}")
+    print(f"rules with any mapping (NOT implementation coverage): {covered}/{len(MAPPING)}")
+    print("Run scripts/check-cwe-conformance.py for measured acceptance coverage.")
     print("  " + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
 
 
@@ -247,7 +352,7 @@ def render_readme(rows, insp):
         lines += [
             "",
             f"{len(tool_only)} inspections have no counterpart in the research rule set "
-            f"(mostly UPLC efficiency, where the research rules skew towards security): {ids}.",
+            f"(reported separately from research-rule coverage): {ids}.",
         ]
     lines += ["", END]
 

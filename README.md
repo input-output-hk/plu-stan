@@ -74,6 +74,20 @@ So far, Plu-Stan implements the following automated detection rules:
 | PLU-STAN-25 | Script-input dependency without a redeemer check | Warning | Validation reads the transaction's other script inputs but never inspects a redeemer, so an unrelated co-spend can satisfy it |
 | PLU-STAN-26 | `zip` without a length check | Warning | `zip` truncates to the shorter list, so trailing elements of the longer one are silently never validated |
 | PLU-STAN-27 | Input spent only to be recreated identically | Performance | An input's address, value, datum and reference script are all asserted equal to an output's — a reference input does this without spending |
+| PLU-STAN-28 | Output validation misses address constraints | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-29 | Output validation misses staking constraints | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-30 | Output validation misses reference script constraints | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-31 | Output validation misses datum constraints | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-32 | Output permits unconstrained tokens | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-33 | Script input dependency misses corresponding redeemer validation | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-34 | Unchanged datum is spent and recreated | Performance | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-35 | Validity range lacks a maximum duration | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-36 | Decoded datum used in field equality | Performance | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-37 | Flattened token tuple is incompletely validated | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-38 | Exact ADA output equality | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-39 | Selected input lacks token identity validation | Warning | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-40 | Trivial forwarding or pattern matching helper | Performance | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
+| PLU-STAN-41 | Fixed string keys used in a datum map | Style | Research detection contract; see [conformance scope](docs/cwe-conformance.md) |
 
 For comprehensive guidelines on Plinth security patterns, anti-patterns, and best practices, see the [**Rules Documentation**](./RULES.md). This includes detailed explanations of the above rules plus additional security considerations not yet automated.
 
@@ -85,10 +99,12 @@ The inspections above are tracked against the rule set published in
 [input-output-hk/Cardano-CWE-Research](https://github.com/input-output-hk/Cardano-CWE-Research/tree/main/rules).
 Each row below links to that rule's page.
 
+The reproducible acceptance target is **19/23 rules (82.6%)**, with all 23 research rules retained in the denominator. Run `python3 scripts/check-cwe-conformance.py` to measure it on a particular checkout. [Scope, evidence and limitations](docs/cwe-conformance.md) define precisely what this claim means. The table below is a declared mapping, not a substitute for a passing acceptance run.
+
 Coverage is graded rather than boolean, because several inspections cover a rule's
 concern with a narrower trigger than the rule specifies:
 
-- **direct** — the inspection implements the rule's detection logic
+- **direct** — implements the documented representative detection contract, with scope and limitations recorded in the conformance document
 - **narrower** — same concern, but the inspection fires in fewer situations
 - **adjacent** — related concern, detected differently
 - **none** — no automated coverage
@@ -103,31 +119,31 @@ fact from the source tree; only the coverage grading is curated.
 
 | Research rule | Category | Coverage | Inspection(s) |
 |---|---|---|---|
-| [EmptyStringADACheck](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/EmptyStringADACheck.md) | Code quality | **direct** | `PLU-STAN-24` |
-| [ImmutableCredential](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/ImmutableCredential.md) | Code quality, Security | **direct** | `PLU-STAN-21` |
-| [PrecisionLoss](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/PrecisionLoss.md) | Code quality | **direct** | `PLU-STAN-16` |
-| [UnstableMakeIsData](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/UnstableMakeIsData.md) | Security | **direct** | `PLU-STAN-23` |
-| [ZipWithoutLengthCheck](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/ZipWithoutLengthCheck.md) | Code quality, Security | **direct** | `PLU-STAN-26` |
-| [MissingAddressValidation](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/MissingAddressValidation.md) | Security | **narrower** | `PLU-STAN-22` |
-| [MissingStakingValidation](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/MissingStakingValidation.md) | Security | **narrower** | `PLU-STAN-14`, `PLU-STAN-04` |
-| [ReadOnlySpend](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/ReadOnlySpend.md) | Performance, Security | **narrower** | `PLU-STAN-27` |
-| [TrashTokens](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/TrashTokens.md) | Performance, Security | **narrower** | `PLU-STAN-15` |
-| [UncheckedRedeemer](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/UncheckedRedeemer.md) | Security | **narrower** | `PLU-STAN-25` |
-| [UnvalidatedDatum](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/UnvalidatedDatum.md) | Security | **narrower** | `PLU-STAN-19` |
-| [UnvalidatedReferenceScript](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/UnvalidatedReferenceScript.md) | Performance | **narrower** | `PLU-STAN-13` |
-| [DatumComparisonOptimization](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/DatumComparisonOptimization.md) | Performance | **adjacent** | `PLU-STAN-02` |
-| [HelperFunctions](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/HelperFunctions.md) | Code quality, Performance | **adjacent** | `PLU-STAN-05` |
-| [IncompleteTokenValidation](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/IncompleteTokenValidation.md) | Security | **adjacent** | `PLU-STAN-09`, `PLU-STAN-11` |
-| [ListUniqueness](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/ListUniqueness.md) | Security | **adjacent** | `PLU-STAN-17` |
-| [PartialUnvalidatedDatum](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/PartialUnvalidatedDatum.md) | Security | **adjacent** | `PLU-STAN-19` |
-| [StrictValueEquality](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/StrictValueEquality.md) | Security | **adjacent** | `PLU-STAN-09`, `PLU-STAN-15` |
-| [UnvalidatedInputIndex](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/UnvalidatedInputIndex.md) | Security | **adjacent** | `PLU-STAN-17` |
-| [ValidityRangeBound](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/ValidityRangeBound.md) | Security | **adjacent** | `PLU-STAN-12` |
-| [DoubleSatisfaction](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/DoubleSatisfaction.md) | Security | **none** | — |
-| [FixedStructureMap](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/FixedStructureMap.md) | Code quality | **none** | — |
-| [NoBurningLogic](https://github.com/input-output-hk/Cardano-CWE-Research/blob/main/rules/NoBurningLogic.md) | Code quality, Security | **none** | — |
+| [DatumComparisonOptimization](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/DatumComparisonOptimization.md) | Performance | **direct** | `PLU-STAN-02`, `PLU-STAN-36` |
+| [EmptyStringADACheck](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/EmptyStringADACheck.md) | Code quality | **direct** | `PLU-STAN-24` |
+| [FixedStructureMap](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/FixedStructureMap.md) | Code quality | **direct** | `PLU-STAN-41` |
+| [HelperFunctions](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/HelperFunctions.md) | Code quality, Performance | **direct** | `PLU-STAN-05`, `PLU-STAN-40` |
+| [ImmutableCredential](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/ImmutableCredential.md) | Code quality, Security | **direct** | `PLU-STAN-21` |
+| [IncompleteTokenValidation](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/IncompleteTokenValidation.md) | Security | **direct** | `PLU-STAN-09`, `PLU-STAN-11`, `PLU-STAN-37` |
+| [MissingAddressValidation](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/MissingAddressValidation.md) | Security | **direct** | `PLU-STAN-22`, `PLU-STAN-28` |
+| [MissingStakingValidation](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/MissingStakingValidation.md) | Security | **direct** | `PLU-STAN-14`, `PLU-STAN-04`, `PLU-STAN-29` |
+| [PrecisionLoss](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/PrecisionLoss.md) | Code quality | **direct** | `PLU-STAN-16` |
+| [ReadOnlySpend](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/ReadOnlySpend.md) | Performance, Security | **direct** | `PLU-STAN-27`, `PLU-STAN-34` |
+| [StrictValueEquality](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/StrictValueEquality.md) | Security | **direct** | `PLU-STAN-09`, `PLU-STAN-15`, `PLU-STAN-38` |
+| [TrashTokens](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/TrashTokens.md) | Performance, Security | **direct** | `PLU-STAN-15`, `PLU-STAN-32` |
+| [UncheckedRedeemer](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/UncheckedRedeemer.md) | Security | **direct** | `PLU-STAN-25`, `PLU-STAN-33` |
+| [UnstableMakeIsData](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/UnstableMakeIsData.md) | Security | **direct** | `PLU-STAN-23` |
+| [UnvalidatedDatum](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/UnvalidatedDatum.md) | Security | **direct** | `PLU-STAN-19`, `PLU-STAN-31` |
+| [UnvalidatedInputIndex](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/UnvalidatedInputIndex.md) | Security | **direct** | `PLU-STAN-17`, `PLU-STAN-39` |
+| [UnvalidatedReferenceScript](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/UnvalidatedReferenceScript.md) | Performance | **direct** | `PLU-STAN-13`, `PLU-STAN-30` |
+| [ValidityRangeBound](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/ValidityRangeBound.md) | Security | **direct** | `PLU-STAN-12`, `PLU-STAN-35` |
+| [ZipWithoutLengthCheck](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/ZipWithoutLengthCheck.md) | Code quality, Security | **direct** | `PLU-STAN-26` |
+| [ListUniqueness](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/ListUniqueness.md) | Security | **adjacent** | `PLU-STAN-17` |
+| [PartialUnvalidatedDatum](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/PartialUnvalidatedDatum.md) | Security | **adjacent** | `PLU-STAN-19` |
+| [DoubleSatisfaction](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/DoubleSatisfaction.md) | Security | **none** | — |
+| [NoBurningLogic](https://github.com/input-output-hk/Cardano-CWE-Research/blob/10eeea42c9b18d37cc2985c02b8b6987c0bb1c13/rules/NoBurningLogic.md) | Code quality, Security | **none** | — |
 
-7 inspections have no counterpart in the research rule set (mostly UPLC efficiency, where the research rules skew towards security): `PLU-STAN-01`, `PLU-STAN-03`, `PLU-STAN-06`, `PLU-STAN-07`, `PLU-STAN-08`, `PLU-STAN-10`, `PLU-STAN-18`.
+7 inspections have no counterpart in the research rule set (reported separately from research-rule coverage): `PLU-STAN-01`, `PLU-STAN-03`, `PLU-STAN-06`, `PLU-STAN-07`, `PLU-STAN-08`, `PLU-STAN-10`, `PLU-STAN-18`.
 
 <!-- END TRACEABILITY -->
 

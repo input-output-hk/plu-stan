@@ -165,6 +165,24 @@ jobs:
       run: |
         cabal test stan-test
 
+    - name: Research conformance (at least 80 percent)
+      run: |
+        python3 scripts/gen-traceability.py
+        git diff --exit-code -- README.md TRACEABILITY.csv
+        python3 scripts/check-cwe-conformance.py --no-build --output cwe-results.json
+
+    - name: Preserve research conformance evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: cwe-conformance-${{ github.sha }}
+        path: |
+          cwe-results.json
+          TRACEABILITY.csv
+          test/cwe-conformance.json
+          docs/cwe-conformance.md
+        retention-days: 90
+
   # As at 2025-07-14, the GitHub-hosted runner for ubuntu-latest comes with
   # Stack 3.7.1 and GHC 9.12.2.
   stack:

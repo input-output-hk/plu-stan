@@ -106,7 +106,8 @@ library
   hs-source-dirs:      src
   exposed-modules:     Stan
                          Stan.Analysis
-                           Stan.Analysis.Analyser
+                           Stan.Analysis.Research
+                       Stan.Analysis.Analyser
                            Stan.Analysis.Pretty
                            Stan.Analysis.Summary
                            Stan.Analysis.Visitor
@@ -267,6 +268,7 @@ library target
                        Target.Partial
                        Target.Style
                        Target.PlutusTx
+                       Target.Research
                        Target.ScriptContextBuilder
                        Target.TestHelpers
 
@@ -283,6 +285,7 @@ test-suite stan-test
                          Test.Stan.Analysis.Partial
                          Test.Stan.Analysis.Style
                          Test.Stan.Analysis.PlutusTx
+                         Test.Stan.Analysis.Research
                        Test.Stan.Cli
                        Test.Stan.Config
                        Test.Stan.Gen

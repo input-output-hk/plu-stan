@@ -70,3 +70,6 @@ output.txt
 # other
 .DS_Store
 /.claude/worktrees
+
+# Generated acceptance evidence (published as a CI artifact).
+cwe-results.json

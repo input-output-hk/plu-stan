@@ -35,7 +35,7 @@ lookupDocs :: Id Inspection -> Maybe InspectionDocs
 lookupDocs insId = HM.lookup insId plinthDocsMap
 
 plinthDocsMap :: HashMap (Id Inspection) InspectionDocs
-plinthDocsMap = fromList
+plinthDocsMap = HM.union researchDocs $ fromList
     [ ( Id "PLU-STAN-01"
       , InspectionDocs
           { docsWhyItMatters = unlines
@@ -697,4 +697,93 @@ plinthDocsMap = fromList
           , docsAnchor = ""
           }
       )
+    ]
+
+-- Teaching content for the dedicated research inspections.
+researchDocs :: HashMap (Id Inspection) InspectionDocs
+researchDocs = fromList
+    [ (Id "PLU-STAN-28", InspectionDocs
+        { docsWhyItMatters = "An unconstrained destination lets a transaction pay the validated output to another address."
+        , docsBadExample = "addressBad out d = txOutDatum out == OutputDatum d"
+        , docsGoodExample = "addressGood out d addr = txOutDatum out == OutputDatum d && txOutAddress out == addr"
+        , docsAnchor = "cwe-research-rule-28"
+        })
+    , (Id "PLU-STAN-29", InspectionDocs
+        { docsWhyItMatters = "Payment credentials alone leave delegation and staking rewards unconstrained."
+        , docsBadExample = "stakeBad out cred = addressCredential (txOutAddress out) == cred"
+        , docsGoodExample = "stakeGood out cred = addressCredential (txOutAddress out) == cred && addressStakingCredential (txOutAddress out) == Nothing"
+        , docsAnchor = "cwe-research-rule-29"
+        })
+    , (Id "PLU-STAN-30", InspectionDocs
+        { docsWhyItMatters = "An attacker can attach a costly reference script to an otherwise valid output."
+        , docsBadExample = "referenceBad out addr = txOutAddress out == addr"
+        , docsGoodExample = "referenceGood out addr = txOutAddress out == addr && txOutReferenceScript out == Nothing"
+        , docsAnchor = "cwe-research-rule-30"
+        })
+    , (Id "PLU-STAN-31", InspectionDocs
+        { docsWhyItMatters = "A script output with unconstrained datum content can corrupt state or become unspendable."
+        , docsBadExample = "datumBad out addr = txOutAddress out == addr"
+        , docsGoodExample = "datumGood out addr d = txOutAddress out == addr && txOutDatum out == OutputDatum d"
+        , docsAnchor = "cwe-research-rule-31"
+        })
+    , (Id "PLU-STAN-32", InspectionDocs
+        { docsWhyItMatters = "Checking only required assets permits unrelated tokens and growing output costs."
+        , docsBadExample = "trashSubset out expected = txOutValue out `V.geq` expected"
+        , docsGoodExample = "trashGood out expected = txOutValue out == expected"
+        , docsAnchor = "cwe-research-rule-32"
+        })
+    , (Id "PLU-STAN-33", InspectionDocs
+        { docsWhyItMatters = "A co-spent script input must perform the expected operation; check its corresponding redeemer."
+        , docsBadExample = "redeemerBad info = any (\\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of\n  ScriptCredential _ -> True\n  _ -> False) (txInfoInputs info)"
+        , docsGoodExample = "redeemerReferences info = any (\\i -> case addressCredential (txOutAddress (txInInfoResolved i)) of\n  ScriptCredential _ -> True\n  _ -> False) (txInfoReferenceInputs info)"
+        , docsAnchor = "cwe-research-rule-33"
+        })
+    , (Id "PLU-STAN-34", InspectionDocs
+        { docsWhyItMatters = "Recreating an unchanged datum can cause unnecessary spending and contention. Review whether a reference input suffices."
+        , docsBadExample = "readOnlyFull i out = txOutAddress (txInInfoResolved i) == txOutAddress out && txOutValue (txInInfoResolved i) == txOutValue out && txOutDatum (txInInfoResolved i) == txOutDatum out && txOutReferenceScript (txInInfoResolved i) == txOutReferenceScript out"
+        , docsGoodExample = "readOnlyChanged i out next = txOutDatum out == OutputDatum next && txOutValue out == txOutValue (txInInfoResolved i)"
+        , docsAnchor = "cwe-research-rule-34"
+        })
+    , (Id "PLU-STAN-35", InspectionDocs
+        { docsWhyItMatters = "Finite endpoints alone allow arbitrarily long validity windows. Bound their difference."
+        , docsBadExample = "timeFiniteBad info deadline = case I.ivFrom (txInfoValidRange info) of\n  I.LowerBound (I.Finite lo) _ -> lo >= deadline\n  _ -> False"
+        , docsGoodExample = "timeGood info maxDuration = case (I.ivFrom (txInfoValidRange info), I.ivTo (txInfoValidRange info)) of\n  (I.LowerBound (I.Finite lo) _, I.UpperBound (I.Finite hi) _) -> hi - lo <= maxDuration\n  _ -> False"
+        , docsAnchor = "cwe-research-rule-35"
+        })
+    , (Id "PLU-STAN-36", InspectionDocs
+        { docsWhyItMatters = "Decoding a datum only to compare fields can cost more than comparing its encoded representation."
+        , docsBadExample = "decodeCompare d expected = case Tx.fromBuiltinData d of\n  Just (TestDatum n pkh) -> n == amount expected && pkh == owner expected\n  Nothing -> False"
+        , docsGoodExample = "encodeCompare d expected = d == Tx.toBuiltinData expected"
+        , docsAnchor = "cwe-research-rule-36"
+        })
+    , (Id "PLU-STAN-37", InspectionDocs
+        { docsWhyItMatters = "Ignoring a currency symbol, token name or amount can authorize an unintended token."
+        , docsBadExample = "tokenWildcard0 info symbol name = all (\\(_, tn, q) -> tn == name && q == 1) (V.flattenValue (txInfoMint info))"
+        , docsGoodExample = "tokenGood info symbol name = all (\\(cs, tn, q) -> cs == symbol && tn == name && q == 1) (V.flattenValue (txInfoMint info))"
+        , docsAnchor = "cwe-research-rule-37"
+        })
+    , (Id "PLU-STAN-38", InspectionDocs
+        { docsWhyItMatters = "Exact ADA equality can conflict with minimum-output requirements. Review an appropriate lower bound."
+        , docsBadExample = "strictAda out n = V.lovelaceValueOf (txOutValue out) == n"
+        , docsGoodExample = "minimumAda out n = V.lovelaceValueOf (txOutValue out) >= n"
+        , docsAnchor = "cwe-research-rule-38"
+        })
+    , (Id "PLU-STAN-39", InspectionDocs
+        { docsWhyItMatters = "A dynamic index selects a position, not the intended UTxO. Check the selected input identity."
+        , docsBadExample = "indexBad info r addr = let selected = txInfoInputs info !! fromInteger (inputIndex r) in txOutAddress (txInInfoResolved selected) == addr"
+        , docsGoodExample = "indexGood info r cs tn = let selected = txInfoInputs info !! fromInteger (inputIndex r) in V.valueOf (txOutValue (txInInfoResolved selected)) cs tn == 1"
+        , docsAnchor = "cwe-research-rule-39"
+        })
+    , (Id "PLU-STAN-40", InspectionDocs
+        { docsWhyItMatters = "A trivial helper may be inlined to reduce overhead. Measure generated code before changing it."
+        , docsBadExample = "forwardHelper pkh info = txSignedBy info pkh"
+        , docsGoodExample = "substantialHelper x y = x > 0 && y > x"
+        , docsAnchor = "cwe-research-rule-40"
+        })
+    , (Id "PLU-STAN-41", InspectionDocs
+        { docsWhyItMatters = "Fixed string keys in a datum map can hide missing fields. A typed record makes structure explicit."
+        , docsBadExample = "mapBad d = M.member \"fee\" (extraInfo d) && M.member \"owner\" (extraInfo d)"
+        , docsGoodExample = "mapDynamic key d = M.member key (extraInfo d)"
+        , docsAnchor = "cwe-research-rule-41"
+        })
     ]
