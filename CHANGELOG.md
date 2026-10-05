@@ -3,6 +3,38 @@
 `stan` uses [PVP Versioning][1].
 The change log is available [on GitHub][2].
 
+## 1.1.0
+
+* Add 14 research inspections (`PLU-STAN-28` through `PLU-STAN-41`) covering
+  output address, staking, reference-script, datum and value constraints;
+  corresponding script-input redeemers; unchanged-datum spending; validity
+  range duration; decoded-datum comparisons; incomplete token tuples; exact
+  ADA equality; dynamic input identity; trivial helpers; and fixed-key datum
+  maps. Each inspection includes teaching content and example fixes.
+
+* Add executable conformance evidence for representative detection contracts
+  covering **19 of the 23 Cardano-CWE-Research rules (82.6%)**. The corpus
+  contains **133 positive and negative CLI cases** against a pinned research
+  snapshot. This measures implementation of the documented warning patterns,
+  not arbitrary-program vulnerability recall or a proof of contract safety.
+  See [docs/cwe-conformance.md](docs/cwe-conformance.md) for scope and limits.
+
+* Use resolved HIE expressions and binder identities for bounded intramodule
+  analysis, including aliases, simple helper expansion and corresponding-object
+  checks. Replace textual precision-loss and zip detection; improve direct
+  immutable-credential detection, mixed compiled-value projections, empty-builtin
+  ADA patterns and comment/string handling for unstable derivation splices.
+
+* Keep validation evidence on accepting paths: classify rejecting expressions
+  structurally, intersect facts across alternative guarded results, exclude
+  bypassed constructor checks and sibling credential arms, and respect the
+  reversed argument order of `subtract` when checking validity-range duration.
+  Treat imported forwarding predicates as unknown rather than empty validation.
+
+* Expand the Hspec suite to **353 examples**, with zero failures and one
+  existing pending example. Run conformance in CI, retain its audit evidence,
+  and update the generated traceability matrix and documented detection contracts.
+
 ## 1.0.0
 
 * Add seven Plinth inspections mapped from the
